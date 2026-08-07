@@ -495,3 +495,126 @@ test('negotiation candidates come with a script', () => {
 function round2(n) {
   return Number(n.toFixed(2));
 }
+
+// ---------------------------------------------------------------------------
+// Forecast, net worth, alerts
+// ---------------------------------------------------------------------------
+
+import { projectBalance, calculateNetWorth } from '../src/engine/forecast.js';
+import { buildAlerts, composeAlertEmail } from '../src/engine/alerts.js';
+
+test('forecast projects the floor case, not the average', () => {
+  const { streams } = pipeline();
+  const floor = projectBalance({
+    openingBalance: 2000, startDate: '2026-08-15', days: 30,
+    incomeStreams: streams, bills: [{ payee: 'Rent', amount: 2350, dueDay: 14 }],
+    dailyNecessary: 15, basis: 'floor',
+  });
+  const median = projectBalance({
+    openingBalance: 2000, startDate: '2026-08-15', days: 30,
+    incomeStreams: streams, bills: [{ payee: 'Rent', amount: 2350, dueDay: 14 }],
+    dailyNecessary: 15, basis: 'median',
+  });
+  // Forecasting on typical pay says "you'll be fine" in exactly the periods
+  // where the household won't be — removing the warning that matters.
+  assert.ok(floor.lowestPoint.balance <= median.lowestPoint.balance);
+});
+
+test('forecast identifies the low point and its date', () => {
+  const result = projectBalance({
+    openingBalance: 500, startDate: '2026-08-01', days: 20,
+    incomeStreams: [], bills: [{ payee: 'Rent', amount: 2350, dueDay: 14 }],
+    dailyNecessary: 10,
+  });
+  assert.ok(result.goesNegative);
+  assert.equal(result.lowestPoint.date, '2026-08-21');
+  assert.equal(result.safeToSpendToday, 0, 'nothing is safe to spend when heading negative');
+});
+
+test('net worth subtracts card and loan balances', () => {
+  const result = calculateNetWorth([
+    { nickname: 'Checking', type: 'checking', current_balance: 5000 },
+    { nickname: 'Savings', type: 'savings', current_balance: 12000 },
+    { nickname: 'Visa', type: 'credit', current_balance: -4820 },
+    { nickname: 'Car Loan', type: 'loan', current_balance: -9000 },
+  ]);
+  assert.equal(result.totalAssets, 17000);
+  assert.equal(result.totalLiabilities, 13820);
+  assert.equal(result.netWorth, 3180);
+});
+
+test('absent investments are stated, never rendered as zero', () => {
+  const result = calculateNetWorth([{ nickname: 'Checking', type: 'checking', current_balance: 100 }]);
+  assert.equal(result.investmentsConnected, false);
+  assert.match(result.note, /not connected/);
+  assert.match(result.note, /not your total net worth/);
+});
+
+test('low balance produces an urgent alert', () => {
+  const { alerts, toEmail } = buildAlerts({
+    forecast: {
+      lowestBeforeNextPayday: { balance: -140, date: '2026-08-21' },
+      lowestPoint: { balance: -140, date: '2026-08-21' },
+    },
+  });
+  const low = alerts.find((a) => a.type === 'low_balance');
+  assert.ok(low);
+  assert.ok(low.urgent);
+  assert.match(low.title, /negative/i);
+  assert.ok(toEmail.includes(low), 'urgent alerts email');
+});
+
+test('dismissed alerts do not come back on the next sync', () => {
+  const state = {
+    forecast: {
+      lowestBeforeNextPayday: { balance: -140, date: '2026-08-21' },
+      lowestPoint: { balance: -140, date: '2026-08-21' },
+    },
+  };
+  const first = buildAlerts(state);
+  const key = first.alerts[0].key;
+  const second = buildAlerts({ ...state, dismissed: new Set([key]) });
+  assert.equal(second.alerts.length, 0, 'an alert that returns nightly gets the sender muted');
+});
+
+test('large-transaction detection is per category, not global', () => {
+  // A $300 grocery run is unremarkable; a $300 coffee charge is not.
+  const history = (category, amounts, extra = {}) =>
+    amounts.map((amount, i) => ({
+      plaid_transaction_id: `${category}_${i}`, category, amount,
+      payee: category, posted_date: '2026-01-01', ...extra,
+    }));
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { alerts } = buildAlerts({
+    transactions: [
+      ...history('Groceries', [140, 150, 130, 145]),
+      ...history('Coffee', [6, 7, 5, 6]),
+      { plaid_transaction_id: 'big_coffee', category: 'Coffee', amount: 90, payee: 'Cafe', posted_date: today },
+      { plaid_transaction_id: 'normal_groceries', category: 'Groceries', amount: 160, payee: 'Safeway', posted_date: today },
+    ],
+  });
+
+  const large = alerts.filter((a) => a.type === 'large_transaction');
+  assert.equal(large.length, 1);
+  assert.match(large[0].title, /Coffee/);
+});
+
+test('only urgent alerts are emailed', () => {
+  const { toEmail, inApp } = buildAlerts({
+    subscriptions: {
+      priceIncreases: [{
+        payee: 'Netflix', annualImpactOfIncrease: 24,
+        priceChange: { from: 15.99, to: 17.99, changePercent: 12.5 },
+      }],
+      duplicates: [{ category: 'Subscriptions', services: [{ payee: 'A' }, { payee: 'B' }], combinedAnnual: 300 }],
+      lowConfidence: [],
+    },
+  });
+  assert.ok(inApp.length > toEmail.length, 'non-urgent stays in-app');
+  assert.ok(toEmail.every((a) => a.urgent));
+});
+
+test('no email is composed when nothing is urgent', () => {
+  assert.equal(composeAlertEmail([{ urgent: false, title: 'x', body: 'y' }]), null);
+});
