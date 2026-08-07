@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Family Budget</title>
+<style>
+  /* Light and dark both defined explicitly — the phone decides which. */
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e2e5ea;
+    --text: #14171c;
+    --muted: #6b7280;
+    --accent: #2f6f4f;
+    --accent-soft: #e6f0ea;
+    --warn: #8a5a00;
+    --warn-soft: #fdf3dc;
+    --info-soft: #eef2f7;
+    --negative: #a03030;
+    --bar: #4a8a68;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --surface: #1c1f25;
+      --border: #2c313a;
+      --text: #e8eaed;
+      --muted: #9aa1ac;
+      --accent: #6fbf95;
+      --accent-soft: #1e2a24;
+      --warn: #e0b458;
+      --warn-soft: #2a2418;
+      --info-soft: #1f242c;
+      --negative: #e08585;
+      --bar: #4f9a75;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { max-width: 720px; margin: 0 auto; padding: 0 16px 64px; }
+
+  .header { padding: 20px 0 8px; }
+  .header h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+
+  h2 { font-size: 18px; margin: 20px 0 12px; font-weight: 620; }
+  h3 { font-size: 15px; margin: 24px 0 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .muted { color: var(--muted); font-size: 14px; }
+
+  /* Nav ------------------------------------------------------------------ */
+  .nav {
+    display: flex; gap: 4px; overflow-x: auto; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 16px;
+    scrollbar-width: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-btn {
+    flex: 1 0 auto; padding: 9px 14px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--muted); font: inherit; font-size: 14px;
+    font-weight: 550; cursor: pointer; white-space: nowrap;
+  }
+  .nav-btn.active { background: var(--accent-soft); color: var(--accent); }
+  .badge {
+    display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px;
+    background: var(--accent); color: var(--bg); border-radius: 9px;
+    font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+
+  /* Banners -------------------------------------------------------------- */
+  .banner {
+    padding: 12px 14px; border-radius: var(--radius); margin-bottom: 14px;
+    font-size: 14px; line-height: 1.45; border: 1px solid transparent;
+  }
+  .banner-info { background: var(--info-soft); color: var(--muted); }
+  .banner-warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 25%, transparent); }
+  .banner-good { background: var(--accent-soft); color: var(--accent); }
+
+  /* Stats ---------------------------------------------------------------- */
+  .month-picker { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 16px; }
+  .month-picker h2 { margin: 0; flex: 1; text-align: center; }
+  .chev {
+    width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 18px; cursor: pointer;
+  }
+  .chev:disabled { opacity: 0.3; cursor: default; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 12px;
+  }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-value { font-size: 20px; font-weight: 650; margin-top: 4px; letter-spacing: -0.02em; }
+  .stat-value.income, .stat-value.positive { color: var(--accent); }
+  .stat-value.negative { color: var(--negative); }
+  .stat-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* Category bars -------------------------------------------------------- */
+  .cat-list { display: flex; flex-direction: column; gap: 2px; }
+  .cat-row {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 11px 14px; border-radius: 10px;
+  }
+  .cat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .cat-name { font-size: 14px; font-weight: 550; }
+  .cat-amount { font-variant-numeric: tabular-nums; font-size: 14px; }
+  .bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--bar); border-radius: 2px; }
+  .bar-fill.muted { background: var(--muted); opacity: 0.4; }
+  .cat-note { font-size: 12px; margin-top: 6px; }
+  .cat-note.up { color: var(--negative); }
+  .cat-note.down { color: var(--accent); }
+
+  /* Notes ---------------------------------------------------------------- */
+  .note-box {
+    margin-top: 18px; padding: 13px 15px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 13px; line-height: 1.5; color: var(--muted);
+  }
+  .note-box strong { color: var(--text); }
+  .note-box details { margin-top: 8px; }
+  .note-box summary { cursor: pointer; color: var(--accent); }
+  .mini-row {
+    display: grid; grid-template-columns: 90px 1fr auto; gap: 8px;
+    padding: 5px 0; font-size: 12px; font-variant-numeric: tabular-nums;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Transactions --------------------------------------------------------- */
+  .search {
+    width: 100%; padding: 11px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font: inherit; font-size: 15px; margin-bottom: 10px;
+  }
+  .txn-list { display: flex; flex-direction: column; gap: 2px; }
+  .txn {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 14px;
+  }
+  .txn-payee { font-size: 14px; font-weight: 550; }
+  .txn-meta { font-size: 12px; color: var(--muted); margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .txn-right { text-align: right; flex-shrink: 0; }
+  .txn-amount { font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 550; }
+  .txn-amount.income { color: var(--accent); }
+  .tag {
+    font-size: 10px; padding: 1px 6px; border-radius: 4px; text-transform: uppercase;
+    letter-spacing: 0.04em; font-weight: 650;
+  }
+  .tag-transfer { background: var(--info-soft); color: var(--muted); }
+  .tag-income { background: var(--accent-soft); color: var(--accent); }
+  .tag-src { background: transparent; color: var(--muted); border: 1px solid var(--border); font-weight: 500; }
+  .cat-select {
+    margin-top: 6px; max-width: 150px; padding: 4px 6px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-family: inherit;
+  }
+
+  /* Trends --------------------------------------------------------------- */
+  .trend-table {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow-x: auto;
+  }
+  .trend-head, .trend-row {
+    display: grid; grid-template-columns: minmax(110px, 1.4fr) repeat(auto-fit, minmax(64px, 1fr));
+    gap: 4px; padding: 9px 14px; font-size: 13px; align-items: center;
+  }
+  .trend-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); }
+  .trend-row { border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .trend-row span:not(.trend-cat) { text-align: right; }
+  .trend-head span:not(:first-child) { text-align: right; }
+  .trend-cat { font-weight: 550; }
+  .trend-avg { font-weight: 650; }
+
+  /* Income --------------------------------------------------------------- */
+  .stream-list, .proj-list { display: flex; flex-direction: column; gap: 2px; }
+  .stream {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .stream-head { display: flex; justify-content: space-between; gap: 12px; }
+  .stream-payee { font-weight: 550; font-size: 14px; }
+  .stream-amount { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .stream-meta { font-size: 12px; color: var(--muted); margin-top: 3px; text-transform: capitalize; }
+  .proj-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+    padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 14px; font-variant-numeric: tabular-nums;
+  }
+  .proj-row.highlight { border-color: var(--accent); background: var(--accent-soft); }
+  .proj-row.total { font-weight: 650; }
+  .proj-row span:not(:first-child) { text-align: right; }
+
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .link { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; padding: 0; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
