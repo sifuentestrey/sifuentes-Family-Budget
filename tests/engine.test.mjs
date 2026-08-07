@@ -156,8 +156,27 @@ test('both earners detected with correct cadences', () => {
   const semi = streams.find((s) => s.cadence === 'semimonthly');
   assert.ok(biweekly, 'biweekly earner detected');
   assert.ok(semi, 'semi-monthly earner detected');
-  assert.equal(biweekly.typical_amount, 2184.62);
+
+  // The stable earner's amount is exact every time.
   assert.equal(semi.typical_amount, 1912.4);
+
+  // The call-shift earner's amount varies, so only the median is meaningful.
+  // Asserting an exact figure here would re-encode the stable-income
+  // assumption this whole change exists to remove.
+  assert.ok(
+    biweekly.typical_amount > 1900 && biweekly.typical_amount < 2500,
+    `median ${biweekly.typical_amount} should sit mid-range`,
+  );
+});
+
+test('cadence detection survives varying amounts', () => {
+  // The point of separating cadence from amount: call shifts change what you
+  // are paid, never when. If amount variance leaked into cadence inference,
+  // a variable earner would be misclassified as irregular and drop out of
+  // every projection.
+  const { streams } = runPipeline();
+  const biweekly = streams.find((s) => s.cadence === 'biweekly');
+  assert.equal(biweekly.occurrences, 8, 'all eight varying paychecks in one stream');
 });
 
 test('three-paycheck month is projected correctly', () => {

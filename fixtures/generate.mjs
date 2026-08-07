@@ -52,14 +52,31 @@ const alexPaydays = [
   '2026-05-08', '2026-05-22', '2026-06-05', '2026-06-19',
   '2026-07-03', '2026-07-17', '2026-07-31', '2026-08-14',
 ];
-for (const date of alexPaydays) {
+// Alex works call shifts, so the AMOUNT varies every check while the cadence
+// stays rigidly biweekly. This is the case that breaks a median-based model:
+// the median is ~$2,180 but checks range $1,412-$3,104. A budget built on the
+// median is unaffordable in roughly half of all pay periods.
+//
+// Paired with the dates above so July still contains three paychecks — a
+// three-paycheck month AND variable amounts interacting is the realistic case.
+const alexAmounts = [
+  2284.15,  // 05-08
+  1412.88,  // 05-22  slow stretch — the floor case
+  2611.40,  // 06-05
+  1876.22,  // 06-19
+  3104.67,  // 07-03  heavy call week
+  2043.91,  // 07-17
+  2455.30,  // 07-31  third paycheck in July
+  1689.75,  // 08-14
+];
+alexPaydays.forEach((date, i) => {
   transactions.push(
-    txn('acc_checking_joint', date, -2184.62, 'DIRECT DEP NORTHSTAR LOGISTICS PAYROLL', {
+    txn('acc_checking_joint', date, -alexAmounts[i], 'DIRECT DEP NORTHSTAR LOGISTICS PAYROLL', {
       merchant: null,
       pfc: pfc('INCOME', 'INCOME_WAGES'),
     }),
   );
-}
+});
 
 const samPaydays = [
   '2026-05-01', '2026-05-15', '2026-06-01', '2026-06-15',
@@ -158,6 +175,110 @@ const june = [
 ];
 for (const [account, date, amount, name, category] of june) {
   transactions.push(txn(account, date, amount, name, { pfc: category }));
+}
+
+// ---------------------------------------------------------------------------
+// Recurring subscriptions, spanning enough months to be detectable.
+//
+// Includes the cases that matter:
+//   - a PRICE INCREASE mid-history (Netflix 15.99 -> 17.99). Must be recognized
+//     as one stream that got more expensive, not two separate subscriptions.
+//   - DUPLICATE SERVICES (Spotify + Apple Music) in the same category.
+//   - a FORGOTTEN subscription (gym, charged monthly, no related activity).
+//   - an ANNUAL premium, the sinking-fund case that breaks budgets in month four.
+// ---------------------------------------------------------------------------
+const subscriptionMonths = ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
+
+// Netflix raises its price from June onward.
+for (const month of subscriptionMonths) {
+  const amount = month >= '2026-06' ? 17.99 : 15.99;
+  transactions.push(
+    txn('acc_card_visa', `${month}-08`, amount, 'NETFLIX.COM', {
+      merchant: 'Netflix',
+      pfc: pfc('ENTERTAINMENT', 'ENTERTAINMENT_MUSIC_AND_AUDIO'),
+    }),
+  );
+}
+
+for (const month of subscriptionMonths) {
+  transactions.push(
+    txn('acc_card_visa', `${month}-09`, 11.99, 'PAYPAL *SPOTIFY USA'),
+    // Second music service — the household is paying twice for the same thing.
+    txn('acc_card_amex', `${month}-21`, 10.99, 'APPLE.COM/BILL APPLE MUSIC', {
+      merchant: 'Apple Music',
+    }),
+    // Charged every month, never any adjacent activity. The classic forgotten one.
+    txn('acc_card_amex', `${month}-03`, 49.00, 'PLANET FITNESS MEMBERSHIP', {
+      pfc: pfc('PERSONAL_CARE', 'PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS'),
+    }),
+  );
+}
+
+// Annual auto insurance premium. Lands once, for ~6x a monthly bill. Without a
+// sinking fund this is the month the budget breaks.
+transactions.push(
+  txn('acc_checking_joint', '2026-04-18', 1428.00, 'GEICO AUTO INSURANCE ANNUAL PREMIUM', {
+    merchant: 'Geico',
+    pfc: pfc('GENERAL_SERVICES', 'GENERAL_SERVICES_INSURANCE'),
+  }),
+);
+
+// Monthly childcare across the history, so it reads as committed rather than
+// a one-off. Already the household's second largest expense after rent.
+for (const month of ['2026-03', '2026-04', '2026-05']) {
+  transactions.push(
+    txn('acc_card_amex', `${month}-12`, 1240.00, 'BRIGHT HORIZONS CHILDCARE', {
+      pfc: pfc('GENERAL_SERVICES', 'GENERAL_SERVICES_CHILDCARE'),
+    }),
+  );
+}
+
+// Rent, the largest committed expense, across the same window.
+for (const month of ['2026-03', '2026-04', '2026-05']) {
+  transactions.push(
+    txn('acc_checking_joint', `${month}-14`, 2350.00, 'RENT PAYMENT OAKWOOD PROPERTIES', {
+      pfc: pfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_RENT'),
+    }),
+  );
+}
+
+// Everyday necessities across the earlier months too.
+//
+// Without these, March-May contain only rent and subscriptions, and the engine
+// correctly-but-uselessly concludes the household buys groceries in 2 months
+// out of 5. Real Plaid history is complete, so a fixture with truncated months
+// tests the wrong thing. Amounts vary month to month, as they genuinely do.
+const earlyNecessities = {
+  '2026-03': { groceries: [131.20, 96.44, 118.75], gas: [54.10, 47.85], utilities: 172.40, internet: 94.99 },
+  '2026-04': { groceries: [142.05, 88.30, 109.61], gas: [61.22, 52.40], utilities: 168.95, internet: 94.99 },
+  '2026-05': { groceries: [127.88, 103.16, 134.42], gas: [49.77, 58.03], utilities: 181.20, internet: 94.99 },
+};
+
+for (const [month, items] of Object.entries(earlyNecessities)) {
+  items.groceries.forEach((amount, i) => {
+    transactions.push(
+      txn('acc_card_visa', `${month}-${String(5 + i * 9).padStart(2, '0')}`, amount,
+        'SAFEWAY #1234 SAN FRANCISCO CA', {
+          pfc: pfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES'),
+        }),
+    );
+  });
+  items.gas.forEach((amount, i) => {
+    transactions.push(
+      txn('acc_card_visa', `${month}-${String(7 + i * 14).padStart(2, '0')}`, amount,
+        'SHELL OIL 57445123456', { merchant: 'Shell', pfc: pfc('TRANSPORTATION', 'TRANSPORTATION_GAS') }),
+    );
+  });
+  transactions.push(
+    txn('acc_checking_joint', `${month}-15`, items.utilities, 'ACH DEBIT PG&E WEB ONLINE', {
+      pfc: pfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY'),
+    }),
+    txn('acc_checking_joint', `${month}-16`, items.internet, 'COMCAST XFINITY WEB PMT'),
+    // Some discretionary spending, so the bucket isn't artificially empty.
+    txn('acc_card_visa', `${month}-19`, 38.50 + Number(month.slice(-1)) * 3, 'TST* CHIPOTLE 2245', {
+      pfc: pfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_FAST_FOOD'),
+    }),
+  );
 }
 
 const output = {
