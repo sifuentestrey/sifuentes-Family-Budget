@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# SECRETS — never commit. Plaid client secret, access tokens, Supabase keys.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+secrets*
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# REAL FINANCIAL DATA — never commit. Only synthetic fixtures belong in git.
+# Anything pushed to GitHub is durable even if deleted later.
+# ---------------------------------------------------------------------------
+data/*
+!data/README.md
+*.csv
+*.pdf
+*.xlsx
+*.ofx
+*.qfx
+real-*.json
+**/real-*
+
+# ---------------------------------------------------------------------------
+# Build / tooling
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+.cache/
+coverage/
+*.log
+.DS_Store
+.vscode/
+.idea/
+supabase/.temp/
+supabase/.branches/
