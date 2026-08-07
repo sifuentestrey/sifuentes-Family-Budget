@@ -130,8 +130,6 @@ const spending = [
   ['acc_card_visa', '2026-07-04', 23.41, 'TST* CHIPOTLE 2245', null, pfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_FAST_FOOD')],
   ['acc_card_visa', '2026-07-06', 58.20, 'SHELL OIL 57445123456', 'Shell', pfc('TRANSPORTATION', 'TRANSPORTATION_GAS')],
   ['acc_card_visa', '2026-07-07', 312.44, 'COSTCO WHSE #0472 SEATTLE WA', null, null],
-  ['acc_card_visa', '2026-07-08', 15.99, 'NETFLIX.COM', 'Netflix', pfc('ENTERTAINMENT', 'ENTERTAINMENT_MUSIC_AND_AUDIO')],
-  ['acc_card_visa', '2026-07-09', 11.99, 'PAYPAL *SPOTIFY USA', null, null],
   ['acc_card_visa', '2026-07-10', 87.33, 'AMZN Mktp US*RT4G59DK3', null, pfc('GENERAL_MERCHANDISE', 'GENERAL_MERCHANDISE_ONLINE_MARKETPLACES')],
   ['acc_card_visa', '2026-07-11', 44.10, 'POS DEBIT 07/11 TRADER JOES #123', null, null],
   ['acc_card_amex', '2026-07-12', 1240.00, 'BRIGHT HORIZONS CHILDCARE', null, pfc('GENERAL_SERVICES', 'GENERAL_SERVICES_CHILDCARE')],
@@ -168,7 +166,6 @@ for (const [account, date, amount, name, merchant, category] of spending) {
 const june = [
   ['acc_card_visa', '2026-06-03', 128.40, 'SAFEWAY #1234 SAN FRANCISCO CA', pfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES')],
   ['acc_card_visa', '2026-06-09', 61.10, 'SHELL OIL 57445123456', pfc('TRANSPORTATION', 'TRANSPORTATION_GAS')],
-  ['acc_card_visa', '2026-06-11', 15.99, 'NETFLIX.COM', null],
   ['acc_card_amex', '2026-06-12', 1240.00, 'BRIGHT HORIZONS CHILDCARE', pfc('GENERAL_SERVICES', 'GENERAL_SERVICES_CHILDCARE')],
   ['acc_checking_joint', '2026-06-14', 2350.00, 'RENT PAYMENT OAKWOOD PROPERTIES', pfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_RENT')],
   ['acc_card_visa', '2026-06-20', 39.85, 'TST* CHIPOTLE 2245', null],

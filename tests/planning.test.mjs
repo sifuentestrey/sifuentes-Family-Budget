@@ -384,3 +384,114 @@ test('unknown inputs are listed rather than guessed', () => {
   assert.equal(model.childcare.known, false);
   assert.ok(model.childcare.range, 'a range is shown instead of a false precision');
 });
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+import { analyzeSubscriptions, detectPriceChange, classifyStream, negotiationCandidates, draftCancellation } from '../src/engine/subscriptions.js';
+import { detectRecurringStreams } from '../src/engine/recurring.js';
+
+const subs = () => analyzeSubscriptions(pipeline().txns);
+
+test('rent and utilities are bills, not subscriptions', () => {
+  // A "subscriptions" list topped by rent is useless for the one thing the
+  // list exists for: deciding what to cancel.
+  const a = subs();
+  assert.ok(!a.subscriptions.some((s) => /rent/i.test(s.payee)), 'rent is not cancellable');
+  assert.ok(a.bills.some((s) => /rent/i.test(s.payee)), 'rent belongs in bills');
+  assert.ok(a.bills.some((s) => /pg&e|comcast/i.test(s.payee)));
+});
+
+test('frequent merchants are neither subscription nor bill', () => {
+  const a = subs();
+  const names = a.frequentMerchants.map((s) => s.payee).join(' ');
+  assert.match(names, /Safeway/, 'shopping often is not a subscription');
+  assert.ok(!a.subscriptions.some((s) => /safeway|shell/i.test(s.payee)));
+  assert.ok(!a.bills.some((s) => /safeway|shell/i.test(s.payee)));
+});
+
+test('actual subscriptions are found with annual cost', () => {
+  const a = subs();
+  const netflix = a.subscriptions.find((s) => /netflix/i.test(s.payee));
+  assert.ok(netflix);
+  // Annualized on the CURRENT price, not the median, which lags after a rise.
+  assert.equal(netflix.annualCost, round2(netflix.last_amount * 12));
+  assert.ok(a.totalAnnual > 0 && a.totalAnnual < 5000, 'plausible subscription total');
+});
+
+test('a sustained price increase is detected', () => {
+  const a = subs();
+  const netflix = a.priceIncreases.find((s) => /netflix/i.test(s.payee));
+  assert.ok(netflix, 'the increase that actually happened');
+  assert.equal(netflix.priceChange.from, 15.99);
+  assert.equal(netflix.priceChange.to, 17.99);
+  assert.equal(netflix.annualImpactOfIncrease, 24);
+});
+
+test('variable-amount merchants never report price increases', () => {
+  // Groceries varying 10-20% weekly is normal. Reporting it as a price rise
+  // would bury the one alert that matters under noise.
+  const a = subs();
+  assert.ok(
+    !a.priceIncreases.some((s) => /safeway|shell|chipotle/i.test(s.payee)),
+    'natural fluctuation is not a price change',
+  );
+});
+
+test('a single spike is not a price increase', () => {
+  // One larger charge is usually a prorated month, not a new price.
+  assert.equal(detectPriceChange([10, 10, 25, 10, 10]), null);
+  // A change that holds is.
+  const held = detectPriceChange([10, 10, 12, 12, 12]);
+  assert.ok(held);
+  assert.equal(held.to, 12);
+});
+
+test('duplicate services are raised as a question, not an instruction', () => {
+  const a = subs();
+  assert.ok(a.duplicates.length > 0, 'three entertainment services in the fixture');
+  assert.match(a.duplicates[0].question, /\?$/, 'asked, not asserted — they may want both');
+});
+
+test('card autopay is never listed as a recurring charge', () => {
+  // A credit card payment recurs monthly and is the household's largest
+  // "charge". Listing it would put it at the top of every list.
+  const { txns } = pipeline();
+  const streams = detectRecurringStreams(txns, { direction: 'outflow' });
+  assert.ok(!streams.some((s) => /chase credit|autopay|amex epayment/i.test(s.payee)));
+});
+
+test('paychecks never appear as recurring charges', () => {
+  const { txns } = pipeline();
+  const streams = detectRecurringStreams(txns, { direction: 'outflow' });
+  assert.ok(!streams.some((s) => /payroll|dirdep/i.test(s.payee)));
+});
+
+test('classifyStream separates the three kinds', () => {
+  assert.equal(classifyStream('Subscriptions'), 'subscription');
+  assert.equal(classifyStream('Rent/Mortgage'), 'bill');
+  assert.equal(classifyStream('Groceries'), 'merchant');
+  assert.equal(classifyStream(null), 'merchant');
+});
+
+test('cancellation draft is written for the user to send themselves', () => {
+  const a = subs();
+  const draft = draftCancellation(a.subscriptions[0]);
+  assert.ok(draft.subject && draft.body);
+  assert.match(draft.note, /You send this/, 'honest about not being a concierge');
+  assert.match(draft.body, /retention offer/);
+});
+
+test('negotiation candidates come with a script', () => {
+  const a = subs();
+  const candidates = negotiationCandidates([...a.subscriptions, ...a.bills]);
+  const comcast = candidates.find((c) => /comcast/i.test(c.payee));
+  assert.ok(comcast, 'internet is negotiable');
+  assert.ok(comcast.script.length > 3);
+  assert.ok(comcast.script.some((line) => /retention/i.test(line)));
+});
+
+function round2(n) {
+  return Number(n.toFixed(2));
+}
