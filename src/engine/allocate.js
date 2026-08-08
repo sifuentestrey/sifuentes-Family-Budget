@@ -244,8 +244,24 @@ export function findExtraPaycheckMonths(paydays) {
     byMonth.set(month, (byMonth.get(month) || 0) + 1);
   }
 
+  // The usual count is the MODE, not the minimum.
+  //
+  // The first and last months in any history are partial — the window starts
+  // and ends mid-month — so they show fewer checks than a real month has. Using
+  // the minimum takes that partial count as the baseline and flags every normal
+  // month as having an extra paycheck, which is both wrong and useless: the
+  // whole point is to single out the two months a year that genuinely differ.
   const counts = [...byMonth.values()];
-  const usual = counts.length ? Math.min(...counts) : 0;
+  if (!counts.length) return [];
+
+  const frequency = new Map();
+  for (const count of counts) frequency.set(count, (frequency.get(count) || 0) + 1);
+  // Ties break toward the LOWER count: a month with an extra paycheck is rare
+  // by definition, so when two counts appear equally often the smaller one is
+  // the normal month and the larger is the exception worth flagging.
+  const usual = [...frequency.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0] - b[0],
+  )[0][0];
 
   return [...byMonth.entries()]
     .filter(([, count]) => count > usual)

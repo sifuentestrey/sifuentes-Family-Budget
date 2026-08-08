@@ -11,6 +11,12 @@
 import { normalizePlaidTransaction, categorizeBatch, categorizationStats } from '../src/engine/categorize.js';
 import { detectTransfers } from '../src/engine/transfers.js';
 import { detectIncomeStreams, markIncome, projectMonthlyIncome } from '../src/engine/income.js';
+import { modelIncomeStreams, reliableMonthlyIncome } from '../src/engine/variable-income.js';
+import { buildExpensePicture, floorCoverage } from '../src/engine/expenses.js';
+import { allocateSeries, findExtraPaycheckMonths } from '../src/engine/allocate.js';
+import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js';
+import { modelChildTransition } from '../src/engine/child-transition.js';
+import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 
 const state = {
   transactions: [],
@@ -55,6 +61,72 @@ async function load() {
   state.month = months.at(-1) === '2026-08' ? '2026-07' : months.at(-1);
   state.months = months;
   state.syncHealth = { last_success: new Date().toISOString(), status: 'good', demo: true };
+
+  buildPlan();
+}
+
+/**
+ * Run the planning engines over the loaded transactions.
+ *
+ * Recomputed whenever transactions change (a recategorization moves spending
+ * between buckets, which moves the baseline, which moves what's safe to save).
+ */
+function buildPlan() {
+  state.streams = modelIncomeStreams(state.streams, state.transactions);
+  state.income = reliableMonthlyIncome(state.streams);
+  state.picture = buildExpensePicture(state.transactions);
+  state.coverage = floorCoverage(state.picture, state.income.reliable);
+  state.subs = analyzeSubscriptions(state.transactions);
+
+  const variable = state.streams.find((s) => s.distribution.stability !== 'stable');
+  state.variableStream = variable;
+
+  if (variable) {
+    const paychecks = state.transactions
+      .filter((t) => t.is_income && t.payee === variable.payee)
+      .sort((a, b) => a.posted_date.localeCompare(b.posted_date))
+      .map((t) => ({ amount: Math.abs(t.amount), date: t.posted_date, cadence: variable.cadence }));
+
+    const commitments = state.picture.categories
+      .filter((c) => c.bucket === 'committed')
+      .map((c) => ({ category: c.category, amount: c.monthlyAverage, dueDay: 1 }));
+
+    const detail = state.income.detail.find((d) => d.payee === variable.payee);
+    const share = state.income.reliable ? detail.monthlyReliable / state.income.reliable : 1;
+
+    state.allocation = allocateSeries(paychecks, {
+      commitments,
+      irregularAnnualTotal: state.picture.irregularAnnualTotal,
+      necessaryMonthly: state.picture.monthly.necessary,
+      shareOfHousehold: share,
+      openingBuffer: 0,
+      nextPayday: variable.next_expected,
+    });
+    state.extraPaycheckMonths = findExtraPaycheckMonths(paychecks.map((p) => p.date));
+  }
+
+  state.structure = incomeStructureAdvice(state.streams, state.picture);
+  state.guidance = buildGuidance({
+    picture: state.picture,
+    coverage: state.coverage,
+    monthlySurplus: state.coverage.fullSurplus,
+    balances: { buffer: 0, emergency: 0 },
+    debts: state.debts ?? [],
+    flags: { hasFullEmployerMatch: true, childPlannedWithinYears: 2 },
+  });
+  state.child = modelChildTransition({
+    picture: state.picture,
+    reliableMonthlyIncome: state.income.reliable,
+    monthlySurplus: state.coverage.fullSurplus,
+    leave: {
+      weeks: 12, paidWeeks: 6, payReplacementRate: 0.6,
+      normalMonthlyIncome: state.streams.find((s) => s.distribution.stability === 'stable')
+        ? state.income.detail.find((d) => d.basis === 'median')?.monthlyExpected ?? 0
+        : 0,
+      isStableEarner: true,
+    },
+    yearsAway: 2,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +203,10 @@ function el(html) {
 function renderNav() {
   const views = [
     ['dashboard', 'Overview'],
+    ['paycheck', 'Paycheck'],
+    ['plan', 'Plan'],
+    ['expenses', 'Expenses'],
+    ['subscriptions', 'Subs'],
     ['transactions', 'Transactions'],
     ['review', 'Review'],
     ['trends', 'Trends'],
@@ -432,6 +508,316 @@ function renderIncome() {
 }
 
 // ---------------------------------------------------------------------------
+// Paycheck — the answer to "how much do I put away from this check?"
+// ---------------------------------------------------------------------------
+
+function renderPaycheck() {
+  if (!state.allocation) {
+    return `<h2>Paycheck</h2><div class="empty">No variable-income stream detected yet.</div>`;
+  }
+
+  const latest = state.allocation.allocations.at(-1);
+  const isShort = latest.status !== 'surplus';
+
+  return `
+    <h2>This paycheck</h2>
+
+    <div class="headline">
+      <div class="headline-label">${isShort ? 'Shortfall' : 'Put away'}</div>
+      <div class="headline-value ${isShort ? 'bad' : 'good'}">
+        ${moneyExact(isShort ? latest.shortfall : latest.surplus)}
+      </div>
+      <div class="headline-note">${latest.message}</div>
+    </div>
+
+    <div class="breakdown">
+      <div class="breakdown-row">
+        <span class="breakdown-label">Check on ${latest.paycheckDate}</span>
+        <span>${moneyExact(latest.paycheckAmount)}</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="breakdown-label">Hold for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="breakdown-label">Sinking funds</span><span>−${moneyExact(latest.moveToSinking)}</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="breakdown-label">Groceries &amp; gas (${latest.daysCovered} days)</span>
+        <span>−${moneyExact(latest.keepForNecessary)}</span>
+      </div>
+      <div class="breakdown-row emphasis">
+        <span class="breakdown-label">${isShort ? 'Short by' : 'Put away'}</span>
+        <span>${moneyExact(isShort ? latest.shortfall : latest.surplus)}</span>
+      </div>
+    </div>
+
+    ${state.extraPaycheckMonths?.length ? `
+      <div class="banner banner-good">
+        <strong>Three-paycheck month${state.extraPaycheckMonths.length > 1 ? 's' : ''}:
+        ${state.extraPaycheckMonths.map((m) => monthLabel(m.month)).join(', ')}.</strong>
+        Monthly bills are covered by the first two checks, so the third is almost
+        entirely spare. Worth deciding where it goes before it arrives.
+      </div>` : ''}
+
+    <h3>Every check</h3>
+    <p class="muted">
+      Bill funding is levelled across checks rather than tied to due dates, so what
+      you can save tracks how big the check was — not which bills happened to land.
+    </p>
+    <div class="breakdown">
+      ${state.allocation.allocations.map((a) => `
+        <div class="breakdown-row ${a.bufferDraw > 0 ? '' : ''}">
+          <span class="breakdown-label">${a.paycheckDate} · ${moneyExact(a.paycheckAmount)}</span>
+          <span class="${a.status === 'surplus' ? '' : 'negative'}">
+            ${a.status === 'surplus' ? moneyExact(a.surplus) : `−${moneyExact(a.shortfall)}`}
+          </span>
+        </div>`).join('')}
+      <div class="breakdown-row emphasis">
+        <span class="breakdown-label">Net saved</span>
+        <span>${moneyExact(state.allocation.netSaved)}</span>
+      </div>
+    </div>
+
+    ${state.allocation.checksNeedingBuffer > 0 ? `
+      <div class="note-box">
+        ${state.allocation.checksNeedingBuffer} of ${state.allocation.allocations.length} checks
+        needed the buffer. That is the buffer doing its job — but if it happens often,
+        the floor is set too high rather than anything being wrong.
+      </div>` : ''}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Plan — guidance and the child transition
+// ---------------------------------------------------------------------------
+
+function renderPlan() {
+  const g = state.guidance;
+  const child = state.child;
+
+  return `
+    <h2>What to do next</h2>
+
+    ${state.structure ? `
+      <div class="note-box">
+        <strong>Structure.</strong> ${state.structure.recommendation}
+      </div>` : ''}
+
+    ${g.steps.map((step) => `
+      <div class="step ${step.status === 'done' ? 'done' : ''}">
+        <div class="step-head">
+          <span class="step-title">${step.priority}. ${step.title}</span>
+          ${step.amount ? `<span class="step-amount">${money(step.amount)}</span>` : ''}
+          ${step.status === 'done' ? '<span class="step-amount">✓</span>' : ''}
+        </div>
+        ${step.monthsToGoal ? `<div class="step-meta">~${step.monthsToGoal} months at current surplus</div>` : ''}
+        <div class="step-why">${step.why}</div>
+        ${step.comparison ? renderDebtComparison(step.comparison) : ''}
+      </div>`).join('')}
+
+    <h3>The child, ~2 years out</h3>
+    <div class="split">
+      <div class="headline">
+        <div class="headline-label">Spare now</div>
+        <div class="headline-value good">${money(child.surplus.now)}</div>
+        <div class="headline-note">per month</div>
+      </div>
+      <div class="headline">
+        <div class="headline-label">After childcare</div>
+        <div class="headline-value ${child.surplus.after < 0 ? 'bad' : ''}">${money(child.surplus.after)}</div>
+        <div class="headline-note">${child.surplus.reductionPercent}% absorbed</div>
+      </div>
+    </div>
+
+    <div class="breakdown">
+      <div class="breakdown-row"><span class="breakdown-label">Childcare</span><span>${moneyExact(child.childcare.monthly)}/mo</span></div>
+      <div class="breakdown-row"><span class="breakdown-label">Birth (deductible + OOP max)</span><span>${moneyExact(child.birth.cost)}</span></div>
+      ${child.leave ? `<div class="breakdown-row"><span class="breakdown-label">Leave income gap</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
+      <div class="breakdown-row emphasis">
+        <span class="breakdown-label">Set aside monthly</span>
+        <span>${moneyExact(child.monthlySetAside)}</span>
+      </div>
+    </div>
+
+    ${child.insights.map((i) => `
+      <div class="insight ${i.severity}">
+        <div class="insight-title">${i.title}</div>
+        <div class="insight-body">${i.detail}</div>
+      </div>`).join('')}
+
+    ${child.unknowns.length ? `
+      <div class="note-box">
+        <strong>Worth finding out — none of this is visible from your transactions:</strong>
+        <ul style="margin:8px 0 0; padding-left:18px;">
+          ${child.unknowns.map((u) => `<li style="margin-bottom:4px">${u}</li>`).join('')}
+        </ul>
+      </div>` : ''}
+
+    <div class="disclaimer">${g.disclaimer}</div>
+  `;
+}
+
+function renderDebtComparison(c) {
+  return `
+    <div class="breakdown" style="margin-top:10px">
+      <div class="breakdown-row">
+        <span class="breakdown-label">Avalanche · ${c.avalanche.months} mo</span>
+        <span>${moneyExact(c.avalanche.interestPaid)} interest</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="breakdown-label">Snowball · ${c.snowball.months} mo</span>
+        <span>${moneyExact(c.snowball.interestPaid)} interest</span>
+      </div>
+    </div>
+    <div class="step-why">${c.note}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+
+function renderExpenses() {
+  const p = state.picture;
+  const c = state.coverage;
+  const statusClass = c.status === 'covered' ? 'good' : c.status === 'tight' ? '' : 'bad';
+
+  return `
+    <h2>Where the money goes</h2>
+    <p class="muted">Based on ${p.monthsAnalyzed} complete months.</p>
+
+    <div class="headline">
+      <div class="headline-label">Surplus on a slow stretch</div>
+      <div class="headline-value ${statusClass}">${money(c.fullSurplus)}</div>
+      <div class="headline-note">${c.message}</div>
+    </div>
+
+    <div class="breakdown">
+      <div class="breakdown-row"><span class="breakdown-label">Committed</span><span>${moneyExact(p.monthly.committed)}</span></div>
+      <div class="breakdown-row"><span class="breakdown-label">Necessary</span><span>${moneyExact(p.monthly.necessary)}</span></div>
+      <div class="breakdown-row"><span class="breakdown-label">Discretionary</span><span>${moneyExact(p.monthly.discretionary)}</span></div>
+      <div class="breakdown-row">
+        <span class="breakdown-label">Irregular (spread)</span>
+        <span>${moneyExact(p.monthly.irregular)}</span>
+      </div>
+      <div class="breakdown-row emphasis">
+        <span class="breakdown-label">True monthly cost</span><span>${moneyExact(p.trueMonthlyCost)}</span>
+      </div>
+    </div>
+
+    <div class="note-box">
+      <strong>Survival cost is ${moneyExact(p.survivalMonthlyCost)}.</strong>
+      That's what an emergency fund should cover — necessities only. Dining out and
+      shopping stop in a real emergency, so sizing on total spending inflates the
+      target and makes it feel unreachable.
+    </div>
+
+    <h3>By category</h3>
+    <div class="breakdown">
+      ${p.categories.map((c) => `
+        <div class="breakdown-row">
+          <span class="breakdown-label">
+            ${c.category}
+            <span class="pill">${c.bucket}</span>
+            ${c.reclassified ? '<span class="pill">reclassified</span>' : ''}
+          </span>
+          <span>${moneyExact(c.monthlyAverage)}</span>
+        </div>`).join('')}
+    </div>
+    <p class="muted" style="margin-top:10px">
+      "Reclassified" means the spending pattern overrode the category label — an
+      annually-paid premium is spread across the year rather than treated as a
+      fixed monthly cost.
+    </p>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+function renderSubscriptions() {
+  const s = state.subs;
+
+  return `
+    <h2>Subscriptions</h2>
+
+    <div class="headline">
+      <div class="headline-label">Annual cost</div>
+      <div class="headline-value">${money(s.totalAnnual)}</div>
+      <div class="headline-note">
+        ${moneyExact(s.totalMonthly)}/mo across ${s.subscriptions.length} services.
+        Shown yearly because that's the number that prompts a decision.
+      </div>
+    </div>
+
+    ${s.priceIncreases.length ? `
+      <div class="banner banner-warn">
+        <strong>${s.priceIncreases.length} price increase${s.priceIncreases.length > 1 ? 's' : ''}.</strong>
+        ${s.priceIncreases.map((p) =>
+          `${p.payee} ${moneyExact(p.priceChange.from)} → ${moneyExact(p.priceChange.to)}
+           (+${p.priceChange.changePercent}%, ${money(p.annualImpactOfIncrease)}/yr)`).join(' · ')}
+      </div>` : ''}
+
+    <div class="breakdown">
+      ${s.subscriptions.map((sub) => `
+        <div class="breakdown-row">
+          <span class="breakdown-label">${sub.payee}
+            ${sub.confidence === 'low' ? '<span class="pill">new</span>' : ''}
+          </span>
+          <span>${moneyExact(sub.last_amount)}/mo · ${money(sub.annualCost)}/yr</span>
+        </div>`).join('')}
+    </div>
+
+    ${s.duplicates.map((d) => `
+      <div class="note-box"><strong>${d.question}</strong>
+        ${d.services.map((x) => x.payee).join(', middle')} — ${money(d.combinedAnnual)}/yr combined.
+      </div>`).join('')}
+
+    <h3>Recurring bills</h3>
+    <p class="muted">Obligations, not subscriptions. Listed so the forecast can use them.</p>
+    <div class="breakdown">
+      ${s.bills.map((b) => `
+        <div class="breakdown-row">
+          <span class="breakdown-label">${b.payee}</span>
+          <span>${moneyExact(b.last_amount)} ${b.cadence}</span>
+        </div>`).join('')}
+    </div>
+
+    ${s.frequentMerchants.length ? `
+      <p class="muted" style="margin-top:14px">
+        ${s.frequentMerchants.map((m) => m.payee).join(', ')} recur too, but they're places
+        you shop rather than things you can cancel — kept out of both lists.
+      </p>` : ''}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Install prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * iOS has no install event — Apple does not implement beforeinstallprompt, so
+ * every iOS install is a manual Add to Home Screen. The only thing we can do is
+ * tell people where the button is, and only when they aren't already installed.
+ */
+function renderInstallHint() {
+  const standalone =
+    window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (standalone || localStorage.getItem('installHintDismissed')) return '';
+
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (!isIOS) return '';
+
+  return `
+    <div class="install-hint" id="install-hint">
+      <strong>Add to your home screen.</strong>
+      Tap the Share button in Safari, then “Add to Home Screen”. It opens like an app
+      and works without a signal.
+      <br /><button data-action="dismiss-install">Dismiss</button>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Interaction
 // ---------------------------------------------------------------------------
 
@@ -454,6 +840,11 @@ function recategorize(id, category) {
       other.categorized_by = category ? 'learned' : 'none';
     }
   }
+
+  // Recategorizing moves spending between buckets, which moves the baseline,
+  // which moves what a paycheck can spare. Everything downstream is stale until
+  // this runs.
+  buildPlan();
   render();
 }
 
@@ -461,6 +852,10 @@ function render() {
   const app = document.getElementById('app');
   const body = {
     dashboard: renderDashboard,
+    paycheck: renderPaycheck,
+    plan: renderPlan,
+    expenses: renderExpenses,
+    subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
     trends: renderTrends,
@@ -474,7 +869,16 @@ function render() {
     ${renderSyncBanner()}
     ${renderNav()}
     <main class="content">${body}</main>
+    ${renderInstallHint()}
   `;
+
+  const dismiss = app.querySelector('[data-action="dismiss-install"]');
+  if (dismiss) {
+    dismiss.addEventListener('click', () => {
+      localStorage.setItem('installHintDismissed', '1');
+      document.getElementById('install-hint')?.remove();
+    });
+  }
 
   app.querySelectorAll('[data-view]').forEach((btn) =>
     btn.addEventListener('click', () => {

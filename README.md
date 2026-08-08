@@ -66,6 +66,48 @@ every month.
 - **No financial advice.** It does arithmetic and shows tradeoffs. Tax strategy,
   retirement accounts, insurance adequacy, and investment allocation are out of scope.
 
+## Installing it on your phones
+
+It's a PWA — it installs to the home screen, opens without browser chrome, and
+works offline. No app store, no developer accounts, no yearly fee. For two users a
+native app would cost $99/yr to Apple plus review cycles and buy nothing.
+
+It has to be served over HTTPS first (see Deploying below). Then:
+
+**iPhone** — open the URL in **Safari** (not Chrome; on iOS every browser is Safari
+underneath, but only Safari has the install option). Tap Share → **Add to Home
+Screen**. The app shows a reminder the first time.
+
+**Android** — open in Chrome. It'll offer "Install app", or use menu → **Add to
+Home screen**.
+
+Notes worth knowing:
+
+- **Push notifications only work once installed**, and only on iOS 16.4+. A Safari
+  tab can't receive them — this is an Apple restriction, not a gap in the app.
+- The service worker caches the app shell so it opens instantly and works with no
+  signal. Financial data is fetched network-first and only falls back to cache when
+  offline, so you're never shown a stale balance as though it were current.
+- iOS evicts PWA caches after long periods of disuse. Nothing is lost — it just
+  re-downloads.
+
+## Deploying
+
+Any static host with HTTPS works; the app is plain files with no build step. Serve
+the repository root (not `web/`) — the app imports the engine from `src/engine/`.
+
+```bash
+npx netlify deploy --dir . --prod
+```
+
+Locally, for testing on a laptop only:
+
+```bash
+python3 -m http.server 8899   # then open http://localhost:8899/web/index.html
+```
+
+Phones can't install from `localhost` — PWA install requires HTTPS.
+
 ## Development
 
 ```bash

@@ -618,3 +618,18 @@ test('only urgent alerts are emailed', () => {
 test('no email is composed when nothing is urgent', () => {
   assert.equal(composeAlertEmail([{ urgent: false, title: 'x', body: 'y' }]), null);
 });
+
+test('a partial trailing month does not make every month look extra', () => {
+  // History ends mid-August with one check so far. Using the minimum count as
+  // the baseline would flag May, June AND July as three-paycheck months.
+  const paydays = [
+    '2026-05-08', '2026-05-22',
+    '2026-06-05', '2026-06-19',
+    '2026-07-03', '2026-07-17', '2026-07-31',
+    '2026-08-14',
+  ];
+  const extra = findExtraPaycheckMonths(paydays);
+  assert.equal(extra.length, 1, 'only July genuinely has a third check');
+  assert.equal(extra[0].month, '2026-07');
+  assert.equal(extra[0].extraChecks, 1);
+});

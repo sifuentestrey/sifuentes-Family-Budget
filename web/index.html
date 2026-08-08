@@ -4,6 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Family Budget</title>
+
+<!-- Installable to the home screen on Android and iOS. -->
+<link rel="manifest" href="./manifest.webmanifest" />
+<meta name="theme-color" content="#1a1d23" />
+
+<!-- iOS ignores the manifest for the home-screen icon and launch behaviour,
+     so these have to be declared separately. -->
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Budget" />
+<meta name="mobile-web-app-capable" content="yes" />
 <style>
   /* Light and dark both defined explicitly — the phone decides which. */
   :root {
@@ -46,7 +58,80 @@
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  #app { max-width: 720px; margin: 0 auto; padding: 0 16px 64px; }
+  /* Respect the notch and the home indicator when launched standalone. */
+  #app {
+    max-width: 720px; margin: 0 auto;
+    padding: env(safe-area-inset-top) calc(16px + env(safe-area-inset-right))
+             calc(64px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+  }
+
+  /* Big numbers that carry a decision. */
+  .headline {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px;
+  }
+  .headline-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .headline-value { font-size: 34px; font-weight: 680; letter-spacing: -0.03em; margin: 4px 0 2px; }
+  .headline-value.good { color: var(--accent); }
+  .headline-value.bad { color: var(--negative); }
+  .headline-note { font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .breakdown { display: flex; flex-direction: column; gap: 2px; margin: 10px 0; }
+  .breakdown-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 9px 14px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 14px; font-variant-numeric: tabular-nums;
+  }
+  .breakdown-row.emphasis { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .breakdown-label { color: var(--muted); }
+  .breakdown-row.emphasis .breakdown-label { color: var(--accent); }
+
+  .step {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px; margin-bottom: 8px;
+  }
+  .step.done { opacity: 0.62; }
+  .step-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .step-title { font-weight: 600; font-size: 15px; }
+  .step-amount { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--accent); white-space: nowrap; }
+  .step-why { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 7px; }
+  .step-meta { font-size: 12px; color: var(--accent); margin-top: 6px; }
+
+  .insight { border-left: 3px solid var(--border); padding: 2px 0 2px 12px; margin: 12px 0; }
+  .insight.high { border-left-color: var(--negative); }
+  .insight.medium { border-left-color: var(--warn); }
+  .insight-title { font-weight: 600; font-size: 14px; }
+  .insight-body { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 4px; }
+
+  .disclaimer {
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+    padding: 14px; border: 1px dashed var(--border); border-radius: var(--radius);
+    margin-top: 20px;
+  }
+  .pill {
+    display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 5px;
+    background: var(--info-soft); color: var(--muted); margin-left: 6px;
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 650;
+  }
+  .pill.variable { background: var(--warn-soft); color: var(--warn); }
+  .pill.stable { background: var(--accent-soft); color: var(--accent); }
+
+  .install-hint {
+    position: fixed; left: 12px; right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    max-width: 696px; margin: 0 auto;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: var(--radius); padding: 13px 15px;
+    font-size: 13px; line-height: 1.45; color: var(--text);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.22); z-index: 50;
+  }
+  .install-hint strong { color: var(--accent); }
+  .install-hint button {
+    margin-top: 8px; background: none; border: 0; padding: 0;
+    color: var(--muted); text-decoration: underline; font: inherit; font-size: 12px; cursor: pointer;
+  }
 
   .header { padding: 20px 0 8px; }
   .header h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
@@ -208,5 +293,16 @@
 <body>
   <div id="app"></div>
   <script type="module" src="./app.js"></script>
+  <script>
+    // Registered outside the module so a service-worker failure can never stop
+    // the app itself from loading.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {
+          /* Offline support is a bonus, not a requirement. */
+        });
+      });
+    }
+  </script>
 </body>
 </html>
