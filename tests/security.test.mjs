@@ -172,3 +172,88 @@ test('Plaid is never requested with money-movement scope', () => {
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Bills and payroll schema (0003) — same guarantees as the original tables
+// ---------------------------------------------------------------------------
+
+const billsSchema = readFileSync(join(ROOT, 'supabase/migrations/0003_bills_and_payroll.sql'), 'utf8');
+const viewSecurity = readFileSync(join(ROOT, 'supabase/migrations/0004_view_security.sql'), 'utf8');
+
+test('every bills/payroll table has RLS enabled', () => {
+  const tables = [
+    'provider_connections', 'sync_runs', 'bill_sources', 'bills', 'bill_imports',
+    'bill_payments', 'pay_profiles', 'pay_periods', 'time_entries',
+    'paycheck_forecasts', 'paystubs', 'deductions', 'paycheck_reconciliations',
+    'income_sources',
+  ];
+  for (const table of tables) {
+    assert.match(
+      billsSchema,
+      new RegExp(`alter table ${table}\\s+enable row level security`, 'i'),
+      `RLS not enabled on ${table}`,
+    );
+    assert.match(
+      billsSchema,
+      new RegExp(`create policy \\w+ on ${table}\\b`, 'i'),
+      `no policy for ${table}`,
+    );
+  }
+});
+
+test('views run as the querying user, not their owner', () => {
+  // A view owned by postgres bypasses RLS entirely — the tables stay protected
+  // while the view hands every household's rows to anyone signed in.
+  for (const view of ['spending_transactions', 'active_bills', 'provider_sync_status']) {
+    assert.match(
+      viewSecurity,
+      new RegExp(`alter view ${view} set \\(security_invoker = true\\)`, 'i'),
+      `${view} would bypass RLS`,
+    );
+  }
+});
+
+test('the household helper is revoked from PUBLIC, not just anon', () => {
+  // anon inherits EXECUTE from PUBLIC, so revoking from anon alone is a no-op.
+  assert.match(viewSecurity, /revoke execute on function current_household_ids\(\) from public/i);
+  assert.match(viewSecurity, /grant execute on function current_household_ids\(\) to authenticated/i);
+});
+
+test('duplicate imports are prevented by database constraints, not just code', () => {
+  // Application-level dedupe is defeated by concurrent syncs. The unique index
+  // is what actually holds.
+  assert.match(billsSchema, /create unique index bills_identity_key[\s\S]*?household_id, provider_key, due_date, amount_due/i);
+  assert.match(billsSchema, /create unique index bills_source_message_key/i);
+  assert.match(billsSchema, /create unique index paystubs_identity_key/i);
+  assert.match(billsSchema, /create unique index time_entries_profile_date_key/i);
+});
+
+test('account labels are length-capped so a full account number cannot be stored', () => {
+  const matches = billsSchema.match(/account_label\s+text check \(account_label is null or length\(account_label\) <= 8\)/gi);
+  assert.ok(matches && matches.length >= 2, 'both bills and bill_sources must cap account_label');
+});
+
+test('no credentials are stored in the bills or payroll schema', () => {
+  // Tokens belong in Vault, referenced by name.
+  assert.doesNotMatch(billsSchema, /password/i);
+  assert.doesNotMatch(billsSchema, /\baccess_token\s+text/i);
+  assert.match(billsSchema, /token_ref/, 'connections reference Vault rather than storing secrets');
+});
+
+test('mock providers cannot claim to be live', async () => {
+  const { createMockEmailProvider } = await import('../src/providers/mock/mock-email-provider.js');
+  const { createMockPayrollProvider } = await import('../src/providers/mock/mock-payroll-provider.js');
+
+  assert.equal(createMockEmailProvider().info.isLive, false);
+  assert.equal(createMockPayrollProvider().info.isLive, false);
+});
+
+test('no provider adapter hardcodes a credential', () => {
+  const providerFiles = allFiles.filter((f) => f.includes('/src/providers/'));
+  assert.ok(providerFiles.length > 0);
+  for (const file of providerFiles) {
+    const content = readFileSync(file, 'utf8');
+    assert.doesNotMatch(content, /(api[_-]?key|client[_-]?secret|password)\s*[:=]\s*['"][^'"]{8,}/i,
+      `possible hardcoded credential in ${file.replace(ROOT, '')}`);
+  }
+});

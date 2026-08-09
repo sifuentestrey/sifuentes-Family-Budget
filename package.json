@@ -9,6 +9,7 @@
     "fixtures": "node fixtures/generate.mjs > fixtures/sample-plaid.json",
     "demo": "node scripts/demo.mjs",
     "plan": "node scripts/plan.mjs",
+    "automation": "node scripts/automation-demo.mjs",
     "sync:shared": "node scripts/sync-shared.mjs",
     "check:shared": "node scripts/sync-shared.mjs --check",
     "predeploy": "npm run sync:shared"
