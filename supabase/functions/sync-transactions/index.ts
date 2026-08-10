@@ -15,7 +15,7 @@
  *     thing standing between two households' data.
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { categorizeBatch, buildLearnedIndex, normalizePlaidTransaction } from '../_shared/categorize.js';
 import { detectTransfers } from '../_shared/transfers.js';
 import { detectIncomeStreams, markIncome } from '../_shared/income.js';
@@ -280,17 +280,55 @@ async function persistIncomeStreams(supabase: any, householdId: string, streams:
   }
 }
 
-Deno.serve(async (req) => {
-  // Only the scheduler or an authenticated household member may trigger a sync.
-  const authHeader = req.headers.get('Authorization');
-  if (authHeader !== `Bearer ${Deno.env.get('SYNC_SECRET')}`) {
-    return new Response('unauthorized', { status: 401 });
-  }
+/**
+ * Compare without leaking length or position through timing.
+ *
+ * Overkill for a 256-bit random secret that nobody can feasibly guess a prefix
+ * of, but it costs nothing and removes the need to think about it again.
+ */
+function secretsMatch(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
+/**
+ * The token the caller must present.
+ *
+ * Vault is the source of truth; the environment variable is only a fallback for
+ * a deployment that still sets one. Returns null when neither is configured,
+ * and the caller MUST treat that as a refusal.
+ *
+ * This function previously compared against `Bearer ${Deno.env.get(...)}`
+ * directly. With the variable unset that template produced the literal string
+ * "Bearer undefined", which anyone could send — verified returning 200 against
+ * the live deployment. Missing configuration now fails closed instead of
+ * silently becoming a password that is printed in this file.
+ */
+async function expectedSecret(supabase: SupabaseClient): Promise<string | null> {
+  const fromEnv = Deno.env.get('SYNC_SECRET');
+  if (fromEnv) return fromEnv;
+
+  const { data, error } = await supabase.rpc('read_vault_secret', {
+    secret_name: 'sync_secret',
+  });
+  if (error || typeof data !== 'string' || data.length === 0) return null;
+  return data;
+}
+
+Deno.serve(async (req) => {
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
+
+  // Only the scheduler or an authenticated household member may trigger a sync.
+  const expected = await expectedSecret(supabase);
+  const presented = req.headers.get('Authorization') ?? '';
+  if (!expected || !secretsMatch(presented, `Bearer ${expected}`)) {
+    return new Response('unauthorized', { status: 401 });
+  }
 
   const { data: items, error } = await supabase
     .from('items')
