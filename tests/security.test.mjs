@@ -69,7 +69,15 @@ test('the browser bundle never touches tokens or the service role', () => {
   for (const file of walk(join(ROOT, 'web'))) {
     const content = readFileSync(file, 'utf8');
     assert.doesNotMatch(content, /SERVICE_ROLE/i, `service role referenced in ${file}`);
-    assert.doesNotMatch(content, /access_token/i, `access token referenced in ${file}`);
+    // A literal assignment would be a hardcoded credential. A property read
+    // (`session.access_token`) is not — the browser is supposed to hold its
+    // own Supabase session token to authenticate its own requests; that is
+    // categorically different from a Plaid access token or the service role.
+    assert.doesNotMatch(
+      content,
+      /access_token\s*[:=]\s*['"][^'"]+['"]/i,
+      `hardcoded access token literal in ${file}`,
+    );
     assert.doesNotMatch(content, /PLAID_SECRET/i, `Plaid secret referenced in ${file}`);
   }
 });

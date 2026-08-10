@@ -18,6 +18,22 @@ import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js'
 import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 
+// Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
+// from a CDN, and the rest of this app is explicitly designed to run
+// standalone on fixtures with no network at all. A static import would make
+// a CDN hiccup break the whole app instead of just the Connect tab.
+let connectModule = null;
+async function loadConnect() {
+  if (!connectModule) {
+    connectModule = await import('./connect.js');
+    // Re-render on auth changes from elsewhere (another tab signing out, a
+    // token refresh) so "Connect" never shows a session that's already gone.
+    // Registered once, only after the module has actually loaded.
+    connectModule.onAuthChange(() => refreshConnection().then(render));
+  }
+  return connectModule;
+}
+
 const state = {
   transactions: [],
   streams: [],
@@ -25,6 +41,14 @@ const state = {
   view: 'dashboard',
   learned: new Map(),
   syncHealth: null,
+  session: null,
+  householdId: null,
+  connectedItems: [],
+  connectAttempted: false,
+  authNotice: null,
+  connectBusy: false,
+  connectError: null,
+  authError: null,
 };
 
 const money = (n) =>
@@ -63,6 +87,47 @@ async function load() {
   state.syncHealth = { last_success: new Date().toISOString(), status: 'good', demo: true };
 
   buildPlan();
+  // Deliberately not awaited here: the demo dashboard must render immediately
+  // on fixtures alone, with zero network dependency, exactly as before. The
+  // Connect tab picks up session state the first time it's opened.
+}
+
+/**
+ * Pick up wherever auth/household/bank-connection state currently stands.
+ * Safe to call repeatedly — sign-in, sign-out, and a finished Plaid Link all
+ * route through here so the "Connect" view never goes stale.
+ *
+ * Failure here (most likely: the Supabase SDK's CDN is unreachable) is
+ * contained to the Connect tab's own error banner — it must never take down
+ * the rest of the app, which needs no network at all.
+ */
+async function refreshConnection() {
+  let connect;
+  try {
+    connect = await loadConnect();
+  } catch {
+    state.connectError = 'Could not load the connection library. Check your network and reload.';
+    return;
+  }
+
+  try {
+    state.session = await connect.getSession();
+  } catch (e) {
+    state.connectError = e.message;
+    return;
+  }
+
+  if (!state.session) {
+    state.householdId = null;
+    state.connectedItems = [];
+    return;
+  }
+  try {
+    state.householdId = await connect.ensureHousehold();
+    state.connectedItems = await connect.listConnectedItems();
+  } catch (e) {
+    state.connectError = e.message;
+  }
 }
 
 /**
@@ -211,6 +276,7 @@ function renderNav() {
     ['review', 'Review'],
     ['trends', 'Trends'],
     ['income', 'Income'],
+    ['connect', 'Connect'],
   ];
   const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
 
@@ -800,6 +866,71 @@ function renderSubscriptions() {
  * every iOS install is a manual Add to Home Screen. The only thing we can do is
  * tell people where the button is, and only when they aren't already installed.
  */
+function renderConnect() {
+  if (!state.session) {
+    return `
+      <div class="note-box">
+        <strong>Sign in to connect a real bank account.</strong>
+        Everything else on this page runs on synthetic demo data until you do.
+      </div>
+      <form id="auth-form" class="step">
+        <div class="step-head"><span class="step-title">Sign in or create an account</span></div>
+        <p class="step-why">
+          <input type="email" name="email" placeholder="Email" required
+            style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
+          <input type="password" name="password" placeholder="Password" minlength="6" required
+            style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
+        </p>
+        ${state.authNotice ? `<div class="banner banner-good">${state.authNotice}</div>` : ''}
+        ${state.authError ? `<div class="banner banner-warn">${state.authError}</div>` : ''}
+        <div class="step-meta" style="display:flex;gap:8px;margin-top:10px;">
+          <button type="submit" data-auth="signin" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;">Sign in</button>
+          <button type="submit" data-auth="signup" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;border:1px solid var(--border);">Create account</button>
+        </div>
+      </form>
+    `;
+  }
+
+  const items = state.connectedItems;
+  return `
+    <div class="banner banner-good">
+      Signed in as ${state.session.user.email}.
+      <button class="link" data-action="sign-out">Sign out</button>
+    </div>
+
+    ${state.connectError ? `<div class="banner banner-warn">${state.connectError}</div>` : ''}
+
+    <div class="step">
+      <div class="step-head">
+        <span class="step-title">Bank accounts</span>
+        <button data-action="connect-bank" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;" ${state.connectBusy ? 'disabled' : ''}>
+          ${state.connectBusy ? 'Connecting…' : '+ Connect a bank'}
+        </button>
+      </div>
+      ${items.length === 0 ? `<p class="step-why">No accounts connected yet. Plaid Link opens in its own secure window — your bank credentials never touch this app.</p>` : `
+        <div class="stream-list" style="margin-top:10px;">
+          ${items.map((item) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${item.institution_name}</span>
+                <span class="pill ${item.status === 'good' ? 'stable' : 'variable'}">${item.status}</span>
+              </div>
+              <div class="stream-meta">
+                ${(item.accounts ?? []).map((a) => `${a.nickname} ····${a.mask ?? ''}`).join(' · ') || 'No accounts yet'}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+
+    <div class="disclaimer">
+      Connecting a bank replaces nothing shown elsewhere in this app yet — the rest of the
+      dashboard still runs on demo data until live sync is wired into the other views.
+    </div>
+  `;
+}
+
 function renderInstallHint() {
   const standalone =
     window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
@@ -860,6 +991,7 @@ function render() {
     review: renderReview,
     trends: renderTrends,
     income: renderIncome,
+    connect: renderConnect,
   }[state.view]();
 
   app.innerHTML = `
@@ -883,7 +1015,20 @@ function render() {
   app.querySelectorAll('[data-view]').forEach((btn) =>
     btn.addEventListener('click', () => {
       state.view = btn.dataset.view;
-      render();
+      // First visit to Connect is what triggers loading the Supabase SDK —
+      // every other view stays entirely offline-capable.
+      if (state.view === 'connect' && !state.connectAttempted) {
+        state.connectAttempted = true;
+        // A full re-render replaces the whole #app subtree, which would wipe
+        // out anything the user already typed into the auth form if they're
+        // faster than this resolves. Skip the re-render in that case — the
+        // fetched session/household state is still applied either way.
+        refreshConnection().then(() => {
+          const form = document.getElementById('auth-form');
+          if (!form || (!form.email.value && !form.password.value)) render();
+        });
+      }
+      render(); // shows the view immediately either way
     }),
   );
 
@@ -908,6 +1053,61 @@ function render() {
       document.querySelectorAll('#txn-list .txn').forEach((row) => {
         row.style.display = row.dataset.search.includes(q) ? '' : 'none';
       });
+    });
+  }
+
+  const authForm = document.getElementById('auth-form');
+  if (authForm) {
+    authForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const mode = ev.submitter?.dataset.auth ?? 'signin';
+      const email = authForm.email.value.trim();
+      const password = authForm.password.value;
+      state.authError = null;
+      state.authNotice = null;
+      try {
+        const connect = await loadConnect();
+        if (mode === 'signup') {
+          const { needsConfirmation } = await connect.signUp(email, password);
+          if (needsConfirmation) {
+            state.authNotice = `Check ${email} for a confirmation link, then sign in.`;
+          }
+        } else {
+          await connect.signIn(email, password);
+        }
+        await refreshConnection();
+      } catch (e) {
+        state.authError = e.message;
+      }
+      render();
+    });
+  }
+
+  const signOutBtn = app.querySelector('[data-action="sign-out"]');
+  if (signOutBtn) {
+    signOutBtn.addEventListener('click', async () => {
+      const connect = await loadConnect();
+      await connect.signOut();
+      await refreshConnection();
+      render();
+    });
+  }
+
+  const connectBtn = app.querySelector('[data-action="connect-bank"]');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', async () => {
+      state.connectBusy = true;
+      state.connectError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.connectBank();
+        await refreshConnection();
+      } catch (e) {
+        state.connectError = e.message;
+      }
+      state.connectBusy = false;
+      render();
     });
   }
 }
