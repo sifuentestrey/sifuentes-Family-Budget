@@ -1,0 +1,1348 @@
+{
+  "_comment": "SYNTHETIC DATA. Entirely invented — no real accounts, people, or amounts. Exercises transfer pairing, mixed pay cadences including a three-paycheck month, messy descriptions, pending exclusion, and an uncategorizable payee.",
+  "accounts": [
+    {
+      "account_id": "acc_checking_joint",
+      "name": "Joint Checking",
+      "type": "depository",
+      "subtype": "checking",
+      "mask": "4021"
+    },
+    {
+      "account_id": "acc_savings_joint",
+      "name": "Joint Savings",
+      "type": "depository",
+      "subtype": "savings",
+      "mask": "7788"
+    },
+    {
+      "account_id": "acc_card_visa",
+      "name": "Visa Everyday",
+      "type": "credit",
+      "subtype": "credit card",
+      "mask": "1043"
+    },
+    {
+      "account_id": "acc_card_amex",
+      "name": "Amex Blue",
+      "type": "credit",
+      "subtype": "credit card",
+      "mask": "2005"
+    }
+  ],
+  "transactions": [
+    {
+      "transaction_id": "txn_0057",
+      "account_id": "acc_card_amex",
+      "date": "2026-03-03",
+      "amount": 49,
+      "name": "PLANET FITNESS MEMBERSHIP",
+      "merchant_name": null,
+      "original_description": "PLANET FITNESS MEMBERSHIP",
+      "personal_finance_category": {
+        "primary": "PERSONAL_CARE",
+        "detailed": "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0077",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-05",
+      "amount": 131.2,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0080",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-07",
+      "amount": 54.1,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0050",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-08",
+      "amount": 15.99,
+      "name": "NETFLIX.COM",
+      "merchant_name": "Netflix",
+      "original_description": "NETFLIX.COM",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_MUSIC_AND_AUDIO"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0055",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-09",
+      "amount": 11.99,
+      "name": "PAYPAL *SPOTIFY USA",
+      "merchant_name": null,
+      "original_description": "PAYPAL *SPOTIFY USA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0071",
+      "account_id": "acc_card_amex",
+      "date": "2026-03-12",
+      "amount": 1240,
+      "name": "BRIGHT HORIZONS CHILDCARE",
+      "merchant_name": null,
+      "original_description": "BRIGHT HORIZONS CHILDCARE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_CHILDCARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0074",
+      "account_id": "acc_checking_joint",
+      "date": "2026-03-14",
+      "amount": 2350,
+      "name": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "merchant_name": null,
+      "original_description": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_RENT"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0078",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-14",
+      "amount": 96.44,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0082",
+      "account_id": "acc_checking_joint",
+      "date": "2026-03-15",
+      "amount": 172.4,
+      "name": "ACH DEBIT PG&E WEB ONLINE",
+      "merchant_name": null,
+      "original_description": "ACH DEBIT PG&E WEB ONLINE",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0083",
+      "account_id": "acc_checking_joint",
+      "date": "2026-03-16",
+      "amount": 94.99,
+      "name": "COMCAST XFINITY WEB PMT",
+      "merchant_name": null,
+      "original_description": "COMCAST XFINITY WEB PMT",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0084",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-19",
+      "amount": 47.5,
+      "name": "TST* CHIPOTLE 2245",
+      "merchant_name": null,
+      "original_description": "TST* CHIPOTLE 2245",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_FAST_FOOD"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0056",
+      "account_id": "acc_card_amex",
+      "date": "2026-03-21",
+      "amount": 10.99,
+      "name": "APPLE.COM/BILL APPLE MUSIC",
+      "merchant_name": "Apple Music",
+      "original_description": "APPLE.COM/BILL APPLE MUSIC",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0081",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-21",
+      "amount": 47.85,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0079",
+      "account_id": "acc_card_visa",
+      "date": "2026-03-23",
+      "amount": 118.75,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0060",
+      "account_id": "acc_card_amex",
+      "date": "2026-04-03",
+      "amount": 49,
+      "name": "PLANET FITNESS MEMBERSHIP",
+      "merchant_name": null,
+      "original_description": "PLANET FITNESS MEMBERSHIP",
+      "personal_finance_category": {
+        "primary": "PERSONAL_CARE",
+        "detailed": "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0085",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-05",
+      "amount": 142.05,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0088",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-07",
+      "amount": 61.22,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0051",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-08",
+      "amount": 15.99,
+      "name": "NETFLIX.COM",
+      "merchant_name": "Netflix",
+      "original_description": "NETFLIX.COM",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_MUSIC_AND_AUDIO"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0058",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-09",
+      "amount": 11.99,
+      "name": "PAYPAL *SPOTIFY USA",
+      "merchant_name": null,
+      "original_description": "PAYPAL *SPOTIFY USA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0072",
+      "account_id": "acc_card_amex",
+      "date": "2026-04-12",
+      "amount": 1240,
+      "name": "BRIGHT HORIZONS CHILDCARE",
+      "merchant_name": null,
+      "original_description": "BRIGHT HORIZONS CHILDCARE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_CHILDCARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0075",
+      "account_id": "acc_checking_joint",
+      "date": "2026-04-14",
+      "amount": 2350,
+      "name": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "merchant_name": null,
+      "original_description": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_RENT"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0086",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-14",
+      "amount": 88.3,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0090",
+      "account_id": "acc_checking_joint",
+      "date": "2026-04-15",
+      "amount": 168.95,
+      "name": "ACH DEBIT PG&E WEB ONLINE",
+      "merchant_name": null,
+      "original_description": "ACH DEBIT PG&E WEB ONLINE",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0091",
+      "account_id": "acc_checking_joint",
+      "date": "2026-04-16",
+      "amount": 94.99,
+      "name": "COMCAST XFINITY WEB PMT",
+      "merchant_name": null,
+      "original_description": "COMCAST XFINITY WEB PMT",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0070",
+      "account_id": "acc_checking_joint",
+      "date": "2026-04-18",
+      "amount": 1428,
+      "name": "GEICO AUTO INSURANCE ANNUAL PREMIUM",
+      "merchant_name": "Geico",
+      "original_description": "GEICO AUTO INSURANCE ANNUAL PREMIUM",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_INSURANCE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0092",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-19",
+      "amount": 50.5,
+      "name": "TST* CHIPOTLE 2245",
+      "merchant_name": null,
+      "original_description": "TST* CHIPOTLE 2245",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_FAST_FOOD"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0059",
+      "account_id": "acc_card_amex",
+      "date": "2026-04-21",
+      "amount": 10.99,
+      "name": "APPLE.COM/BILL APPLE MUSIC",
+      "merchant_name": "Apple Music",
+      "original_description": "APPLE.COM/BILL APPLE MUSIC",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0089",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-21",
+      "amount": 52.4,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0087",
+      "account_id": "acc_card_visa",
+      "date": "2026-04-23",
+      "amount": 109.61,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0009",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-01",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0063",
+      "account_id": "acc_card_amex",
+      "date": "2026-05-03",
+      "amount": 49,
+      "name": "PLANET FITNESS MEMBERSHIP",
+      "merchant_name": null,
+      "original_description": "PLANET FITNESS MEMBERSHIP",
+      "personal_finance_category": {
+        "primary": "PERSONAL_CARE",
+        "detailed": "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0093",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-05",
+      "amount": 127.88,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0096",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-07",
+      "amount": 49.77,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0001",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-08",
+      "amount": -2284.15,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0052",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-08",
+      "amount": 15.99,
+      "name": "NETFLIX.COM",
+      "merchant_name": "Netflix",
+      "original_description": "NETFLIX.COM",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_MUSIC_AND_AUDIO"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0061",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-09",
+      "amount": 11.99,
+      "name": "PAYPAL *SPOTIFY USA",
+      "merchant_name": null,
+      "original_description": "PAYPAL *SPOTIFY USA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0073",
+      "account_id": "acc_card_amex",
+      "date": "2026-05-12",
+      "amount": 1240,
+      "name": "BRIGHT HORIZONS CHILDCARE",
+      "merchant_name": null,
+      "original_description": "BRIGHT HORIZONS CHILDCARE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_CHILDCARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0076",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-14",
+      "amount": 2350,
+      "name": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "merchant_name": null,
+      "original_description": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_RENT"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0094",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-14",
+      "amount": 103.16,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0010",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-15",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0098",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-15",
+      "amount": 181.2,
+      "name": "ACH DEBIT PG&E WEB ONLINE",
+      "merchant_name": null,
+      "original_description": "ACH DEBIT PG&E WEB ONLINE",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0099",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-16",
+      "amount": 94.99,
+      "name": "COMCAST XFINITY WEB PMT",
+      "merchant_name": null,
+      "original_description": "COMCAST XFINITY WEB PMT",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0100",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-19",
+      "amount": 53.5,
+      "name": "TST* CHIPOTLE 2245",
+      "merchant_name": null,
+      "original_description": "TST* CHIPOTLE 2245",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_FAST_FOOD"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0062",
+      "account_id": "acc_card_amex",
+      "date": "2026-05-21",
+      "amount": 10.99,
+      "name": "APPLE.COM/BILL APPLE MUSIC",
+      "merchant_name": "Apple Music",
+      "original_description": "APPLE.COM/BILL APPLE MUSIC",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0097",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-21",
+      "amount": 58.03,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0002",
+      "account_id": "acc_checking_joint",
+      "date": "2026-05-22",
+      "amount": -1412.88,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0095",
+      "account_id": "acc_card_visa",
+      "date": "2026-05-23",
+      "amount": 134.42,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0011",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-01",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0045",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-03",
+      "amount": 128.4,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0066",
+      "account_id": "acc_card_amex",
+      "date": "2026-06-03",
+      "amount": 49,
+      "name": "PLANET FITNESS MEMBERSHIP",
+      "merchant_name": null,
+      "original_description": "PLANET FITNESS MEMBERSHIP",
+      "personal_finance_category": {
+        "primary": "PERSONAL_CARE",
+        "detailed": "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0003",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-05",
+      "amount": -2611.4,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0018",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-05",
+      "amount": 1102.35,
+      "name": "CHASE CREDIT CRD AUTOPAY 062026",
+      "merchant_name": null,
+      "original_description": "CHASE CREDIT CRD AUTOPAY 062026",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0019",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-06",
+      "amount": -1102.35,
+      "name": "PAYMENT THANK YOU - WEB",
+      "merchant_name": null,
+      "original_description": "PAYMENT THANK YOU - WEB",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0053",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-08",
+      "amount": 17.99,
+      "name": "NETFLIX.COM",
+      "merchant_name": "Netflix",
+      "original_description": "NETFLIX.COM",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_MUSIC_AND_AUDIO"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0046",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-09",
+      "amount": 61.1,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": null,
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0064",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-09",
+      "amount": 11.99,
+      "name": "PAYPAL *SPOTIFY USA",
+      "merchant_name": null,
+      "original_description": "PAYPAL *SPOTIFY USA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0047",
+      "account_id": "acc_card_amex",
+      "date": "2026-06-12",
+      "amount": 1240,
+      "name": "BRIGHT HORIZONS CHILDCARE",
+      "merchant_name": null,
+      "original_description": "BRIGHT HORIZONS CHILDCARE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_CHILDCARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0048",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-14",
+      "amount": 2350,
+      "name": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "merchant_name": null,
+      "original_description": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_RENT"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0012",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-15",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0004",
+      "account_id": "acc_checking_joint",
+      "date": "2026-06-19",
+      "amount": -1876.22,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0049",
+      "account_id": "acc_card_visa",
+      "date": "2026-06-20",
+      "amount": 39.85,
+      "name": "TST* CHIPOTLE 2245",
+      "merchant_name": null,
+      "original_description": "TST* CHIPOTLE 2245",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0065",
+      "account_id": "acc_card_amex",
+      "date": "2026-06-21",
+      "amount": 10.99,
+      "name": "APPLE.COM/BILL APPLE MUSIC",
+      "merchant_name": "Apple Music",
+      "original_description": "APPLE.COM/BILL APPLE MUSIC",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0013",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-01",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0023",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-02",
+      "amount": 142.87,
+      "name": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "merchant_name": null,
+      "original_description": "SAFEWAY #1234 SAN FRANCISCO CA",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0005",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-03",
+      "amount": -3104.67,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0024",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-03",
+      "amount": 6.75,
+      "name": "SQ *BLUE BOTTLE COFFEE #4412 OAKLAND CA",
+      "merchant_name": null,
+      "original_description": "SQ *BLUE BOTTLE COFFEE #4412 OAKLAND CA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0069",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-03",
+      "amount": 49,
+      "name": "PLANET FITNESS MEMBERSHIP",
+      "merchant_name": null,
+      "original_description": "PLANET FITNESS MEMBERSHIP",
+      "personal_finance_category": {
+        "primary": "PERSONAL_CARE",
+        "detailed": "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0025",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-04",
+      "amount": 23.41,
+      "name": "TST* CHIPOTLE 2245",
+      "merchant_name": null,
+      "original_description": "TST* CHIPOTLE 2245",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_FAST_FOOD"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0016",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-05",
+      "amount": 1450,
+      "name": "CHASE CREDIT CRD AUTOPAY 072026",
+      "merchant_name": null,
+      "original_description": "CHASE CREDIT CRD AUTOPAY 072026",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0017",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-06",
+      "amount": -1450,
+      "name": "PAYMENT THANK YOU - WEB",
+      "merchant_name": null,
+      "original_description": "PAYMENT THANK YOU - WEB",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0020",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-06",
+      "amount": 800,
+      "name": "ONLINE TRANSFER TO SAVINGS 7788",
+      "merchant_name": null,
+      "original_description": "ONLINE TRANSFER TO SAVINGS 7788",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0021",
+      "account_id": "acc_savings_joint",
+      "date": "2026-07-06",
+      "amount": -800,
+      "name": "ONLINE TRANSFER FROM CHECKING 4021",
+      "merchant_name": null,
+      "original_description": "ONLINE TRANSFER FROM CHECKING 4021",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0026",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-06",
+      "amount": 58.2,
+      "name": "SHELL OIL 57445123456",
+      "merchant_name": "Shell",
+      "original_description": "SHELL OIL 57445123456",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_GAS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0027",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-07",
+      "amount": 312.44,
+      "name": "COSTCO WHSE #0472 SEATTLE WA",
+      "merchant_name": null,
+      "original_description": "COSTCO WHSE #0472 SEATTLE WA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0054",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-08",
+      "amount": 17.99,
+      "name": "NETFLIX.COM",
+      "merchant_name": "Netflix",
+      "original_description": "NETFLIX.COM",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_MUSIC_AND_AUDIO"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0067",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-09",
+      "amount": 11.99,
+      "name": "PAYPAL *SPOTIFY USA",
+      "merchant_name": null,
+      "original_description": "PAYPAL *SPOTIFY USA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0028",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-10",
+      "amount": 87.33,
+      "name": "AMZN Mktp US*RT4G59DK3",
+      "merchant_name": null,
+      "original_description": "AMZN Mktp US*RT4G59DK3",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_ONLINE_MARKETPLACES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0029",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-11",
+      "amount": 44.1,
+      "name": "POS DEBIT 07/11 TRADER JOES #123",
+      "merchant_name": null,
+      "original_description": "POS DEBIT 07/11 TRADER JOES #123",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0022",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-12",
+      "amount": 640.18,
+      "name": "AMEX EPAYMENT ACH PMT",
+      "merchant_name": null,
+      "original_description": "AMEX EPAYMENT ACH PMT",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0030",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-12",
+      "amount": 1240,
+      "name": "BRIGHT HORIZONS CHILDCARE",
+      "merchant_name": null,
+      "original_description": "BRIGHT HORIZONS CHILDCARE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_CHILDCARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0031",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-13",
+      "amount": 68.45,
+      "name": "CVS/PHARMACY #08812 BERKELEY CA",
+      "merchant_name": null,
+      "original_description": "CVS/PHARMACY #08812 BERKELEY CA",
+      "personal_finance_category": {
+        "primary": "MEDICAL",
+        "detailed": "MEDICAL_PHARMACIES_AND_SUPPLEMENTS"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0032",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-14",
+      "amount": 2350,
+      "name": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "merchant_name": null,
+      "original_description": "RENT PAYMENT OAKWOOD PROPERTIES",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_RENT"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0014",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-15",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0033",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-15",
+      "amount": 187.62,
+      "name": "ACH DEBIT PG&E WEB ONLINE",
+      "merchant_name": null,
+      "original_description": "ACH DEBIT PG&E WEB ONLINE",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0034",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-16",
+      "amount": 94.99,
+      "name": "COMCAST XFINITY WEB PMT",
+      "merchant_name": null,
+      "original_description": "COMCAST XFINITY WEB PMT",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0006",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-17",
+      "amount": -2043.91,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0035",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-17",
+      "amount": 32.18,
+      "name": "UBER TRIP 8KJ2N",
+      "merchant_name": "Uber",
+      "original_description": "UBER TRIP 8KJ2N",
+      "personal_finance_category": {
+        "primary": "TRANSPORTATION",
+        "detailed": "TRANSPORTATION_TAXIS_AND_RIDE_SHARES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0036",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-18",
+      "amount": 129.99,
+      "name": "REI #0021 SEATTLE WA",
+      "merchant_name": null,
+      "original_description": "REI #0021 SEATTLE WA",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0037",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-19",
+      "amount": 76.3,
+      "name": "WHOLE FOODS MKT #10234",
+      "merchant_name": null,
+      "original_description": "WHOLE FOODS MKT #10234",
+      "personal_finance_category": {
+        "primary": "FOOD_AND_DRINK",
+        "detailed": "FOOD_AND_DRINK_GROCERIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0038",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-20",
+      "amount": 18.5,
+      "name": "VENMO *JORDAN ELLIS",
+      "merchant_name": null,
+      "original_description": "VENMO *JORDAN ELLIS",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0068",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-21",
+      "amount": 10.99,
+      "name": "APPLE.COM/BILL APPLE MUSIC",
+      "merchant_name": "Apple Music",
+      "original_description": "APPLE.COM/BILL APPLE MUSIC",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0039",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-22",
+      "amount": 245,
+      "name": "GEICO AUTO INSURANCE",
+      "merchant_name": "Geico",
+      "original_description": "GEICO AUTO INSURANCE",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_INSURANCE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0040",
+      "account_id": "acc_card_amex",
+      "date": "2026-07-24",
+      "amount": 62.14,
+      "name": "PETCO #1882",
+      "merchant_name": null,
+      "original_description": "PETCO #1882",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_PET_SUPPLIES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0041",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-25",
+      "amount": 89,
+      "name": "HRTLND PMT SYS MRCH SVC 449201",
+      "merchant_name": null,
+      "original_description": "HRTLND PMT SYS MRCH SVC 449201",
+      "personal_finance_category": null,
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0042",
+      "account_id": "acc_card_visa",
+      "date": "2026-07-26",
+      "amount": 210.75,
+      "name": "BAY AREA ORTHODONTICS",
+      "merchant_name": null,
+      "original_description": "BAY AREA ORTHODONTICS",
+      "personal_finance_category": {
+        "primary": "MEDICAL",
+        "detailed": "MEDICAL_DENTAL_CARE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0043",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-28",
+      "amount": 35,
+      "name": "INTEREST CHARGE ON PURCHASES",
+      "merchant_name": null,
+      "original_description": "INTEREST CHARGE ON PURCHASES",
+      "personal_finance_category": {
+        "primary": "BANK_FEES",
+        "detailed": "BANK_FEES_INTEREST_CHARGE"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0007",
+      "account_id": "acc_checking_joint",
+      "date": "2026-07-31",
+      "amount": -2455.3,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0015",
+      "account_id": "acc_checking_joint",
+      "date": "2026-08-01",
+      "amount": -1912.4,
+      "name": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "merchant_name": null,
+      "original_description": "ACH CREDIT MERIDIAN HEALTH GRP DIRDEP",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    },
+    {
+      "transaction_id": "txn_0044",
+      "account_id": "acc_card_visa",
+      "date": "2026-08-05",
+      "amount": 51.2,
+      "name": "SQ *PHILZ COFFEE",
+      "merchant_name": null,
+      "original_description": "SQ *PHILZ COFFEE",
+      "personal_finance_category": null,
+      "pending": true
+    },
+    {
+      "transaction_id": "txn_0008",
+      "account_id": "acc_checking_joint",
+      "date": "2026-08-14",
+      "amount": -1689.75,
+      "name": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "merchant_name": null,
+      "original_description": "DIRECT DEP NORTHSTAR LOGISTICS PAYROLL",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES"
+      },
+      "pending": false
+    }
+  ]
+}

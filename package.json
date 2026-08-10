@@ -1,0 +1,20 @@
+{
+  "name": "sifuentes-family-budget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Household budget with automatic bank sync and layered categorization",
+  "scripts": {
+    "test": "node --test 'tests/*.test.mjs' && npm run check:shared",
+    "fixtures": "node fixtures/generate.mjs > fixtures/sample-plaid.json",
+    "demo": "node scripts/demo.mjs",
+    "plan": "node scripts/plan.mjs",
+    "automation": "node scripts/automation-demo.mjs",
+    "sync:shared": "node scripts/sync-shared.mjs",
+    "check:shared": "node scripts/sync-shared.mjs --check",
+    "predeploy": "npm run sync:shared"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

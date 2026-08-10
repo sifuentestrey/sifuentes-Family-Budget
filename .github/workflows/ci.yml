@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Engine tests plus the security guardrails: credential scanning,
+      # gitignore coverage, RLS policy checks, and no tokens in browser code.
+      # These only protect anything if they actually run on every change.
+      - name: Test
+        run: npm test
+
+      # The engine has one source of truth (src/engine/) and a deployed copy
+      # under supabase/functions/_shared/. Two copies of categorization logic
+      # drifting apart would mean the app shows one set of numbers and the
+      # nightly sync writes another — a genuinely nasty bug to track down.
+      - name: Check shared engine copies are in sync
+        run: npm run check:shared
+
+      - name: Verify fixtures are reproducible
+        run: |
+          npm run fixtures
+          git diff --exit-code fixtures/sample-plaid.json \
+            || (echo "fixtures/sample-plaid.json is stale — run 'npm run fixtures'" && exit 1)
+
+  no-real-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Belt and braces alongside .gitignore. Anything pushed to GitHub is
+      # durable even after deletion, so this failing loudly beats discovering
+      # a committed bank statement later.
+      - name: Reject statement-format files
+        run: |
+          found=$(git ls-files | grep -iE '\.(csv|pdf|xlsx|ofx|qfx)$' || true)
+          if [ -n "$found" ]; then
+            echo "Statement-format files must never be committed:"
+            echo "$found"
+            exit 1
+          fi
+          echo "No statement-format files tracked."
