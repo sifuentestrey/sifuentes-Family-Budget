@@ -21,7 +21,14 @@ export function onAuthChange(callback) {
  *   session until the user clicks the link in their inbox.
  */
 export async function signUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // Without this, Supabase sends the confirmation link to the project's
+  // dashboard-configured Site URL, which defaults to localhost and stays
+  // that way until someone remembers to change it for production.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: window.location.origin + window.location.pathname },
+  });
   if (error) throw error;
   return { needsConfirmation: !data.session };
 }
