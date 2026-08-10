@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Family Budget — UI Mockup</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#171717;background:#f6f6f3}*{box-sizing:border-box}body{margin:0}.phone{width:min(430px,100%);margin:24px auto;min-height:900px;background:#f6f6f3;padding:24px 18px 92px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.eyebrow{font-size:12px;color:#777}.title{font-size:26px;font-weight:700;letter-spacing:-.6px;margin-top:2px}.avatar{width:38px;height:38px;border-radius:50%;background:#fff;border:1px solid #e4e4e0;display:grid;place-items:center;font-weight:700}.hero{background:#fff;border:1px solid #e7e7e2;border-radius:22px;padding:22px;margin-bottom:14px}.hero-label{font-size:13px;color:#777}.hero-number{font-size:48px;line-height:1.05;font-weight:750;letter-spacing:-2px;margin:7px 0}.hero-sub{font-size:13px;color:#777}.progress{height:6px;background:#ededeb;border-radius:99px;margin:18px 0 10px;overflow:hidden}.progress span{display:block;width:68%;height:100%;background:#1f7a57;border-radius:99px}.row{display:flex;justify-content:space-between;font-size:12px;color:#777}.section{margin:24px 2px 10px;font-size:15px;font-weight:700}.card{background:#fff;border:1px solid #e7e7e2;border-radius:18px;margin-bottom:10px;padding:15px}.bill{display:flex;align-items:center;gap:12px}.icon{width:40px;height:40px;border-radius:13px;background:#f0f0ed;display:grid;place-items:center;font-weight:700}.bill-main{flex:1}.bill-name{font-size:14px;font-weight:650}.bill-date{font-size:12px;color:#858585;margin-top:3px}.amount{font-size:14px;font-weight:700}.pay{display:flex;justify-content:space-between;align-items:center}.pay-number{font-size:23px;font-weight:750;letter-spacing:-.6px;margin-top:4px}.pill{font-size:11px;padding:5px 8px;border-radius:99px;background:#edf6f1;color:#1f7a57}.spend-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.spend{background:#fff;border:1px solid #e7e7e2;border-radius:18px;padding:15px}.spend-label{font-size:12px;color:#777}.spend-number{font-size:19px;font-weight:700;margin-top:8px}.review{border-left:3px solid #d28a2f}.review small{color:#777}.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(430px,100%);height:72px;background:rgba(255,255,255,.96);border-top:1px solid #e7e7e2;display:flex;justify-content:space-around;align-items:center}.nav a{text-decoration:none;color:#888;font-size:11px;text-align:center}.nav a.active{color:#171717;font-weight:700}.nav i{display:block;font-style:normal;font-size:18px;margin-bottom:3px}@media(min-width:700px){.phone{width:430px;border:1px solid #e2e2de;border-radius:28px}.nav{position:fixed}}
+</style>
+</head>
+<body>
+<main class="phone">
+  <header class="top"><div><div class="eyebrow">Monday, Aug 10</div><div class="title">Good afternoon, Trey</div></div><div class="avatar">T</div></header>
+  <section class="hero">
+    <div class="hero-label">Safe to spend</div>
+    <div class="hero-number">$1,284</div>
+    <div class="hero-sub">through Aug 17</div>
+    <div class="progress"><span></span></div>
+    <div class="row"><span>$2,640 checking</span><span>$744 buffer</span></div>
+  </section>
+
+  <div class="section">Next up</div>
+  <section class="card">
+    <div class="bill"><div class="icon">M</div><div class="bill-main"><div class="bill-name">Mortgage</div><div class="bill-date">Due Aug 15</div></div><div class="amount">$1,900</div></div>
+  </section>
+  <section class="card">
+    <div class="bill"><div class="icon">E</div><div class="bill-main"><div class="bill-name">Electricity</div><div class="bill-date">Due Aug 18 · estimated</div></div><div class="amount">$146</div></div>
+  </section>
+
+  <div class="section">Next paycheck</div>
+  <section class="card pay"><div><div class="eyebrow">Friday, Aug 14</div><div class="pay-number">$2,746</div></div><span class="pill">High confidence</span></section>
+
+  <div class="section">Spending this month</div>
+  <section class="spend-grid"><div class="spend"><div class="spend-label">Groceries</div><div class="spend-number">$486</div></div><div class="spend"><div class="spend-label">Dining</div><div class="spend-number">$214</div></div><div class="spend"><div class="spend-label">Gas</div><div class="spend-number">$132</div></div><div class="spend"><div class="spend-label">Everything else</div><div class="spend-number">$301</div></div></section>
+
+  <div class="section">Needs your attention</div>
+  <section class="card review"><div class="bill"><div class="icon">?</div><div class="bill-main"><div class="bill-name">New recurring charge found</div><div class="bill-date">Hulu · about $19/month</div></div><span class="pill">Review</span></div></section>
+</main>
+<nav class="nav"><a class="active"><i>⌂</i>Home</a><a><i>▣</i>Bills</a><a><i>↗</i>Spending</a><a><i>＄</i>Income</a><a><i>•••</i>More</a></nav>
+</body>
+</html>
