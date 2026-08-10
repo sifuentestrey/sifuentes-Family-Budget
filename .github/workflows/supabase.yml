@@ -1,0 +1,55 @@
+name: Deploy Supabase
+
+# Edge functions and migrations deploy themselves on merge to main.
+#
+# Previously the only way to ship a function was to paste its whole source —
+# and every file it imports — through a tool call by hand. That is slow, and it
+# risks a transcription error in code nobody would think to re-read. The CLI
+# reads from disk, so what ships is byte-for-byte what is in the repo.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/supabase.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check credentials are present
+        id: creds
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SUPABASE_ACCESS_TOKEN is not set — skipping deploy."
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: supabase/setup-cli@v1
+        if: steps.creds.outputs.has_token == 'true'
+        with:
+          version: latest
+
+      # Migrations first: a function deployed against a schema that has not
+      # been migrated yet fails at runtime, while the reverse ordering is safe
+      # because migrations here are additive.
+      - name: Push migrations
+        if: steps.creds.outputs.has_token == 'true' && env.DB_PASSWORD != ''
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --password "$DB_PASSWORD" --linked || supabase db push --password "$DB_PASSWORD"
+
+      - name: Deploy edge functions
+        if: steps.creds.outputs.has_token == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy --project-ref ytkpthlhtbxtvtadepqt

@@ -321,3 +321,50 @@ test('an invited user joins the inviting household rather than creating one', ()
     'invite lookup must precede household creation',
   );
 });
+
+// ---------------------------------------------------------------------------
+// Sync endpoint authentication
+// ---------------------------------------------------------------------------
+
+const syncFn = readFileSync(
+  join(ROOT, 'supabase/functions/sync-transactions/index.ts'), 'utf8',
+);
+// Comments describe the bug being guarded against and legitimately quote it,
+// so scan executable code only — otherwise documenting a vulnerability trips
+// the test that exists to prevent it.
+const syncCode = syncFn
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+
+test('the sync endpoint never compares against an interpolated env var', () => {
+  // The original check was `authHeader !== `Bearer ${Deno.env.get('SYNC_SECRET')}``.
+  // With the variable unset that interpolates to the literal "Bearer undefined",
+  // which anyone can send — confirmed returning 200 against the live deployment.
+  // Any comparison that embeds a possibly-undefined lookup has the same hole.
+  assert.doesNotMatch(
+    syncCode,
+    /Bearer \$\{\s*Deno\.env\.get/,
+    'bearer comparison interpolates an env lookup that may be undefined',
+  );
+});
+
+test('the sync endpoint fails closed when no secret is configured', () => {
+  // Missing configuration must refuse every caller, not admit them.
+  assert.match(syncFn, /if \(!expected/, 'missing secret must short-circuit to a refusal');
+  assert.match(syncFn, /return null;/, 'expectedSecret must be able to report "unconfigured"');
+});
+
+test('the sync secret is compared in constant time', () => {
+  assert.match(syncFn, /function secretsMatch/);
+  assert.match(syncFn, /\^/, 'comparison should xor rather than short-circuit');
+});
+
+test('edge function JWT settings are pinned in config, not the dashboard', () => {
+  const config = readFileSync(join(ROOT, 'supabase/config.toml'), 'utf8');
+  // sync-transactions runs with verify_jwt off because pg_cron presents a
+  // Vault secret, not a user JWT. That makes its own check the only gate, so
+  // the setting must be recorded next to the reasoning rather than being a
+  // dashboard toggle nobody can see in review.
+  assert.match(config, /\[functions\.sync-transactions\][\s\S]*?verify_jwt = false/);
+  assert.match(config, /\[functions\.plaid-exchange\][\s\S]*?verify_jwt = true/);
+});
