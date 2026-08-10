@@ -17,8 +17,10 @@ import { allocateSeries, findExtraPaycheckMonths } from '../src/engine/allocate.
 import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js';
 import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
+import { buildAlerts } from '../src/engine/alerts.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
-import { makeTimeEntry, makePayProfile, validatePayProfile } from '../src/domain/payroll.js';
+import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
+import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
 import { daysUntilDue } from '../src/domain/bill.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -66,6 +68,67 @@ async function refreshBills() {
   } catch (e) {
     state.billsError = e.message;
   }
+  refreshAlerts();
+}
+
+/**
+ * Recompute the alert set from whatever state is currently loaded.
+ *
+ * Deliberately tolerant of missing inputs — `state.bills` is empty until a
+ * session exists, `state.subs` is empty until the demo/real transactions have
+ * loaded — buildAlerts() treats every input as optional for exactly this
+ * reason, so this can run early and often rather than waiting for everything.
+ */
+function refreshAlerts() {
+  state.alerts = buildAlerts({
+    bills: state.bills,
+    transactions: state.transactions,
+    subscriptions: state.subs,
+    syncHealth: state.syncHealth,
+    dismissed: state.dismissedAlerts,
+  });
+}
+
+function dismissAlert(key) {
+  state.dismissedAlerts.add(key);
+  localStorage.setItem('dismissedAlerts', JSON.stringify([...state.dismissedAlerts]));
+  refreshAlerts();
+}
+
+let paystubsModule = null;
+async function loadPaystubs() {
+  if (!paystubsModule) paystubsModule = await import('./paystubs.js');
+  return paystubsModule;
+}
+
+/**
+ * Reload paystubs and recompute reconciliations from source (each stub's own
+ * period + that period's logged time entries) rather than round-tripping the
+ * persisted summary — the DB only stores aggregate expected/actual figures,
+ * not the per-line deduction detail learnFromHistory() needs to spot a
+ * recurring deduction missing from the pay profile.
+ */
+async function refreshPaystubs() {
+  state.paystubsError = null;
+  if (!state.session || !state.householdId || !state.payProfile) return;
+
+  try {
+    const [paystubs, shifts] = await Promise.all([loadPaystubs(), loadShifts()]);
+    state.paystubs = await paystubs.listPaystubs();
+
+    const reconciliations = [];
+    for (const stub of state.paystubs) {
+      const entries = await shifts.listTimeEntries(stub.period.start, stub.period.end);
+      const forecast = forecastPaycheck({
+        profile: state.payProfile, entries, period: stub.period, payDate: stub.payDate,
+      });
+      reconciliations.push(reconcilePaycheck(forecast, stub));
+    }
+    state.reconciliations = reconciliations;
+    state.learnedAdjustments = learnFromHistory(reconciliations);
+  } catch (e) {
+    state.paystubsError = e.message;
+  }
 }
 
 /**
@@ -103,6 +166,15 @@ async function refreshShifts() {
   }
 }
 
+/** Which alerts a household has already seen, so they don't return every render. */
+function loadDismissedAlerts() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('dismissedAlerts') ?? '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
 const state = {
   transactions: [],
   streams: [],
@@ -110,6 +182,8 @@ const state = {
   view: 'dashboard',
   learned: new Map(),
   syncHealth: null,
+  dismissedAlerts: loadDismissedAlerts(),
+  alerts: { alerts: [], urgent: [], inApp: [], toEmail: [] },
   session: null,
   householdId: null,
   connectedItems: [],
@@ -133,6 +207,14 @@ const state = {
   billsNeedingReview: [],
   billsError: null,
   billsAttempted: false,
+  paystubs: [],
+  reconciliations: [],
+  learnedAdjustments: null,
+  paystubsError: null,
+  paystubsAttempted: false,
+  paystubBusy: false,
+  paystubFormError: null,
+  adjustmentsNotice: null,
   connectAttempted: false,
   authNotice: null,
   connectBusy: false,
@@ -315,6 +397,8 @@ function buildPlan() {
     },
     yearsAway: 2,
   });
+
+  refreshAlerts();
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +484,7 @@ function renderNav() {
     ['trends', 'Trends'],
     ['income', 'Income'],
     ['shifts', 'Shifts'],
+    ['paystubs', 'Paystubs'],
     ['bills', 'Bills'],
     ['connect', 'Connect'],
   ];
@@ -445,6 +530,30 @@ function renderSyncBanner() {
   return '';
 }
 
+/**
+ * Alerts, most urgent first. Lives at the top of the Dashboard rather than
+ * globally above the nav — a notification center belongs at the front door,
+ * not repeated on every tab.
+ */
+function renderAlerts() {
+  const items = [...state.alerts.urgent, ...state.alerts.inApp.filter((a) => !a.urgent)];
+  if (!items.length) return '';
+
+  return `
+    <div class="stream-list" style="margin-bottom:14px;">
+      ${items.map((a) => `
+        <div class="banner ${a.urgent ? 'banner-warn' : 'banner-info'}" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div>
+            <strong>${a.title}</strong>
+            <div style="margin-top:2px;">${a.body}</div>
+          </div>
+          <button class="link" data-action="dismiss-alert" data-key="${a.key}" style="white-space:nowrap;">Dismiss</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderDashboard() {
   const txns = spendingIn(state.month);
   const total = txns.reduce((s, t) => s + t.amount, 0);
@@ -461,6 +570,7 @@ function renderDashboard() {
   const max = categories.length ? categories[0][1] : 1;
 
   return `
+    ${renderAlerts()}
     <div class="month-picker">
       <button class="chev" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>‹</button>
       <h2>${monthLabel(state.month)}</h2>
@@ -1427,6 +1537,101 @@ function renderBills() {
   `;
 }
 
+/**
+ * Paystub entry and the reconciliation it produces against the forecast for
+ * that same pay period — the loop that lets the app learn an actual effective
+ * tax rate instead of the one guessed once during pay setup.
+ */
+function renderPaystubs() {
+  if (!state.session) {
+    return `
+      <div class="note-box">
+        <strong>Sign in to reconcile paystubs.</strong>
+        Open the Connect tab to sign in.
+      </div>`;
+  }
+  if (!state.payProfile) {
+    return `
+      <div class="note-box">
+        <strong>Set up pay first.</strong>
+        Reconciliation compares a real stub against a forecast, and the forecast
+        needs a pay profile — set one up on the Shifts tab first.
+      </div>`;
+  }
+  if (state.paystubsError) {
+    return `<div class="banner banner-warn">${state.paystubsError}</div>`;
+  }
+
+  const learned = state.learnedAdjustments;
+
+  return `
+    <div class="step">
+      <div class="step-head"><span class="step-title">Enter a paystub</span></div>
+      <p class="step-why">
+        Matched against the forecast for the same pay period. Three or more
+        stubs is enough to start suggesting adjustments to the tax assumptions
+        in pay setup.
+      </p>
+      <form id="paystub-form" class="step">
+        ${field('Pay date', 'payDate', 'date', '', 'required')}
+        ${field('Period start', 'periodStart', 'date', '', 'required')}
+        ${field('Period end', 'periodEnd', 'date', '', 'required')}
+        ${field('Gross pay', 'grossPay', 'number', '', 'step="0.01" min="0" required')}
+        ${field('Net pay', 'netPay', 'number', '', 'step="0.01" min="0" required')}
+        ${field('Total taxes withheld', 'totalTaxes', 'number', '', 'step="0.01" min="0" required')}
+        ${field('Regular hours (optional)', 'regularHours', 'number', '', 'step="0.01" min="0"')}
+        ${field('Overtime hours (optional)', 'overtimeHours', 'number', '', 'step="0.01" min="0"')}
+        <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
+          Other deductions (optional) — one per line, "Label: Amount"
+          <textarea name="deductions" rows="3" placeholder="401k: 128.00&#10;Health insurance: 84.50"
+            style="${FIELD_STYLE}"></textarea>
+        </label>
+        ${state.paystubFormError ? `<div class="banner banner-warn" style="margin-top:8px;">${state.paystubFormError}</div>` : ''}
+        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.paystubBusy ? 'disabled' : ''}>
+          ${state.paystubBusy ? 'Saving…' : 'Save and reconcile'}
+        </button>
+      </form>
+    </div>
+
+    ${learned ? `
+      <div class="step">
+        <div class="step-head"><span class="step-title">What the stubs say</span></div>
+        <p class="step-why">${learned.ready ? learned.summary : learned.reason}</p>
+        ${learned.ready && (learned.suggestedTaxRate != null || learned.suggestedDeductions?.length) ? `
+          ${state.adjustmentsNotice ? `<div class="banner banner-good">${state.adjustmentsNotice}</div>` : ''}
+          <button data-action="apply-adjustments" class="link" style="${BUTTON_STYLE}">
+            Apply these adjustments to pay setup
+          </button>
+        ` : ''}
+      </div>
+    ` : ''}
+
+    <div class="step">
+      <div class="step-head"><span class="step-title">History</span></div>
+      ${state.reconciliations.length === 0 ? '<p class="step-why">No paystubs entered yet.</p>' : `
+        <div class="stream-list" style="margin-top:10px;">
+          ${state.reconciliations.map((r) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${r.payDate}</span>
+                <span class="pill ${r.materialVariance ? 'variable' : 'stable'}">${moneyExact(r.net.actual)} net</span>
+              </div>
+              <div class="stream-meta">
+                Forecast ${moneyExact(r.net.expected)} · ${r.net.difference >= 0 ? '+' : ''}${moneyExact(r.net.difference)}${r.net.percentDifference != null ? ` (${r.net.percentDifference}%)` : ''}
+              </div>
+              ${r.findings.length ? `
+                <ul style="margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--muted);">
+                  ${r.findings.map((f) => `<li>${f}</li>`).join('')}
+                </ul>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
 function renderInstallHint() {
   const standalone =
     window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
@@ -1488,6 +1693,7 @@ function render() {
     trends: renderTrends,
     income: renderIncome,
     shifts: renderShifts,
+    paystubs: renderPaystubs,
     bills: renderBills,
     connect: renderConnect,
   }[state.view]();
@@ -1545,6 +1751,19 @@ function render() {
         state.connectAttempted = true;
         (haveSession ? Promise.resolve() : refreshConnection())
           .then(refreshBills)
+          .then(render);
+      }
+      // Paystubs needs both a session and the pay profile Shifts sets up, so
+      // it establishes both rather than showing an empty state a reload would fix.
+      if (state.view === 'paystubs' && !state.paystubsAttempted) {
+        state.paystubsAttempted = true;
+        const haveSession = state.connectAttempted;
+        state.connectAttempted = true;
+        const haveProfile = state.shiftsAttempted;
+        state.shiftsAttempted = true;
+        (haveSession ? Promise.resolve() : refreshConnection())
+          .then(() => (haveProfile ? Promise.resolve() : refreshShifts()))
+          .then(refreshPaystubs)
           .then(render);
       }
       render(); // shows the view immediately either way
@@ -1785,6 +2004,88 @@ function render() {
     });
   }
 
+  const paystubForm = document.getElementById('paystub-form');
+  if (paystubForm) {
+    paystubForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = paystubForm;
+
+      const deductions = f.deductions.value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const i = line.lastIndexOf(':');
+          if (i < 0) return null;
+          const amount = Number(line.slice(i + 1).replace(/[$,]/g, '').trim());
+          return Number.isFinite(amount) ? { label: line.slice(0, i).trim(), amount } : null;
+        })
+        .filter(Boolean);
+
+      const stub = makePaystub({
+        payDate: f.payDate.value,
+        period: { start: f.periodStart.value, end: f.periodEnd.value },
+        grossPay: Number(f.grossPay.value),
+        netPay: Number(f.netPay.value),
+        totalTaxes: Number(f.totalTaxes.value),
+        regularHours: f.regularHours.value ? Number(f.regularHours.value) : undefined,
+        overtimeHours: f.overtimeHours.value ? Number(f.overtimeHours.value) : undefined,
+        deductions,
+        source: 'manual',
+      });
+
+      const { valid, errors } = validatePaystub(stub);
+      if (!valid) {
+        state.paystubFormError = errors.join('; ');
+        render();
+        return;
+      }
+
+      state.paystubBusy = true;
+      state.paystubFormError = null;
+      state.adjustmentsNotice = null;
+      render();
+      try {
+        const [paystubs, shifts] = await Promise.all([loadPaystubs(), loadShifts()]);
+        const saved = await paystubs.savePaystub(stub, state.householdId);
+
+        // Reconcile against the forecast for THIS stub's own period, not
+        // whatever "upcoming" currently means — a stub entered for a past
+        // period must be compared to what was forecast for that period.
+        const entries = await shifts.listTimeEntries(saved.period.start, saved.period.end);
+        const forecast = forecastPaycheck({
+          profile: state.payProfile, entries, period: saved.period, payDate: saved.payDate,
+        });
+        const reconciliation = reconcilePaycheck(forecast, saved);
+        await paystubs.saveReconciliation(reconciliation, state.householdId, null);
+
+        f.reset();
+        await refreshPaystubs();
+      } catch (e) {
+        state.paystubFormError = e.message;
+      }
+      state.paystubBusy = false;
+      render();
+    });
+  }
+
+  const applyAdjustmentsBtn = app.querySelector('[data-action="apply-adjustments"]');
+  if (applyAdjustmentsBtn) {
+    applyAdjustmentsBtn.addEventListener('click', async () => {
+      const { profile: adjusted, changed, changes } = applyLearnedAdjustments(state.payProfile, state.learnedAdjustments);
+      if (!changed) return;
+      try {
+        const shifts = await loadShifts();
+        state.payProfile = await shifts.savePayProfile(adjusted, state.householdId, state.payProfile.id);
+        state.adjustmentsNotice = `Applied: ${changes.join('; ')}.`;
+        await refreshPaystubs();
+      } catch (e) {
+        state.paystubsError = e.message;
+      }
+      render();
+    });
+  }
+
   const editProfileBtn = app.querySelector('[data-action="edit-profile"]');
   if (editProfileBtn) {
     editProfileBtn.addEventListener('click', () => {
@@ -1812,6 +2113,13 @@ function render() {
       } catch (e) {
         state.shiftsError = e.message;
       }
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-action="dismiss-alert"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dismissAlert(btn.dataset.key);
       render();
     });
   });
@@ -1860,16 +2168,21 @@ function render() {
 
 consumeGmailOAuthReturn();
 
-load().then(async () => {
-  // Returning from Gmail's consent screen always means a session already
-  // exists — load it now rather than waiting for a click on the Connect tab,
-  // so the notice above appears next to state that's actually current.
-  if (state.gmailNotice || state.gmailError) {
-    state.connectAttempted = true;
-    await refreshConnection();
-  }
-  render();
-}).catch((e) => {
+load().then(render).catch((e) => {
   document.getElementById('app').innerHTML =
     `<div class="banner banner-warn">Could not load data: ${e.message}</div>`;
 });
+
+// A returning signed-in user's session, bills, and alerts load in the
+// background, after the demo dashboard has already painted — never blocking
+// that first render is the whole reason fixtures work with zero network
+// dependency. Runs unconditionally (not just after a Gmail OAuth return) so
+// alerts and bills are current the moment the app opens, without requiring a
+// manual visit to Connect or Bills first.
+(async () => {
+  state.connectAttempted = true;
+  await refreshConnection();
+  state.billsAttempted = true;
+  await refreshBills();
+  render();
+})();

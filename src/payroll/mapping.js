@@ -65,6 +65,102 @@ export function profileToRow(profile, householdId) {
   };
 }
 
+export function stubToRow(stub, householdId) {
+  return {
+    household_id: householdId,
+    pay_profile_id: stub.payProfileId ?? null,
+    pay_date: stub.payDate,
+    period_start: stub.period?.start ?? null,
+    period_end: stub.period?.end ?? null,
+    gross_pay: stub.grossPay,
+    net_pay: stub.netPay,
+    total_taxes: stub.totalTaxes,
+    regular_hours: stub.regularHours ?? null,
+    overtime_hours: stub.overtimeHours ?? null,
+    earnings: stub.earnings ?? {},
+    source: stub.source,
+    source_ref: stub.sourceRef ?? null,
+    confidence: stub.confidence,
+  };
+}
+
+export function rowToStub(row, deductionRows = []) {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    payProfileId: row.pay_profile_id ?? undefined,
+    payDate: row.pay_date,
+    period: { start: row.period_start, end: row.period_end },
+    grossPay: n(row.gross_pay),
+    netPay: n(row.net_pay),
+    regularHours: row.regular_hours != null ? n(row.regular_hours) : undefined,
+    overtimeHours: row.overtime_hours != null ? n(row.overtime_hours) : undefined,
+    totalTaxes: n(row.total_taxes),
+    deductions: deductionRows.map(rowToDeduction),
+    earnings: row.earnings ?? {},
+    source: row.source,
+    sourceRef: row.source_ref ?? undefined,
+    confidence: n(row.confidence),
+  };
+}
+
+export function deductionToRow(deduction, householdId, paystubId) {
+  return {
+    household_id: householdId,
+    paystub_id: paystubId,
+    label: deduction.label,
+    amount: deduction.amount,
+    pre_tax: deduction.preTax ?? false,
+    category: deduction.category ?? null,
+  };
+}
+
+export function rowToDeduction(row) {
+  return {
+    label: row.label,
+    amount: n(row.amount),
+    preTax: row.pre_tax ?? false,
+  };
+}
+
+export function reconciliationToRow(reconciliation, householdId, forecastId) {
+  return {
+    household_id: householdId,
+    paystub_id: reconciliation.paystubId,
+    forecast_id: forecastId ?? null,
+    expected_gross: reconciliation.gross.expected,
+    actual_gross: reconciliation.gross.actual,
+    expected_net: reconciliation.net.expected,
+    actual_net: reconciliation.net.actual,
+    expected_taxes: reconciliation.taxes.expected,
+    actual_taxes: reconciliation.taxes.actual,
+    expected_deductions: reconciliation.deductions.expected,
+    actual_deductions: reconciliation.deductions.actual,
+    material_variance: reconciliation.materialVariance,
+    findings: reconciliation.findings,
+    derived_rates: reconciliation.derivedRates,
+  };
+}
+
+export function rowToReconciliationSummary(row) {
+  return {
+    id: row.id,
+    paystubId: row.paystub_id,
+    expectedGross: n(row.expected_gross),
+    actualGross: n(row.actual_gross),
+    expectedNet: n(row.expected_net),
+    actualNet: n(row.actual_net),
+    expectedTaxes: n(row.expected_taxes),
+    actualTaxes: n(row.actual_taxes),
+    expectedDeductions: n(row.expected_deductions),
+    actualDeductions: n(row.actual_deductions),
+    materialVariance: row.material_variance,
+    findings: row.findings ?? [],
+    derivedRates: row.derived_rates ?? {},
+    createdAt: row.created_at,
+  };
+}
+
 export function rowToEntry(row) {
   return {
     id: row.id,
