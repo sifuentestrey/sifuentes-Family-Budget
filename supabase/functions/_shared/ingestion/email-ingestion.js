@@ -1,3 +1,6 @@
+// GENERATED FILE — do not edit.
+// Source of truth: src/ingestion/email-ingestion.js
+// Regenerate with: npm run sync:shared
 /**
  * Email bill ingestion.
  *

@@ -20,3 +20,21 @@ verify_jwt = false
 # and refuses when none is configured, so this is not an open endpoint.
 [functions.sync-transactions]
 verify_jwt = false
+
+[functions.gmail-oauth-start]
+verify_jwt = true
+
+# Google's redirect back here is a plain browser GET with no Supabase session
+# attached — it cannot carry a bearer token. The one-time `state` row minted
+# by gmail-oauth-start is the actual guard; see that function's comments.
+[functions.gmail-oauth-callback]
+verify_jwt = false
+
+# Same reasoning as sync-transactions: cron presents a Vault-held secret, not
+# a user JWT.
+[functions.sync-bills]
+verify_jwt = false
+
+# Same reasoning again: cron presents a Vault-held secret, not a user JWT.
+[functions.send-alerts]
+verify_jwt = false

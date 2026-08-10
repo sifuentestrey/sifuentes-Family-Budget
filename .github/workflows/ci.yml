@@ -15,6 +15,13 @@ jobs:
         with:
           node-version: '22'
 
+      # The project was dependency-free until PDF bill parsing needed a real
+      # text-extraction library (unpdf) — this step only exists because of
+      # that, and npm ci (not install) so CI fails loudly on a lockfile that
+      # drifted from package.json rather than silently resolving around it.
+      - name: Install dependencies
+        run: npm ci
+
       # Engine tests plus the security guardrails: credential scanning,
       # gitignore coverage, RLS policy checks, and no tokens in browser code.
       # These only protect anything if they actually run on every change.

@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -49,6 +49,10 @@ const SHELL_ASSETS = [
   '../src/domain/payroll.js',
   '../src/payroll/pay-calculator.js',
   '../src/payroll/forecast.js',
+  // Bills: app.js imports daysUntilDue statically (not lazily, unlike
+  // connect.js/shifts.js/bills.js themselves), so it's required to parse at
+  // all, the same reason the payroll modules above are here.
+  '../src/domain/bill.js',
 ];
 
 self.addEventListener('install', (event) => {

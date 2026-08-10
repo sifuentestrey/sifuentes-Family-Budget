@@ -312,6 +312,90 @@ test('ingested bills pass domain validation', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// PDF attachment fallback — "your e-bill is attached" with almost nothing in
+// the body, the exact pattern the body-only parser structurally cannot catch.
+// ---------------------------------------------------------------------------
+
+function providerWithAttachment({ bodyText, attachmentBytes = new Uint8Array([1]) }) {
+  const message = {
+    id: 'msg_pdf_1', from: 'billing@examplepower.com', fromName: 'Example Power',
+    subject: 'Your e-bill is ready', receivedAt: '2026-07-18T00:00:00Z',
+    bodyText, attachments: [{ id: 'att_1', filename: 'statement.pdf', mimeType: 'application/pdf' }],
+  };
+  return {
+    info: { key: 'test-provider', displayName: 'Test', kind: 'email', isLive: true },
+    async isConnected() { return true; },
+    async searchMessages() { return [message]; },
+    async getMessage(id) { return id === message.id ? message : null; },
+    async getAttachment() { return attachmentBytes; },
+  };
+}
+
+function fakePdfParser(fields) {
+  return {
+    key: 'pdf',
+    canParse: (input) => input.kind === 'pdf',
+    async parse() { return { fields, confidence: fields.confidence, warnings: [] }; },
+  };
+}
+
+test('a PDF attachment fills in what a thin body could not', async () => {
+  const provider = providerWithAttachment({ bodyText: 'Your e-bill is attached. Thanks for being a customer.' });
+  const pdfParser = fakePdfParser({ amountDue: 203.17, dueDate: '2026-08-08', confidence: 0.95, warnings: [] });
+
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1', pdfParser });
+
+  assert.equal(result.billsAccepted.length, 1);
+  const bill = result.billsAccepted[0];
+  assert.equal(bill.amountDue, 203.17);
+  assert.equal(bill.dueDate, '2026-08-08');
+  assert.equal(bill.source, 'pdf', 'a bill resolved via the attachment is sourced as pdf, not email');
+  assert.equal(bill.sourceDocumentId, 'att_1');
+});
+
+test('a message with no PDF attachment is unaffected by pdfParser being present', async () => {
+  const provider = createMockEmailProvider();
+  const pdfParser = fakePdfParser({ amountDue: 999, dueDate: '2026-01-01', confidence: 1, warnings: [] });
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1', pdfParser });
+  assert.ok(!result.billsAccepted.some((b) => b.amountDue === 999), 'pdfParser must never be consulted without an attachment');
+});
+
+test('a body that already parses fully is not overridden by the PDF fallback', async () => {
+  const provider = providerWithAttachment({
+    bodyText: 'Total Amount Due $50.00\nDue Date: 08/01/2026',
+  });
+  const pdfParser = fakePdfParser({ amountDue: 999, dueDate: '2026-01-01', confidence: 1, warnings: [] });
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1', pdfParser });
+  assert.equal(result.billsAccepted[0].amountDue, 50, 'the fallback only runs when the body parse is incomplete');
+  assert.equal(result.billsAccepted[0].source, 'email');
+});
+
+test('a PDF that also fails to parse leaves the message skipped, not accepted with garbage', async () => {
+  const provider = providerWithAttachment({ bodyText: 'Your e-bill is attached.' });
+  const pdfParser = fakePdfParser({ amountDue: undefined, dueDate: undefined, confidence: 0, warnings: ['empty'] });
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1', pdfParser });
+  assert.equal(result.billsAccepted.length, 0);
+  assert.equal(result.needsReview.length, 0);
+  assert.ok(result.skipped.some((s) => s.messageId === 'msg_pdf_1'));
+});
+
+test('a getAttachment failure is recorded as an error but does not abort the whole sync', async () => {
+  const provider = providerWithAttachment({ bodyText: 'Your e-bill is attached.' });
+  provider.getAttachment = async () => { throw new Error('network blip'); };
+  const pdfParser = fakePdfParser({ amountDue: 1, dueDate: '2026-01-01', confidence: 1, warnings: [] });
+
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1', pdfParser });
+  assert.ok(result.errors.some((e) => e.stage === 'pdf' && /network blip/.test(e.message)));
+});
+
+test('no pdfParser option means an attachment is simply never looked at', async () => {
+  const provider = providerWithAttachment({ bodyText: 'Your e-bill is attached.' });
+  const result = await ingestBillsFromEmail(provider, { householdId: 'h1' });
+  assert.equal(result.billsAccepted.length, 0);
+  assert.equal(result.errors.length, 0, 'no pdfParser means no attempt, not a failed attempt');
+});
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
