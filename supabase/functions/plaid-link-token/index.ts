@@ -12,7 +12,12 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const PLAID_ENV = Deno.env.get('PLAID_ENV') ?? 'production';
+// Trimmed at the point of use, not just here: a value pasted from a chat
+// message or a notes app routinely carries an invisible trailing newline, and
+// Deno.env.get() returns it verbatim. Refusing to work until a human retypes a
+// 24-character hex string by hand is a worse fix than simply not caring about
+// whitespace that has no bearing on the credential itself.
+const PLAID_ENV = (Deno.env.get('PLAID_ENV') ?? 'production').trim().toLowerCase();
 const PLAID_HOST = `https://${PLAID_ENV}.plaid.com`;
 
 const cors = {
@@ -24,8 +29,8 @@ const cors = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const clientId = Deno.env.get('PLAID_CLIENT_ID');
-  const secret = Deno.env.get('PLAID_SECRET');
+  const clientId = Deno.env.get('PLAID_CLIENT_ID')?.trim();
+  const secret = Deno.env.get('PLAID_SECRET')?.trim();
 
   // Fail loudly and specifically. "Plaid is not configured" is actionable;
   // a generic 500 sends someone hunting through logs.

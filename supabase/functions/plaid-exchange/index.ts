@@ -11,7 +11,10 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const PLAID_ENV = Deno.env.get('PLAID_ENV') ?? 'production';
+// Trimmed at the point of use: a pasted value routinely carries an invisible
+// trailing newline, and requiring a human to retype a credential by hand to
+// dodge that is a worse fix than not caring about whitespace.
+const PLAID_ENV = (Deno.env.get('PLAID_ENV') ?? 'production').trim().toLowerCase();
 const PLAID_HOST = `https://${PLAID_ENV}.plaid.com`;
 
 const cors = {
@@ -34,8 +37,8 @@ function mapAccountType(type: string, subtype: string | null) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const clientId = Deno.env.get('PLAID_CLIENT_ID');
-  const secret = Deno.env.get('PLAID_SECRET');
+  const clientId = Deno.env.get('PLAID_CLIENT_ID')?.trim();
+  const secret = Deno.env.get('PLAID_SECRET')?.trim();
   if (!clientId || !secret) {
     return json({
       error: 'not_configured',
