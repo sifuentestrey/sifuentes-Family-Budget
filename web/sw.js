@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -44,6 +44,11 @@ const SHELL_ASSETS = [
   '../src/engine/subscriptions.js',
   '../src/engine/forecast.js',
   '../src/engine/alerts.js',
+  // Payroll: shift logging computes its forecast client-side, so these must be
+  // cached alongside the engines or the Shifts view breaks offline.
+  '../src/domain/payroll.js',
+  '../src/payroll/pay-calculator.js',
+  '../src/payroll/forecast.js',
 ];
 
 self.addEventListener('install', (event) => {

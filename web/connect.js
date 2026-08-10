@@ -58,6 +58,47 @@ export async function listConnectedItems() {
   return data ?? [];
 }
 
+/**
+ * Household members, so the Connect tab can show who is actually in here.
+ *
+ * RLS scopes this to the caller's own household, so there is no filter to pass
+ * and no way to widen it from the browser.
+ */
+export async function listMembers() {
+  const { data, error } = await supabase
+    .from('household_members')
+    .select('user_id, display_name, created_at')
+    .order('created_at');
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function listInvites() {
+  const { data, error } = await supabase
+    .from('household_invites')
+    .select('id, email, created_at, expires_at, accepted_at')
+    .is('accepted_at', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Issue an invite. The household is taken from the caller's own membership
+ * inside the function — it is deliberately not a parameter, so this cannot be
+ * used to add someone to a household the caller isn't in.
+ */
+export async function createInvite(email) {
+  const { data, error } = await supabase.rpc('create_household_invite', { invite_email: email });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function revokeInvite(id) {
+  const { error } = await supabase.from('household_invites').delete().eq('id', id);
+  if (error) throw error;
+}
+
 async function callFunction(name, body) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');

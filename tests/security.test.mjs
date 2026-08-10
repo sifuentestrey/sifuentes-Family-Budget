@@ -265,3 +265,106 @@ test('no provider adapter hardcodes a credential', () => {
       `possible hardcoded credential in ${file.replace(ROOT, '')}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Invite-only signup (0006)
+// ---------------------------------------------------------------------------
+
+const inviteSchema = readFileSync(join(ROOT, 'supabase/migrations/0006_invite_only_signup.sql'), 'utf8');
+
+test('household_invites is RLS-protected and household-scoped', () => {
+  assert.match(inviteSchema, /alter table household_invites\s+enable row level security/i);
+  assert.match(inviteSchema, /create policy \w+ on household_invites/i);
+  const policy = inviteSchema.match(/create policy \w+ on household_invites[\s\S]*?;/i)[0];
+  assert.match(policy, /current_household_ids\(\)/);
+});
+
+test('the signup hook is callable only by the auth server', () => {
+  // Exposed to authenticated, it becomes an oracle for which addresses hold a
+  // pending invite. Exposed to anon, it is that for anyone at all.
+  assert.match(
+    inviteSchema,
+    /revoke execute on function public\.hook_restrict_signup\(jsonb\) from public, anon, authenticated/i,
+  );
+  assert.match(
+    inviteSchema,
+    /grant execute on function public\.hook_restrict_signup\(jsonb\) to supabase_auth_admin/i,
+  );
+});
+
+test('the signup hook denies by default', () => {
+  const fn = inviteSchema.match(/create or replace function public\.hook_restrict_signup[\s\S]*?\$\$;/i)[0];
+  // The final statement before the function ends must be a rejection, so an
+  // address that matches no branch is refused rather than waved through.
+  const returns = [...fn.matchAll(/return ([^;]+);/g)].map((m) => m[1]);
+  assert.match(returns.at(-1), /error/, 'hook must fall through to a denial');
+  assert.match(fn, /expires_at > now\(\)/, 'expired invites must not admit anyone');
+  assert.match(fn, /accepted_at is null/, 'a used invite must not admit a second person');
+});
+
+test('invites cannot be issued for someone else\'s household', () => {
+  const fn = inviteSchema.match(/create or replace function create_household_invite[\s\S]*?\$\$;/i)[0];
+  // The household is derived from the caller's own membership. If it were ever
+  // taken from an argument, any signed-in user could add themselves anywhere.
+  assert.doesNotMatch(fn, /create_household_invite\([^)]*household_id/i);
+  assert.match(fn, /from household_members\s+where user_id = auth\.uid\(\)/i);
+});
+
+test('an invited user joins the inviting household rather than creating one', () => {
+  const fn = inviteSchema.match(/create or replace function bootstrap_household[\s\S]*?\$\$;/i)[0];
+  assert.match(fn, /from household_invites/i, 'bootstrap must consult pending invites');
+  assert.match(fn, /accepted_at = now\(\)/i, 'the invite must be consumed on acceptance');
+  // The invite lookup has to happen before the create-a-household fallback,
+  // or the second person in a couple silently gets their own empty household.
+  assert.ok(
+    fn.indexOf('from household_invites') < fn.indexOf('insert into households'),
+    'invite lookup must precede household creation',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Sync endpoint authentication
+// ---------------------------------------------------------------------------
+
+const syncFn = readFileSync(
+  join(ROOT, 'supabase/functions/sync-transactions/index.ts'), 'utf8',
+);
+// Comments describe the bug being guarded against and legitimately quote it,
+// so scan executable code only — otherwise documenting a vulnerability trips
+// the test that exists to prevent it.
+const syncCode = syncFn
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+
+test('the sync endpoint never compares against an interpolated env var', () => {
+  // The original check was `authHeader !== `Bearer ${Deno.env.get('SYNC_SECRET')}``.
+  // With the variable unset that interpolates to the literal "Bearer undefined",
+  // which anyone can send — confirmed returning 200 against the live deployment.
+  // Any comparison that embeds a possibly-undefined lookup has the same hole.
+  assert.doesNotMatch(
+    syncCode,
+    /Bearer \$\{\s*Deno\.env\.get/,
+    'bearer comparison interpolates an env lookup that may be undefined',
+  );
+});
+
+test('the sync endpoint fails closed when no secret is configured', () => {
+  // Missing configuration must refuse every caller, not admit them.
+  assert.match(syncFn, /if \(!expected/, 'missing secret must short-circuit to a refusal');
+  assert.match(syncFn, /return null;/, 'expectedSecret must be able to report "unconfigured"');
+});
+
+test('the sync secret is compared in constant time', () => {
+  assert.match(syncFn, /function secretsMatch/);
+  assert.match(syncFn, /\^/, 'comparison should xor rather than short-circuit');
+});
+
+test('edge function JWT settings are pinned in config, not the dashboard', () => {
+  const config = readFileSync(join(ROOT, 'supabase/config.toml'), 'utf8');
+  // sync-transactions runs with verify_jwt off because pg_cron presents a
+  // Vault secret, not a user JWT. That makes its own check the only gate, so
+  // the setting must be recorded next to the reasoning rather than being a
+  // dashboard toggle nobody can see in review.
+  assert.match(config, /\[functions\.sync-transactions\][\s\S]*?verify_jwt = false/);
+  assert.match(config, /\[functions\.plaid-exchange\][\s\S]*?verify_jwt = true/);
+});

@@ -1,0 +1,22 @@
+project_id = "ytkpthlhtbxtvtadepqt"
+
+# Per-function JWT settings. The CLI applies these on deploy, so they are part
+# of the repo rather than something to remember to re-set in the dashboard.
+
+[functions.plaid-link-token]
+verify_jwt = true
+
+[functions.plaid-exchange]
+verify_jwt = true
+
+# Unauthenticated on purpose: it has to be checkable before any user account
+# exists, and the only thing it discloses is that this project intends to talk
+# to Plaid. It never echoes a credential value.
+[functions.plaid-health]
+verify_jwt = false
+
+# Called by pg_cron, which presents a Vault-held bearer token rather than a
+# user JWT. The function does its own constant-time check against that secret
+# and refuses when none is configured, so this is not an open endpoint.
+[functions.sync-transactions]
+verify_jwt = false

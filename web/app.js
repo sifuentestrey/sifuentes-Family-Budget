@@ -17,6 +17,8 @@ import { allocateSeries, findExtraPaycheckMonths } from '../src/engine/allocate.
 import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js';
 import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
+import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
+import { makeTimeEntry, makePayProfile, validatePayProfile } from '../src/domain/payroll.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
 // from a CDN, and the rest of this app is explicitly designed to run
@@ -34,6 +36,49 @@ async function loadConnect() {
   return connectModule;
 }
 
+// Same reasoning as loadConnect: shifts.js imports the Supabase client, so it
+// stays out of the initial module graph.
+let shiftsModule = null;
+async function loadShifts() {
+  if (!shiftsModule) shiftsModule = await import('./shifts.js');
+  return shiftsModule;
+}
+
+/**
+ * Load the pay profile and this period's shifts.
+ *
+ * Needs a household, so it runs only once the Connect tab has established a
+ * session. Errors stay on this view for the same reason connection errors stay
+ * on Connect — the fixture dashboard must keep working regardless.
+ */
+async function refreshShifts() {
+  state.shiftsError = null;
+  if (!state.session || !state.householdId) return;
+
+  let shifts;
+  try {
+    shifts = await loadShifts();
+  } catch {
+    state.shiftsError = 'Could not load the shift library. Check your network and reload.';
+    return;
+  }
+
+  try {
+    state.payProfile = await shifts.getPayProfile();
+    if (!state.payProfile) {
+      state.timeEntries = [];
+      return;
+    }
+    const upcoming = nextPayPeriod(state.payProfile);
+    state.payPeriod = upcoming;
+    state.timeEntries = upcoming
+      ? await shifts.listTimeEntries(upcoming.period.start, upcoming.period.end)
+      : [];
+  } catch (e) {
+    state.shiftsError = e.message;
+  }
+}
+
 const state = {
   transactions: [],
   streams: [],
@@ -44,6 +89,18 @@ const state = {
   session: null,
   householdId: null,
   connectedItems: [],
+  members: [],
+  invites: [],
+  inviteError: null,
+  inviteNotice: null,
+  inviteBusy: false,
+  payProfile: null,
+  payPeriod: null,
+  timeEntries: [],
+  shiftsError: null,
+  shiftsBusy: false,
+  shiftsAttempted: false,
+  editingProfile: false,
   connectAttempted: false,
   authNotice: null,
   connectBusy: false,
@@ -120,11 +177,17 @@ async function refreshConnection() {
   if (!state.session) {
     state.householdId = null;
     state.connectedItems = [];
+    state.members = [];
+    state.invites = [];
     return;
   }
   try {
     state.householdId = await connect.ensureHousehold();
-    state.connectedItems = await connect.listConnectedItems();
+    [state.connectedItems, state.members, state.invites] = await Promise.all([
+      connect.listConnectedItems(),
+      connect.listMembers(),
+      connect.listInvites(),
+    ]);
   } catch (e) {
     state.connectError = e.message;
   }
@@ -276,6 +339,7 @@ function renderNav() {
     ['review', 'Review'],
     ['trends', 'Trends'],
     ['income', 'Income'],
+    ['shifts', 'Shifts'],
     ['connect', 'Connect'],
   ];
   const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
@@ -924,11 +988,255 @@ function renderConnect() {
       `}
     </div>
 
+    <div class="step">
+      <div class="step-head"><span class="step-title">Who's in this household</span></div>
+      <div class="stream-list" style="margin-top:10px;">
+        ${state.members.map((m) => `
+          <div class="stream">
+            <div class="stream-head">
+              <span class="stream-payee">${m.display_name}</span>
+              ${m.user_id === state.session.user.id ? '<span class="pill stable">you</span>' : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <p class="step-why" style="margin-top:14px;">
+        Signup is invite-only. Anyone who finds this page can open it, but they cannot
+        create an account unless someone here invites their email address first.
+      </p>
+
+      <form id="invite-form">
+        <input type="email" name="email" placeholder="Their email address" required
+          style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
+        ${state.inviteNotice ? `<div class="banner banner-good" style="margin-top:8px;">${state.inviteNotice}</div>` : ''}
+        ${state.inviteError ? `<div class="banner banner-warn" style="margin-top:8px;">${state.inviteError}</div>` : ''}
+        <button type="submit" class="link" ${state.inviteBusy ? 'disabled' : ''}
+          style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-top:10px;display:inline-block;">
+          ${state.inviteBusy ? 'Inviting…' : 'Send invite'}
+        </button>
+      </form>
+
+      ${state.invites.length === 0 ? '' : `
+        <div class="stream-list" style="margin-top:14px;">
+          ${state.invites.map((inv) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${inv.email}</span>
+                <button class="link" data-action="revoke-invite" data-id="${inv.id}">Revoke</button>
+              </div>
+              <div class="stream-meta">
+                Invited — can create an account until ${new Date(inv.expires_at).toLocaleDateString()}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+
     <div class="disclaimer">
       Connecting a bank replaces nothing shown elsewhere in this app yet — the rest of the
       dashboard still runs on demo data until live sync is wired into the other views.
     </div>
   `;
+}
+
+const FIELD_STYLE =
+  'width:100%;margin-top:6px;padding:10px;border-radius:8px;border:1px solid var(--border);' +
+  'background:var(--bg);color:var(--text);font:inherit;';
+const BUTTON_STYLE =
+  'text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);' +
+  'color:var(--accent);font-weight:600;margin-top:10px;display:inline-block;';
+
+function field(label, name, type, value, extra = '') {
+  return `
+    <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
+      ${label}
+      <input type="${type}" name="${name}" value="${value ?? ''}" style="${FIELD_STYLE}" ${extra} />
+    </label>`;
+}
+
+/**
+ * Shift logging and the forecast it feeds.
+ *
+ * This is the one number Plaid cannot produce. A bank feed shows the deposit
+ * after it has landed; for income that swings with how many shifts were worked,
+ * knowing the check in advance is the whole point.
+ */
+function renderShifts() {
+  if (!state.session) {
+    return `
+      <div class="note-box">
+        <strong>Sign in to log shifts.</strong>
+        Shifts are shared across the household, so they live in the database
+        rather than on one phone — open the Connect tab to sign in.
+      </div>`;
+  }
+
+  if (state.shiftsError) {
+    return `<div class="banner banner-warn">${state.shiftsError}</div>`;
+  }
+
+  const p = state.payProfile;
+
+  if (!p || state.editingProfile) {
+    return `
+      <div class="note-box">
+        <strong>How you get paid.</strong>
+        Two defaults here are deliberately not the usual ones, because the usual
+        ones are wrong for call work — see the notes under each.
+      </div>
+      <form id="pay-profile-form" class="step">
+        <div class="step-head"><span class="step-title">${p ? 'Edit pay setup' : 'Set up your pay'}</span></div>
+        ${field('Label', 'label', 'text', p?.label ?? 'Primary', 'required')}
+        ${field('Employer (optional)', 'employerName', 'text', p?.employerName ?? '')}
+        ${field('Base hourly rate', 'baseHourlyRate', 'number', p?.baseHourlyRate ?? '', 'step="0.01" min="0.01" required')}
+        ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+
+        ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required')}
+        <p class="step-why">
+          <strong>0 disables it</strong>, which is the right default for a compressed
+          schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of
+          overtime that you were never paid — roughly 8 phantom hours a week.
+        </p>
+
+        ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
+
+        ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required')}
+        <p class="step-why">
+          Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a
+          2-hour minimum pay 4 hours, not 1.
+        </p>
+
+        ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+        ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required')}
+        <p class="step-why">
+          Standby is time on call. It pays its own rate and never counts toward an
+          overtime threshold.
+        </p>
+
+        <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
+          Pay frequency
+          <select name="payFrequency" style="${FIELD_STYLE}">
+            ${['weekly', 'biweekly', 'semimonthly', 'monthly'].map((f) => `
+              <option value="${f}" ${(p?.payFrequency ?? 'biweekly') === f ? 'selected' : ''}>${f}</option>
+            `).join('')}
+          </select>
+        </label>
+
+        ${field('A pay period you know: start', 'payPeriodStart', 'date', p?.payPeriodStart ?? '', 'required')}
+        ${field('…and its end', 'payPeriodEnd', 'date', p?.payPeriodEnd ?? '', 'required')}
+        ${field('…and the payday for it', 'payday', 'date', p?.payday ?? '', 'required')}
+        <p class="step-why">
+          Periods are walked forward from this anchor rather than computed from
+          today, so they stay aligned to your employer's actual calendar.
+        </p>
+
+        ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
+          p?.taxAssumptions?.federalRate != null
+            ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
+            : 18, 'step="1" min="0" max="60" required')}
+        <p class="step-why">
+          A starting guess for federal + state. Social Security and Medicare are
+          added automatically. Once you enter a real paystub the app learns your
+          actual effective rate — that is usually the biggest source of error in a
+          take-home estimate.
+        </p>
+
+        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.shiftsBusy ? 'disabled' : ''}>
+          ${state.shiftsBusy ? 'Saving…' : 'Save pay setup'}
+        </button>
+        ${p ? `<button type="button" data-action="cancel-profile" class="link" style="margin-left:10px;">Cancel</button>` : ''}
+      </form>`;
+  }
+
+  const period = state.payPeriod;
+  const forecast = period
+    ? forecastPaycheck({
+      profile: p,
+      entries: state.timeEntries,
+      period: period.period,
+      payDate: period.payDate,
+    })
+    : null;
+
+  return `
+    ${forecast ? `
+      <div class="step">
+        <div class="step-head">
+          <span class="step-title">Next check — ${new Date(`${forecast.payDate}T00:00:00`).toLocaleDateString()}</span>
+          <span class="pill ${forecast.confidence === 'high' ? 'stable' : 'variable'}">${forecast.confidence} confidence</span>
+        </div>
+        <div class="big-number">${moneyExact(forecast.estimatedNet)}</div>
+        <div class="stream-meta">
+          Estimated take-home for ${forecast.period.start} → ${forecast.period.end}.
+          ${forecast.daysCovered} of ${forecast.daysInPeriod} days logged.
+        </div>
+        <div class="stream-list" style="margin-top:12px;">
+          <div class="stream"><div class="stream-head">
+            <span class="stream-payee">Gross</span><span>${moneyExact(forecast.breakdown.totalGross)}</span></div></div>
+          <div class="stream"><div class="stream-head">
+            <span class="stream-payee">Taxes</span><span>−${moneyExact(forecast.breakdown.totalTaxes)}</span></div></div>
+          <div class="stream"><div class="stream-head">
+            <span class="stream-payee">Deductions</span><span>−${moneyExact(forecast.breakdown.totalDeductions)}</span></div></div>
+        </div>
+        ${forecast.confidenceReasons.length ? `
+          <p class="step-why" style="margin-top:10px;">
+            ${forecast.confidenceReasons.join(' · ')}
+          </p>` : ''}
+      </div>` : `
+      <div class="banner banner-warn">
+        No upcoming pay period — check the anchor dates in your pay setup.
+      </div>`}
+
+    <div class="step">
+      <div class="step-head">
+        <span class="step-title">Log a shift</span>
+        <button data-action="edit-profile" class="link">Pay setup</button>
+      </div>
+      <form id="shift-form">
+        ${field('Date', 'date', 'date', new Date().toISOString().slice(0, 10), 'required')}
+        ${field('Hours worked', 'regularHours', 'number', '', 'step="0.25" min="0" required')}
+        ${field('Callback hours', 'callbackHours', 'number', '', 'step="0.25" min="0"')}
+        ${field('Number of callouts', 'callbackEvents', 'number', '', 'step="1" min="0"')}
+        ${field('Standby hours (on call)', 'standbyHours', 'number', '', 'step="0.25" min="0"')}
+        ${field('Holiday hours', 'holidayHours', 'number', '', 'step="0.25" min="0"')}
+        ${field('PTO hours', 'ptoHours', 'number', '', 'step="0.25" min="0"')}
+        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.shiftsBusy ? 'disabled' : ''}>
+          ${state.shiftsBusy ? 'Saving…' : 'Add shift'}
+        </button>
+      </form>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="step-title">This period</span></div>
+      ${state.timeEntries.length === 0 ? `
+        <p class="step-why">No shifts logged for this period yet.</p>` : `
+        <div class="stream-list" style="margin-top:10px;">
+          ${state.timeEntries.map((e) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${new Date(`${e.date}T00:00:00`).toLocaleDateString()}</span>
+                <button class="link" data-action="delete-shift" data-id="${e.id}">Remove</button>
+              </div>
+              <div class="stream-meta">
+                ${[
+                  e.regularHours ? `${e.regularHours}h worked` : '',
+                  e.callbackEvents ? `${e.callbackEvents} callout${e.callbackEvents > 1 ? 's' : ''} (${e.callbackHours}h)` : '',
+                  e.standbyHours ? `${e.standbyHours}h standby` : '',
+                  e.holidayHours ? `${e.holidayHours}h holiday` : '',
+                  e.ptoHours ? `${e.ptoHours}h PTO` : '',
+                ].filter(Boolean).join(' · ')}
+              </div>
+            </div>`).join('')}
+        </div>`}
+    </div>
+
+    <div class="disclaimer">
+      An estimate from the hours logged here, not a promise from your employer.
+      Enter a real paystub once one arrives and the app corrects its own tax
+      assumptions against it.
+    </div>`;
 }
 
 function renderInstallHint() {
@@ -991,6 +1299,7 @@ function render() {
     review: renderReview,
     trends: renderTrends,
     income: renderIncome,
+    shifts: renderShifts,
     connect: renderConnect,
   }[state.view]();
 
@@ -1027,6 +1336,17 @@ function render() {
           const form = document.getElementById('auth-form');
           if (!form || (!form.email.value && !form.password.value)) render();
         });
+      }
+      // Shifts needs the same session, and reaching it without passing through
+      // Connect is normal once signed in — so it establishes the session too
+      // rather than showing an empty state that a reload would fix.
+      if (state.view === 'shifts' && !state.shiftsAttempted) {
+        state.shiftsAttempted = true;
+        const haveSession = state.connectAttempted;
+        state.connectAttempted = true; // don't make Connect redo this
+        (haveSession ? Promise.resolve() : refreshConnection())
+          .then(refreshShifts)
+          .then(render);
       }
       render(); // shows the view immediately either way
     }),
@@ -1076,6 +1396,7 @@ function render() {
           await connect.signIn(email, password);
         }
         await refreshConnection();
+        await refreshShifts();
       } catch (e) {
         state.authError = e.message;
       }
@@ -1088,6 +1409,9 @@ function render() {
     signOutBtn.addEventListener('click', async () => {
       const connect = await loadConnect();
       await connect.signOut();
+      state.payProfile = null;
+      state.timeEntries = [];
+      state.payPeriod = null;
       await refreshConnection();
       render();
     });
@@ -1110,6 +1434,166 @@ function render() {
       render();
     });
   }
+
+  const inviteForm = document.getElementById('invite-form');
+  if (inviteForm) {
+    inviteForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const email = inviteForm.email.value.trim();
+      state.inviteBusy = true;
+      state.inviteError = null;
+      state.inviteNotice = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.createInvite(email);
+        // Deliberately not an email — no mail provider is configured, and
+        // inventing one would mean an invite that silently never arrives.
+        // Telling them to pass the link along is honest and works today.
+        state.inviteNotice =
+          `${email} can now create an account. Send them this page's link — ` +
+          `they sign up with that address and land straight in this household.`;
+        await refreshConnection();
+      } catch (e) {
+        state.inviteError = e.message;
+      }
+      state.inviteBusy = false;
+      render();
+    });
+  }
+
+  const profileForm = document.getElementById('pay-profile-form');
+  if (profileForm) {
+    profileForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = profileForm;
+      const num = (name) => Number(f[name].value);
+
+      // Social Security and Medicare are statutory and not the user's to guess,
+      // so only the income-tax portion comes from the form.
+      const incomeTaxRate = num('taxRate') / 100;
+      const profile = makePayProfile({
+        label: f.label.value.trim(),
+        employerName: f.employerName.value.trim(),
+        baseHourlyRate: num('baseHourlyRate'),
+        overtimeMultiplier: num('overtimeMultiplier'),
+        dailyOvertimeThreshold: num('dailyOvertimeThreshold'),
+        weeklyOvertimeThreshold: num('weeklyOvertimeThreshold'),
+        callbackMinimumHours: num('callbackMinimumHours'),
+        callbackMultiplier: num('callbackMultiplier'),
+        standbyRate: num('standbyRate'),
+        payFrequency: f.payFrequency.value,
+        payPeriodStart: f.payPeriodStart.value,
+        payPeriodEnd: f.payPeriodEnd.value,
+        payday: f.payday.value,
+        taxAssumptions: {
+          federalRate: incomeTaxRate,
+          stateRate: 0,
+          socialSecurityRate: 0.062,
+          medicareRate: 0.0145,
+        },
+      });
+
+      const problems = validatePayProfile(profile);
+      if (problems.length) {
+        state.shiftsError = problems.join('. ');
+        render();
+        return;
+      }
+
+      state.shiftsBusy = true;
+      state.shiftsError = null;
+      render();
+      try {
+        const shifts = await loadShifts();
+        await shifts.savePayProfile(profile, state.householdId, state.payProfile?.id);
+        state.editingProfile = false;
+        await refreshShifts();
+      } catch (e) {
+        state.shiftsError = e.message;
+      }
+      state.shiftsBusy = false;
+      render();
+    });
+  }
+
+  const shiftForm = document.getElementById('shift-form');
+  if (shiftForm) {
+    shiftForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = shiftForm;
+      const num = (name) => Number(f[name].value || 0);
+
+      const entry = makeTimeEntry({
+        date: f.date.value,
+        regularHours: num('regularHours'),
+        callbackHours: num('callbackHours'),
+        callbackEvents: f.callbackEvents.value ? num('callbackEvents') : undefined,
+        standbyHours: num('standbyHours'),
+        holidayHours: num('holidayHours'),
+        ptoHours: num('ptoHours'),
+      });
+
+      state.shiftsBusy = true;
+      state.shiftsError = null;
+      render();
+      try {
+        const shifts = await loadShifts();
+        await shifts.saveTimeEntry(entry, state.householdId, state.payProfile.id);
+        await refreshShifts();
+      } catch (e) {
+        state.shiftsError = e.message;
+      }
+      state.shiftsBusy = false;
+      render();
+    });
+  }
+
+  const editProfileBtn = app.querySelector('[data-action="edit-profile"]');
+  if (editProfileBtn) {
+    editProfileBtn.addEventListener('click', () => {
+      state.editingProfile = true;
+      render();
+    });
+  }
+
+  const cancelProfileBtn = app.querySelector('[data-action="cancel-profile"]');
+  if (cancelProfileBtn) {
+    cancelProfileBtn.addEventListener('click', () => {
+      state.editingProfile = false;
+      state.shiftsError = null;
+      render();
+    });
+  }
+
+  app.querySelectorAll('[data-action="delete-shift"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.shiftsError = null;
+      try {
+        const shifts = await loadShifts();
+        await shifts.deleteTimeEntry(btn.dataset.id);
+        await refreshShifts();
+      } catch (e) {
+        state.shiftsError = e.message;
+      }
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-action="revoke-invite"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.inviteError = null;
+      state.inviteNotice = null;
+      try {
+        const connect = await loadConnect();
+        await connect.revokeInvite(btn.dataset.id);
+        await refreshConnection();
+      } catch (e) {
+        state.inviteError = e.message;
+      }
+      render();
+    });
+  });
 }
 
 load().then(render).catch((e) => {
