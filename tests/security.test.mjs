@@ -265,3 +265,59 @@ test('no provider adapter hardcodes a credential', () => {
       `possible hardcoded credential in ${file.replace(ROOT, '')}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Invite-only signup (0006)
+// ---------------------------------------------------------------------------
+
+const inviteSchema = readFileSync(join(ROOT, 'supabase/migrations/0006_invite_only_signup.sql'), 'utf8');
+
+test('household_invites is RLS-protected and household-scoped', () => {
+  assert.match(inviteSchema, /alter table household_invites\s+enable row level security/i);
+  assert.match(inviteSchema, /create policy \w+ on household_invites/i);
+  const policy = inviteSchema.match(/create policy \w+ on household_invites[\s\S]*?;/i)[0];
+  assert.match(policy, /current_household_ids\(\)/);
+});
+
+test('the signup hook is callable only by the auth server', () => {
+  // Exposed to authenticated, it becomes an oracle for which addresses hold a
+  // pending invite. Exposed to anon, it is that for anyone at all.
+  assert.match(
+    inviteSchema,
+    /revoke execute on function public\.hook_restrict_signup\(jsonb\) from public, anon, authenticated/i,
+  );
+  assert.match(
+    inviteSchema,
+    /grant execute on function public\.hook_restrict_signup\(jsonb\) to supabase_auth_admin/i,
+  );
+});
+
+test('the signup hook denies by default', () => {
+  const fn = inviteSchema.match(/create or replace function public\.hook_restrict_signup[\s\S]*?\$\$;/i)[0];
+  // The final statement before the function ends must be a rejection, so an
+  // address that matches no branch is refused rather than waved through.
+  const returns = [...fn.matchAll(/return ([^;]+);/g)].map((m) => m[1]);
+  assert.match(returns.at(-1), /error/, 'hook must fall through to a denial');
+  assert.match(fn, /expires_at > now\(\)/, 'expired invites must not admit anyone');
+  assert.match(fn, /accepted_at is null/, 'a used invite must not admit a second person');
+});
+
+test('invites cannot be issued for someone else\'s household', () => {
+  const fn = inviteSchema.match(/create or replace function create_household_invite[\s\S]*?\$\$;/i)[0];
+  // The household is derived from the caller's own membership. If it were ever
+  // taken from an argument, any signed-in user could add themselves anywhere.
+  assert.doesNotMatch(fn, /create_household_invite\([^)]*household_id/i);
+  assert.match(fn, /from household_members\s+where user_id = auth\.uid\(\)/i);
+});
+
+test('an invited user joins the inviting household rather than creating one', () => {
+  const fn = inviteSchema.match(/create or replace function bootstrap_household[\s\S]*?\$\$;/i)[0];
+  assert.match(fn, /from household_invites/i, 'bootstrap must consult pending invites');
+  assert.match(fn, /accepted_at = now\(\)/i, 'the invite must be consumed on acceptance');
+  // The invite lookup has to happen before the create-a-household fallback,
+  // or the second person in a couple silently gets their own empty household.
+  assert.ok(
+    fn.indexOf('from household_invites') < fn.indexOf('insert into households'),
+    'invite lookup must precede household creation',
+  );
+});

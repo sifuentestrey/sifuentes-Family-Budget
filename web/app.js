@@ -44,6 +44,11 @@ const state = {
   session: null,
   householdId: null,
   connectedItems: [],
+  members: [],
+  invites: [],
+  inviteError: null,
+  inviteNotice: null,
+  inviteBusy: false,
   connectAttempted: false,
   authNotice: null,
   connectBusy: false,
@@ -120,11 +125,17 @@ async function refreshConnection() {
   if (!state.session) {
     state.householdId = null;
     state.connectedItems = [];
+    state.members = [];
+    state.invites = [];
     return;
   }
   try {
     state.householdId = await connect.ensureHousehold();
-    state.connectedItems = await connect.listConnectedItems();
+    [state.connectedItems, state.members, state.invites] = await Promise.all([
+      connect.listConnectedItems(),
+      connect.listMembers(),
+      connect.listInvites(),
+    ]);
   } catch (e) {
     state.connectError = e.message;
   }
@@ -924,6 +935,52 @@ function renderConnect() {
       `}
     </div>
 
+    <div class="step">
+      <div class="step-head"><span class="step-title">Who's in this household</span></div>
+      <div class="stream-list" style="margin-top:10px;">
+        ${state.members.map((m) => `
+          <div class="stream">
+            <div class="stream-head">
+              <span class="stream-payee">${m.display_name}</span>
+              ${m.user_id === state.session.user.id ? '<span class="pill stable">you</span>' : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <p class="step-why" style="margin-top:14px;">
+        Signup is invite-only. Anyone who finds this page can open it, but they cannot
+        create an account unless someone here invites their email address first.
+      </p>
+
+      <form id="invite-form">
+        <input type="email" name="email" placeholder="Their email address" required
+          style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
+        ${state.inviteNotice ? `<div class="banner banner-good" style="margin-top:8px;">${state.inviteNotice}</div>` : ''}
+        ${state.inviteError ? `<div class="banner banner-warn" style="margin-top:8px;">${state.inviteError}</div>` : ''}
+        <button type="submit" class="link" ${state.inviteBusy ? 'disabled' : ''}
+          style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-top:10px;display:inline-block;">
+          ${state.inviteBusy ? 'Inviting…' : 'Send invite'}
+        </button>
+      </form>
+
+      ${state.invites.length === 0 ? '' : `
+        <div class="stream-list" style="margin-top:14px;">
+          ${state.invites.map((inv) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${inv.email}</span>
+                <button class="link" data-action="revoke-invite" data-id="${inv.id}">Revoke</button>
+              </div>
+              <div class="stream-meta">
+                Invited — can create an account until ${new Date(inv.expires_at).toLocaleDateString()}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+
     <div class="disclaimer">
       Connecting a bank replaces nothing shown elsewhere in this app yet — the rest of the
       dashboard still runs on demo data until live sync is wired into the other views.
@@ -1110,6 +1167,48 @@ function render() {
       render();
     });
   }
+
+  const inviteForm = document.getElementById('invite-form');
+  if (inviteForm) {
+    inviteForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const email = inviteForm.email.value.trim();
+      state.inviteBusy = true;
+      state.inviteError = null;
+      state.inviteNotice = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.createInvite(email);
+        // Deliberately not an email — no mail provider is configured, and
+        // inventing one would mean an invite that silently never arrives.
+        // Telling them to pass the link along is honest and works today.
+        state.inviteNotice =
+          `${email} can now create an account. Send them this page's link — ` +
+          `they sign up with that address and land straight in this household.`;
+        await refreshConnection();
+      } catch (e) {
+        state.inviteError = e.message;
+      }
+      state.inviteBusy = false;
+      render();
+    });
+  }
+
+  app.querySelectorAll('[data-action="revoke-invite"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.inviteError = null;
+      state.inviteNotice = null;
+      try {
+        const connect = await loadConnect();
+        await connect.revokeInvite(btn.dataset.id);
+        await refreshConnection();
+      } catch (e) {
+        state.inviteError = e.message;
+      }
+      render();
+    });
+  });
 }
 
 load().then(render).catch((e) => {
