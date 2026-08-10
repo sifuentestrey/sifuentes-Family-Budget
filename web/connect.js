@@ -56,6 +56,46 @@ export async function ensureHousehold() {
   return data;
 }
 
+/**
+ * Non-bank provider connections (currently just Gmail). Bank connections live
+ * in `items`/`accounts` instead — this table is for everything added after,
+ * so it stays provider-agnostic rather than growing a column per integration.
+ */
+export async function listProviderConnections() {
+  const { data, error } = await supabase
+    .from('provider_connections')
+    .select('id, provider_key, display_name, kind, is_live, status, status_detail, connected_at, last_synced_at')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Start the Gmail OAuth flow. Unlike Plaid Link, this is a full-page redirect
+ * rather than a popup/modal — Google's consent screen is designed to be
+ * navigated to, not embedded, and gmail-oauth-callback redirects the browser
+ * straight back here once it's done.
+ */
+export async function connectGmail() {
+  const { url } = await callFunction('gmail-oauth-start');
+  window.location.href = url;
+}
+
+/**
+ * Drops the connection row so the UI stops treating Gmail as connected and
+ * the daily bill sync stops picking this household up.
+ *
+ * Does not revoke the underlying Google grant or purge the stored refresh
+ * token from Vault — reconnecting overwrites it, and revoking it entirely is
+ * one click at myaccount.google.com/permissions in the meantime. Read-only
+ * mail scope, so the residual risk of a lingering token is low; noted here
+ * rather than silently treated as fully handled.
+ */
+export async function disconnectGmail() {
+  const { error } = await supabase.from('provider_connections').delete().eq('provider_key', 'gmail');
+  if (error) throw error;
+}
+
 export async function listConnectedItems() {
   const { data, error } = await supabase
     .from('items')

@@ -19,6 +19,7 @@ import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile } from '../src/domain/payroll.js';
+import { daysUntilDue } from '../src/domain/bill.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
 // from a CDN, and the rest of this app is explicitly designed to run
@@ -42,6 +43,29 @@ let shiftsModule = null;
 async function loadShifts() {
   if (!shiftsModule) shiftsModule = await import('./shifts.js');
   return shiftsModule;
+}
+
+let billsModule = null;
+async function loadBills() {
+  if (!billsModule) billsModule = await import('./bills.js');
+  return billsModule;
+}
+
+/** Needs a household, same as shifts — runs once the Connect tab (or a
+ * direct visit to Bills after already having a session) has one. */
+async function refreshBills() {
+  state.billsError = null;
+  if (!state.session || !state.householdId) return;
+
+  try {
+    const bills = await loadBills();
+    [state.bills, state.billsNeedingReview] = await Promise.all([
+      bills.listBills(),
+      bills.listBillsNeedingReview(),
+    ]);
+  } catch (e) {
+    state.billsError = e.message;
+  }
 }
 
 /**
@@ -89,11 +113,15 @@ const state = {
   session: null,
   householdId: null,
   connectedItems: [],
+  providerConnections: [],
   members: [],
   invites: [],
   inviteError: null,
   inviteNotice: null,
   inviteBusy: false,
+  gmailBusy: false,
+  gmailNotice: null,
+  gmailError: null,
   payProfile: null,
   payPeriod: null,
   timeEntries: [],
@@ -101,6 +129,10 @@ const state = {
   shiftsBusy: false,
   shiftsAttempted: false,
   editingProfile: false,
+  bills: [],
+  billsNeedingReview: [],
+  billsError: null,
+  billsAttempted: false,
   connectAttempted: false,
   authNotice: null,
   connectBusy: false,
@@ -177,20 +209,48 @@ async function refreshConnection() {
   if (!state.session) {
     state.householdId = null;
     state.connectedItems = [];
+    state.providerConnections = [];
     state.members = [];
     state.invites = [];
     return;
   }
   try {
     state.householdId = await connect.ensureHousehold();
-    [state.connectedItems, state.members, state.invites] = await Promise.all([
+    [state.connectedItems, state.providerConnections, state.members, state.invites] = await Promise.all([
       connect.listConnectedItems(),
+      connect.listProviderConnections(),
       connect.listMembers(),
       connect.listInvites(),
     ]);
   } catch (e) {
     state.connectError = e.message;
   }
+}
+
+/**
+ * Gmail's OAuth redirect lands back on this exact page with `?gmail=...` —
+ * read it once on load, translate it into a banner, and strip it from the
+ * URL so refreshing the page doesn't replay the same notice.
+ */
+function consumeGmailOAuthReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('gmail');
+  if (!status) return;
+
+  const detail = params.get('gmail_detail');
+  if (status === 'connected') {
+    state.gmailNotice = 'Gmail connected. The first bill scan runs on the next daily sync.';
+  } else if (status === 'denied') {
+    state.gmailError = 'Gmail connection cancelled — consent was not granted.';
+  } else {
+    state.gmailError = `Could not connect Gmail${detail ? `: ${detail}` : ''}.`;
+  }
+
+  params.delete('gmail');
+  params.delete('gmail_detail');
+  const query = params.toString();
+  window.history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : ''));
+  state.view = 'connect';
 }
 
 /**
@@ -340,15 +400,17 @@ function renderNav() {
     ['trends', 'Trends'],
     ['income', 'Income'],
     ['shifts', 'Shifts'],
+    ['bills', 'Bills'],
     ['connect', 'Connect'],
   ];
   const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
+  const billsReviewCount = state.billsNeedingReview.length;
 
   return `
     <nav class="nav">
       ${views.map(([id, label]) => `
         <button class="nav-btn ${state.view === id ? 'active' : ''}" data-view="${id}">
-          ${label}${id === 'review' && reviewCount ? `<span class="badge">${reviewCount}</span>` : ''}
+          ${label}${id === 'review' && reviewCount ? `<span class="badge">${reviewCount}</span>` : ''}${id === 'bills' && billsReviewCount ? `<span class="badge">${billsReviewCount}</span>` : ''}
         </button>
       `).join('')}
     </nav>
@@ -989,6 +1051,50 @@ function renderConnect() {
     </div>
 
     <div class="step">
+      <div class="step-head">
+        <span class="step-title">Email (bills)</span>
+      </div>
+      ${state.gmailNotice ? `<div class="banner banner-good">${state.gmailNotice}</div>` : ''}
+      ${state.gmailError ? `<div class="banner banner-warn">${state.gmailError}</div>` : ''}
+      ${(() => {
+        const gmail = state.providerConnections.find((c) => c.provider_key === 'gmail');
+        if (!gmail || gmail.status === 'disconnected') {
+          return `
+            <p class="step-why">
+              Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
+              else — read-only access, no email is ever sent or modified. Google's own consent
+              screen is where you approve this, not this app.
+            </p>
+            <button data-action="connect-gmail" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;" ${state.gmailBusy ? 'disabled' : ''}>
+              ${state.gmailBusy ? 'Connecting…' : '+ Connect Gmail'}
+            </button>`;
+        }
+        const statusLabel = {
+          connected: 'connected', needs_reauth: 'needs reconnect', error: 'error',
+        }[gmail.status] ?? gmail.status;
+        return `
+          <div class="stream">
+            <div class="stream-head">
+              <span class="stream-payee">Gmail</span>
+              <span class="pill ${gmail.status === 'connected' ? 'stable' : 'variable'}">${statusLabel}</span>
+            </div>
+            <div class="stream-meta">
+              ${gmail.last_synced_at ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}` : 'Not scanned yet — runs on the next daily sync'}
+              ${gmail.status_detail ? ` · ${gmail.status_detail}` : ''}
+            </div>
+          </div>
+          <button data-action="disconnect-gmail" class="link" style="margin-top:10px;" ${state.gmailBusy ? 'disabled' : ''}>
+            ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
+          </button>
+          ${gmail.status === 'needs_reauth' ? `
+            <button data-action="connect-gmail" class="link" style="margin-top:10px;margin-left:8px;" ${state.gmailBusy ? 'disabled' : ''}>
+              Reconnect
+            </button>` : ''}
+        `;
+      })()}
+    </div>
+
+    <div class="step">
       <div class="step-head"><span class="step-title">Who's in this household</span></div>
       <div class="stream-list" style="margin-top:10px;">
         ${state.members.map((m) => `
@@ -1239,6 +1345,88 @@ function renderShifts() {
     </div>`;
 }
 
+/**
+ * Bills detected from Gmail. Plaid shows a payment after it lands; a bill is
+ * the one piece of information the household needs *before* that, which is
+ * the entire reason this exists rather than waiting for the bank feed.
+ */
+function renderBills() {
+  if (!state.session) {
+    return `
+      <div class="note-box">
+        <strong>Sign in to see bills.</strong>
+        Bills are shared across the household, so they live in the database —
+        open the Connect tab to sign in.
+      </div>`;
+  }
+
+  if (state.billsError) {
+    return `<div class="banner banner-warn">${state.billsError}</div>`;
+  }
+
+  const gmail = state.providerConnections.find((c) => c.provider_key === 'gmail');
+  if (!gmail || gmail.status === 'disconnected') {
+    return `
+      <div class="note-box">
+        <strong>No email connected yet.</strong>
+        Connect Gmail from the Connect tab to start finding bills automatically —
+        nothing here populates on its own before that.
+      </div>`;
+  }
+
+  const review = state.billsNeedingReview;
+  const bills = state.bills;
+  const urgency = (dueDate) => (daysUntilDue({ dueDate }) <= 7 ? 'variable' : 'stable');
+
+  return `
+    ${review.length ? `
+      <div class="step">
+        <div class="step-head"><span class="step-title">Needs review (${review.length})</span></div>
+        <p class="step-why">
+          Parsed with low confidence — confirm before it counts toward what's due, or
+          dismiss if this isn't actually a bill (a payment receipt, a promo email that
+          used billing language).
+        </p>
+        <div class="stream-list" style="margin-top:10px;">
+          ${review.map((b) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${b.providerName}</span>
+                <span class="pill variable">${moneyExact(b.amountDue)}</span>
+              </div>
+              <div class="stream-meta">Due ${b.dueDate} · confidence ${Math.round(b.confidence * 100)}%</div>
+              <div style="margin-top:8px;display:flex;gap:8px;">
+                <button class="link" data-action="confirm-bill" data-id="${b.id}">Confirm</button>
+                <button class="link" data-action="dismiss-bill" data-id="${b.id}">Dismiss</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="step">
+      <div class="step-head"><span class="step-title">Upcoming bills</span></div>
+      ${bills.length === 0 ? `
+        <p class="step-why">
+          No bills detected yet. ${gmail.last_synced_at ? 'The last scan found nothing due — check back after the next daily sync.' : 'The first scan runs on the next daily sync.'}
+        </p>` : `
+        <div class="stream-list" style="margin-top:10px;">
+          ${bills.map((b) => `
+            <div class="stream">
+              <div class="stream-head">
+                <span class="stream-payee">${b.providerName}</span>
+                <span class="pill ${urgency(b.dueDate)}">${moneyExact(b.amountDue)}</span>
+              </div>
+              <div class="stream-meta">Due ${b.dueDate} · ${b.category} · ${b.status}</div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
 function renderInstallHint() {
   const standalone =
     window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
@@ -1300,6 +1488,7 @@ function render() {
     trends: renderTrends,
     income: renderIncome,
     shifts: renderShifts,
+    bills: renderBills,
     connect: renderConnect,
   }[state.view]();
 
@@ -1346,6 +1535,16 @@ function render() {
         state.connectAttempted = true; // don't make Connect redo this
         (haveSession ? Promise.resolve() : refreshConnection())
           .then(refreshShifts)
+          .then(render);
+      }
+      // Same reasoning as Shifts: Bills needs a session and a household, and
+      // reaching it directly (already signed in, or a second visit) is normal.
+      if (state.view === 'bills' && !state.billsAttempted) {
+        state.billsAttempted = true;
+        const haveSession = state.connectAttempted;
+        state.connectAttempted = true;
+        (haveSession ? Promise.resolve() : refreshConnection())
+          .then(refreshBills)
           .then(render);
       }
       render(); // shows the view immediately either way
@@ -1431,6 +1630,43 @@ function render() {
         state.connectError = e.message;
       }
       state.connectBusy = false;
+      render();
+    });
+  }
+
+  app.querySelectorAll('[data-action="connect-gmail"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.gmailBusy = true;
+      state.gmailError = null;
+      state.gmailNotice = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        // Full-page redirect to Google — this call does not return; the next
+        // render happens on the page Google sends the browser back to.
+        await connect.connectGmail();
+      } catch (e) {
+        state.gmailError = e.message;
+        state.gmailBusy = false;
+        render();
+      }
+    });
+  });
+
+  const disconnectGmailBtn = app.querySelector('[data-action="disconnect-gmail"]');
+  if (disconnectGmailBtn) {
+    disconnectGmailBtn.addEventListener('click', async () => {
+      state.gmailBusy = true;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.disconnectGmail();
+        await refreshConnection();
+        state.gmailNotice = 'Gmail disconnected.';
+      } catch (e) {
+        state.gmailError = e.message;
+      }
+      state.gmailBusy = false;
       render();
     });
   }
@@ -1580,6 +1816,32 @@ function render() {
     });
   });
 
+  app.querySelectorAll('[data-action="confirm-bill"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const bills = await loadBills();
+        await bills.confirmBill(btn.dataset.id);
+        await refreshBills();
+      } catch (e) {
+        state.billsError = e.message;
+      }
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-action="dismiss-bill"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const bills = await loadBills();
+        await bills.dismissBill(btn.dataset.id);
+        await refreshBills();
+      } catch (e) {
+        state.billsError = e.message;
+      }
+      render();
+    });
+  });
+
   app.querySelectorAll('[data-action="revoke-invite"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       state.inviteError = null;
@@ -1596,7 +1858,18 @@ function render() {
   });
 }
 
-load().then(render).catch((e) => {
+consumeGmailOAuthReturn();
+
+load().then(async () => {
+  // Returning from Gmail's consent screen always means a session already
+  // exists — load it now rather than waiting for a click on the Connect tab,
+  // so the notice above appears next to state that's actually current.
+  if (state.gmailNotice || state.gmailError) {
+    state.connectAttempted = true;
+    await refreshConnection();
+  }
+  render();
+}).catch((e) => {
   document.getElementById('app').innerHTML =
     `<div class="banner banner-warn">Could not load data: ${e.message}</div>`;
 });
