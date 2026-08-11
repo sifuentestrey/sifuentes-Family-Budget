@@ -1,6 +1,9 @@
 # Handoff — Family Budget
 
-Paste this into a new chat to resume. Written 2026-08-10.
+Paste this into a new chat to resume. Written 2026-08-11 (supersedes the
+2026-08-10 version — that one described work as still in progress on branch
+`claude/family-budget-shared-accounts-djv89t`; all of it has since merged to
+`main` through PR #9, and this file is the corrected, verified state).
 
 ## What this is
 
@@ -11,114 +14,109 @@ PWA frontend, deployed to GitHub Pages. Zero-cost stack by design.
 
 ## Repo / project IDs
 
-- GitHub: `sifuentestrey/sifuentes-Family-Budget` (now **public**)
+- GitHub: `sifuentestrey/sifuentes-Family-Budget` (public)
 - Supabase project: `ytkpthlhtbxtvtadepqt`
 - Live app: https://sifuentestrey.github.io/sifuentes-Family-Budget/
-- Working branch: `claude/family-budget-shared-accounts-djv89t` — PR #2 open
-  (title: "Invite-only signup, and shift logging with paycheck forecast"),
-  draft, CI green, no review comments as of last check.
+- `main` is the only branch that matters. PRs #1–#9 are all merged, 0 open.
+  The old working branch `claude/family-budget-shared-accounts-djv89t` is
+  fully superseded (everything on it is in `main`, some of it evolved
+  further) — safe to delete, nobody has done so yet.
 
-## Current state (verified, not assumed)
+## Current state (verified 2026-08-11 against live Supabase + local repo)
 
-- **211 tests passing**, all offline against fixtures.
-- **`auth.users` is empty** — nobody has signed up yet, including the owner.
-- **PLAID_ENV is `sandbox`**, not production. Credentials otherwise valid
-  (whitespace-trimmed at point of use).
-- **Repo is public.** Confirmed clean before flipping: no secrets, only
-  synthetic fixture data (`fixtures/sample-plaid.json` is explicitly labeled
-  invented), real data paths are gitignored.
-- **Signup is invite-gated at the database level**, enforced two ways so it
-  doesn't depend on a dashboard click: a `before-user-created` auth hook
-  (`hook_restrict_signup`) AND a trigger on `auth.users`
-  (`enforce_invite_only_signup`) that calls the same function. First account
-  ever is admitted unconditionally (bootstraps the household), everyone after
-  needs a pending invite. Verified live: stranger refused (403), invited
-  address (case/whitespace-insensitive) admitted, expired/consumed invites
-  refused, joining an invite consumes it and adds to the *existing* household
-  rather than creating a new one.
-- **Daily sync is scheduled** — `pg_cron` job `daily-transaction-sync`,
-  09:00 UTC, calls `sync-transactions` with a bearer token now stored in
-  Supabase Vault (`sync_secret`). Confirmed active in `cron.job`.
-- **A real auth bug was found and fixed**: `sync-transactions` compared the
-  bearer token against a template string with an unset env var
-  (`SYNC_SECRET`), so the effective check was against the literal string
-  `"Bearer undefined"` — verified live, it returned HTTP 200. Fixed to read
-  from Vault, fail closed if unconfigured, constant-time compare. Regression
-  tests added and confirmed to fail when the pattern is reintroduced.
-  **This fix is committed but not yet deployed** (see Blockers).
-- **Shift logging is built**: pay profile setup + per-shift entry + paycheck
-  forecast, wired into a new "Shifts" nav tab. Uses the existing (already
-  tested) payroll engine in `src/payroll/`. DB column mapping extracted to
-  `src/payroll/mapping.js` specifically so it's unit-testable (the browser
-  module that queries Supabase can't be loaded by the test runner).
-- **CI/CD for Supabase added**: `.github/workflows/supabase.yml` deploys edge
-  functions + migrations from disk on merge to `main`, gated on
-  `SUPABASE_ACCESS_TOKEN` / `SUPABASE_DB_PASSWORD` secrets existing (skips
-  with a warning if not, doesn't fail red).
-- Codex pushed 5 additive files directly to `main` (provider readiness
-  service, docs) — merged into this branch, no conflicts.
+- **269 tests passing** (`npm test`), 0 failing. Note: `node_modules` is not
+  checked in — a fresh clone/machine needs `npm install` before tests will
+  run (the `unpdf` dependency fails to resolve otherwise).
+- **1 user in `auth.users`** — the owner has signed up. Household exists.
+- **No bank connected yet** — `items` table is empty. This needs the owner,
+  in-app, with real bank credentials; not something an agent can or should
+  do.
+- **No invites sent yet** — `household_invites` is empty. Needs the second
+  household member's email, which only the owner has.
+- **The sync-transactions auth bug fix IS deployed and live**, not just
+  committed — confirmed by reading the deployed function body directly via
+  Supabase MCP (`get_edge_function`), not just checking git. It reads the
+  bearer secret from Vault, fails closed if unset, constant-time compares.
+- **Vault has `sync_secret`** (1 row), and three `pg_cron` jobs are active:
+  `daily-transaction-sync` (09:00 UTC), `daily-bill-sync` (09:15 UTC),
+  `daily-alert-email` (09:30 UTC).
+- **The GitHub Actions Supabase-deploy workflow (`supabase.yml`) has never
+  actually deployed anything** — `SUPABASE_ACCESS_TOKEN` was never added as
+  a repo secret, so every run so far (4 runs, ~10s each) hit the "not set —
+  skipping deploy" branch and exited green without doing anything. This has
+  NOT caused any real gap: whoever worked this repo after the handoff
+  deployed the edge function and migrations directly via the Supabase MCP
+  tool instead of relying on CI. Still worth fixing so future changes to
+  `supabase/` don't silently no-op on merge — see Loose ends.
+- Shift logging, invite-only signup, Gmail bill scanning, PDF paystub
+  attachments, outbound alert emails, paystub reconciliation, and
+  Safe-to-Spend-as-the-authoritative-dashboard-number are all built, tested,
+  and merged (PRs #2, #4, #6, #7, #8, #9).
 
-## Blockers — things that need you, specifically
+## Loose ends (not blocking, but real)
 
-1. **Add `SUPABASE_ACCESS_TOKEN` as a GitHub repo secret**
-   (from https://supabase.com/dashboard/account/tokens). This is what
-   deploys the sync-secret fix and everything else in `supabase/`. Until
-   it's set, the CI Supabase workflow skips itself — the auth bug fix sits
-   committed but not live on the deployed function.
-   Optional: also add `SUPABASE_DB_PASSWORD` to let CI push migrations too
-   (migrations are currently applied by me via MCP tool, which still works,
-   just isn't automated end-to-end without this).
+1. **`SUPABASE_ACCESS_TOKEN` still isn't a GitHub secret.** Get one from
+   https://supabase.com/dashboard/account/tokens and add it as a repo
+   secret so `supabase.yml` actually deploys on merge instead of
+   silently skipping. Optional: `SUPABASE_DB_PASSWORD` too, so CI can push
+   migrations (currently still done by hand via MCP).
+2. **~30 stale branches on the remote** (`payroll-v1` through `-v6`,
+   `payroll-engine-*`, `payroll-groundwork-*`, `payroll-system-a` through
+   `-h`, `x-pay`, etc.) — almost all point at the same abandoned commit
+   `4645f57`. Cosmetic clutter only, nothing depends on them. Fine to
+   delete in a batch; ask before doing it since it's a bulk destructive git
+   operation.
+3. **`claude/family-budget-shared-accounts-djv89t`** — the old working
+   branch, fully merged, safe to delete.
 
-2. **Merge PR #2** once you're satisfied — or ask the new session to check
-   status/merge it. Nothing is blocking it; it was green last checked.
+## What only the owner can do next
 
-3. **Sign up in the app** — you're user #0, so you're admitted
-   unconditionally. This is what creates the household.
-
-4. **Connect a bank.** Recommended order: sandbox first (proves the sync
-   pipeline end-to-end — it's never run against real Plaid, not once), then
-   flip `PLAID_ENV` to `production` and connect real accounts.
-
-5. **Invite your wife** from the Connect tab once you have an account —
-   she needs a pending invite to sign up at all now.
+1. **Connect a bank** in the app. Recommended order: sandbox first (proves
+   the sync pipeline end-to-end — confirmed it has never run against real
+   Plaid), then flip `PLAID_ENV` to `production` and connect real accounts.
+2. **Invite the second household member** from the Connect tab — needs
+   their email; they need a pending invite to sign up at all now.
 
 ## Deliberately not done yet
 
-- Paystub reconciliation UI (engine exists, tested, not wired to a view) —
-  this is what would let the app learn your real effective tax rate instead
-  of the guessed rate you enter in pay setup. Natural next step after shift
-  logging.
-- Email bill ingestion (lower priority than shifts — reasoning: Plaid
-  transaction data already derives most of what bills would show; shifts are
-  the one thing Plaid structurally cannot know in advance).
-- No email/push delivery for alerts — in-app only, no mail provider
-  configured.
+- Email/push delivery beyond the existing outbound alert emails — check
+  current alert wiring before assuming this is still true, PR #6 added
+  outbound alert emails.
+- Anything past what's listed above — check `git log --oneline -20` for
+  the actual current edge, this file is a snapshot, not a live view.
 
 ## How to verify state quickly in a new session
 
 ```sql
 -- against project ytkpthlhtbxtvtadepqt via Supabase MCP tools
-select count(*) from auth.users;                    -- should be 0 until you sign up
-select jobname, active from cron.job;                -- daily-transaction-sync, active=true
-select count(*) from vault.secrets where name='sync_secret';  -- 1
+select count(*) from auth.users;                              -- 1
+select count(*) from items;                                   -- 0 until a bank is connected
+select count(*) from household_invites;                       -- 0 until someone is invited
+select jobname, active from cron.job;                          -- 3 rows, all active=true
+select count(*) from vault.secrets where name='sync_secret';   -- 1
 ```
 
 ```bash
-git fetch origin && git log --oneline origin/claude/family-budget-shared-accounts-djv89t -5
-npm test 2>&1 | tail -5   # expect 211+ passing
+git fetch origin && git log --oneline origin/main -10
+npm install && npm test 2>&1 | tail -8   # expect 269+ passing, 0 failing
 ```
 
 ## Tone/process notes for the next session
 
-- User wants **all automation, nothing manual unless ABSOLUTELY necessary**
-  — the CI workflow and DB-level enforcement above are direct responses to
-  that. Keep defaulting that direction; ask before adding a manual step.
-- I do NOT have a Supabase management/CLI token in this environment — only
-  the MCP tool (`execute_sql`, `apply_migration`, `deploy_edge_function`
-  which requires pasting full file contents inline). That's *why* the CI
-  workflow exists — pasting ~60KB of engine code by hand for every function
-  deploy was the wrong mechanism. Don't revert to hand-pasting once the CI
-  token is set.
+- User wants **all automation, nothing manual unless ABSOLUTELY necessary**,
+  and generally prefers the agent to just act rather than ask for each step
+  — but still confirm before anything destructive/hard-to-reverse (bulk
+  branch deletion, force-push, minting new credentials) or anything that
+  needs information only the owner has (bank login, spouse's email).
+- The user is non-technical — doesn't use the terminal, described their own
+  input as "pressing random buttons." Don't hand them shell commands to run
+  as the primary path; do the work directly (this session had local shell
+  + GitHub + Supabase MCP access and used all three) and explain outcomes
+  in plain language.
 - This repo is **public**. Before adding anything, sanity-check it's not
   real financial data (`.gitignore` already blocks `data/*`, `*.csv`, etc. —
   don't weaken that).
+- Don't trust an old handoff doc's "current state" section at face value —
+  this file itself was stale by one day and had already-merged work
+  described as still pending. Verify against the live DB and `git log`
+  before acting on anything a handoff claims.
