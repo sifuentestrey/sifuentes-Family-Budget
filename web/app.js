@@ -353,7 +353,10 @@ function gatherSafeToSpendInputs() {
   const pendingOutflows = pendingTxns.reduce((sum, t) => sum + t.amount, 0);
 
   // Daily variable spending: average of groceries, fuel, dining from recent months.
-  const variableCategories = ['Groceries', 'Gas & Fuel', 'Dining & Restaurants'];
+  // These strings must match what the categorizer actually emits (see
+  // src/engine/seed-rules.js) — a label that never occurs silently contributes
+  // zero, which inflates safe-to-spend rather than failing visibly.
+  const variableCategories = ['Groceries', 'Gas', 'Dining Out'];
   const recentMonths = state.months.slice(-3).filter((m) => m < state.month);
   let variableDailyTotal = 0;
   let variableDayCount = 0;
@@ -376,9 +379,16 @@ function gatherSafeToSpendInputs() {
   const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;
   const bufferBalance = 0;
 
-  // Expected income before next payday: conservative floor for this income stream.
-  // For demo purposes, use the typical biweekly amount if available.
-  const expectedIncomeBeforePayday = state.variableStream?.typical_amount ?? 0;
+  // Income landing strictly BEFORE the horizon — not the paycheck that defines
+  // it. next_expected is when this stream's next check arrives, so that check is
+  // what the household is surviving until, not money available to survive on.
+  // Counting it here added a full paycheck to the starting balance and inflated
+  // the headline by exactly the amount that has not arrived yet.
+  //
+  // With a single detected stream there is by definition no income between now
+  // and next_expected, so this is zero. It stays a named variable because a
+  // second stream (or a known one-off) would legitimately land in here.
+  const expectedIncomeBeforePayday = 0;
 
   return {
     currentBalance,
