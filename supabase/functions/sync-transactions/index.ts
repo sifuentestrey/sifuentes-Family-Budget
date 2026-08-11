@@ -19,6 +19,8 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { categorizeBatch, buildLearnedIndex, normalizePlaidTransaction } from '../_shared/categorize.js';
 import { detectTransfers } from '../_shared/transfers.js';
 import { detectIncomeStreams, markIncome } from '../_shared/income.js';
+import { rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
+import { findPayingTransaction } from '../_shared/domain/bill-payment-match.js';
 
 // Trimmed at the point of use: a pasted value routinely carries an invisible
 // trailing newline, and requiring a human to retype a credential by hand to
@@ -270,6 +272,45 @@ async function reprocessWindow(supabase: any, householdId: string) {
   }
 
   await persistIncomeStreams(supabase, householdId, streams);
+  await reconcileBills(supabase, householdId, processed);
+}
+
+/**
+ * Mark a bill paid once a matching bank transaction shows up, instead of
+ * leaving it in "upcoming" forever after the household already paid it
+ * through the connected account. The other half of matching bills across
+ * sources — dedupe.js already reconciles email vs. manual entry; this
+ * reconciles either of those against what the bank actually shows.
+ *
+ * Conservative by construction (see findPayingTransaction): an ambiguous
+ * match marks nothing rather than guessing which bill a transaction paid.
+ */
+async function reconcileBills(supabase: any, householdId: string, transactions: any[]) {
+  const { data: billRows } = await supabase
+    .from('bills')
+    .select('*')
+    .eq('household_id', householdId)
+    .neq('status', 'paid')
+    .neq('status', 'ignored');
+  if (!billRows?.length) return;
+
+  for (const row of billRows) {
+    const bill = rowToBill(row);
+    const match = findPayingTransaction(bill, transactions);
+    if (!match) continue;
+
+    const { error } = await supabase
+      .from('bills')
+      .update({
+        status: 'paid',
+        paid_at: match.posted_date,
+        paid_amount: match.amount,
+        paid_transaction_id: match.id,
+      })
+      .eq('id', bill.id)
+      .neq('status', 'paid');
+    if (error) throw new Error(`could not mark bill ${bill.id} paid: ${error.message}`);
+  }
 }
 
 async function persistIncomeStreams(supabase: any, householdId: string, streams: any[]) {

@@ -7,7 +7,9 @@
  * low-confidence parse can never silently count toward what's due.
  */
 import { supabase, FUNCTIONS_URL } from './supabase-client.js';
-import { rowToBill } from '../src/ingestion/bill-row-mapping.js';
+import { rowToBill, billToRow } from '../src/ingestion/bill-row-mapping.js';
+import { slugify } from '../src/domain/bill.js';
+import { findDuplicateBill, shouldUpdateExisting } from '../src/ingestion/dedupe.js';
 
 export async function listBills() {
   const { data, error } = await supabase.from('active_bills').select('*').order('due_date');
@@ -62,6 +64,15 @@ export async function parseBillText(text) {
  * Always source='manual', confirmed, full confidence — a household typing or
  * confirming a number themselves needs no review queue, unlike a low-
  * confidence automated parse.
+ *
+ * Checked against every existing bill for the household — any source, not
+ * just other manual entries — before inserting. The same bill Gmail already
+ * parsed and a household now types in by hand (or the reverse order) must
+ * update one row, not sit alongside it as a second, uncoordinated "bill".
+ * A manual entry wins that merge (see dedupe.js's shouldUpdateExisting) —
+ * a human confirming a number outranks any automated parse — unless the
+ * existing bill is already paid, in which case nothing is touched and the
+ * caller is told why rather than silently doing nothing.
  */
 export async function createBill({ providerName, amountDue, dueDate, category }) {
   const { data: { session } } = await supabase.auth.getSession();
@@ -76,19 +87,41 @@ export async function createBill({ providerName, amountDue, dueDate, category })
   if (membershipError) throw membershipError;
   if (!membership) throw new Error('Not in a household');
 
-  const providerKey = providerName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-
-  const { error } = await supabase.from('bills').insert({
-    household_id: membership.household_id,
-    provider_name: providerName.trim(),
-    provider_key: providerKey || 'manual-entry',
+  const candidate = {
+    householdId: membership.household_id,
+    providerName: providerName.trim(),
+    providerKey: slugify(providerName.trim()) || 'manual-entry',
     category: category || 'Other',
-    amount_due: amountDue,
-    due_date: dueDate,
+    amountDue,
+    dueDate,
     status: 'confirmed',
     source: 'manual',
     confidence: 1,
-    needs_review: false,
-  });
+    needsReview: false,
+    detectedAt: new Date().toISOString(),
+  };
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('bills')
+    .select('*')
+    .eq('household_id', membership.household_id);
+  if (existingError) throw existingError;
+
+  const verdict = findDuplicateBill(candidate, (existingRows ?? []).map(rowToBill));
+  if (verdict.isDuplicate) {
+    const decision = shouldUpdateExisting(verdict.existing, candidate);
+    if (!decision.update) {
+      throw new Error(
+        `This looks like the same bill as the existing ${verdict.existing.providerName} bill `
+        + `(${decision.reason}) — not adding a duplicate.`,
+      );
+    }
+    const row = billToRow({ ...verdict.existing, ...candidate, id: verdict.existing.id });
+    const { error } = await supabase.from('bills').update(row).eq('id', verdict.existing.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from('bills').insert(billToRow(candidate));
   if (error) throw error;
 }

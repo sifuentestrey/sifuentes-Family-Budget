@@ -22,6 +22,8 @@
  *      than merged silently, because occasionally it is two real bills.
  */
 
+import { providersMatch } from '../domain/provider-match.js';
+
 /** Due dates this far apart may still be the same bill seen twice. */
 const FUZZY_DAY_WINDOW = 3;
 
@@ -86,11 +88,13 @@ export function findDuplicateBill(candidate, existingBills) {
     };
   }
 
-  // 3. Fuzzy — same provider, close amount, close date.
-  const provider = (candidate.providerKey || candidate.providerName || '').toLowerCase();
+  // 3. Fuzzy — same provider (allowing for how differently each channel
+  // spells it: "netflix" from a manual entry vs "netflixcom" from a Gmail
+  // parse are the same company), close amount, close date.
+  const candidateProvider = candidate.providerKey || candidate.providerName || '';
   for (const existing of existingBills) {
-    const existingProvider = (existing.providerKey || existing.providerName || '').toLowerCase();
-    if (!provider || provider !== existingProvider) continue;
+    const existingProvider = existing.providerKey || existing.providerName || '';
+    if (!providersMatch(candidateProvider, existingProvider)) continue;
     if (existing.householdId !== candidate.householdId) continue;
 
     const amountDelta = Math.abs(existing.amountDue - candidate.amountDue);

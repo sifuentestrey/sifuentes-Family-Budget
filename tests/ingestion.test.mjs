@@ -14,6 +14,7 @@ import {
 } from '../src/ingestion/dedupe.js';
 import { ingestBillsFromEmail, classifyMessage, providerFromSender } from '../src/ingestion/email-ingestion.js';
 import { makeBill, validateBill, needsReview, billsDueBetween } from '../src/domain/bill.js';
+import { providersMatch } from '../src/domain/provider-match.js';
 import { createMockEmailProvider, MOCK_MESSAGES } from '../src/providers/mock/mock-email-provider.js';
 import { createMockPayrollProvider } from '../src/providers/mock/mock-payroll-provider.js';
 import { createRegistry } from '../src/providers/registry.js';
@@ -245,6 +246,50 @@ test('a paid bill is not rewritten', () => {
 test('identity keys are stable and scoped to the household', () => {
   assert.equal(billIdentityKey(bill({ id: 'a' })), billIdentityKey(bill({ id: 'b' })));
   assert.notEqual(billIdentityKey(bill()), billIdentityKey(bill({ householdId: 'h2' })));
+});
+
+test('a bill entered by hand catches a Gmail-parsed duplicate despite a differently spelled provider key', () => {
+  // The exact scenario manual entry introduced: a household types "Netflix"
+  // for a bill the Gmail parser already stored under the key "netflixcom".
+  const parsed = bill({
+    providerName: 'Netflix.com', providerKey: 'netflixcom', source: 'email',
+    sourceMessageId: 'msg_1', dueDate: '2026-08-08', amountDue: 17.99,
+  });
+  const typed = bill({
+    providerName: 'Netflix', providerKey: 'netflix', source: 'manual',
+    dueDate: '2026-08-09', amountDue: 17.99, confidence: 1,
+  });
+  const verdict = findDuplicateBill(typed, [parsed]);
+  assert.equal(verdict.isDuplicate, true);
+  assert.equal(verdict.matchType, 'fuzzy');
+});
+
+test('a manual entry updates the Gmail-parsed duplicate rather than sitting alongside it', () => {
+  const parsed = bill({ providerKey: 'netflixcom', providerName: 'Netflix.com', source: 'email', confidence: 0.85 });
+  const typed = bill({ providerKey: 'netflix', providerName: 'Netflix', source: 'manual', confidence: 1 });
+  assert.equal(shouldUpdateExisting(parsed, typed).update, true);
+});
+
+test('unrelated providers of similar length are not fuzzy-matched', () => {
+  const gas = bill({ providerKey: 'texas-gas', providerName: 'Texas Gas' });
+  const power = bill({ providerKey: 'texas-power', providerName: 'Texas Power', amountDue: gas.amountDue, dueDate: gas.dueDate });
+  assert.equal(findDuplicateBill(power, [gas]).isDuplicate, false);
+});
+
+// ---------------------------------------------------------------------------
+// Provider name fuzzy matching
+// ---------------------------------------------------------------------------
+
+test('providersMatch treats spelling variants of one company as the same', () => {
+  assert.ok(providersMatch('Netflix', 'netflixcom'));
+  assert.ok(providersMatch('Netflix.com', 'Netflix'));
+  assert.ok(providersMatch('Con Edison', 'CON EDISON'));
+});
+
+test('providersMatch rejects different companies, including short-name collisions', () => {
+  assert.ok(!providersMatch('AT&T', 'AAA'));
+  assert.ok(!providersMatch('Texas Gas', 'Texas Power'));
+  assert.ok(!providersMatch('', 'Netflix'));
 });
 
 test('paystubs dedupe on pay date and period, not amount', () => {
