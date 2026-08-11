@@ -18,7 +18,7 @@ import { createMockEmailProvider, MOCK_MESSAGES } from '../src/providers/mock/mo
 import { createMockPayrollProvider } from '../src/providers/mock/mock-payroll-provider.js';
 import { createRegistry } from '../src/providers/registry.js';
 import { syncBills, syncPayroll, syncPaystubs, createMemoryStore, summarizeSyncState } from '../src/sync/sync-engine.js';
-import { calculateSafeToSpend, monthlyOverview } from '../src/budget/safe-to-spend.js';
+import { calculateSafeToSpend, monthlyOverview } from '../src/engine/budget/safe-to-spend.js';
 
 // ---------------------------------------------------------------------------
 // Date parsing

@@ -48,3 +48,7 @@ verify_jwt = false
 # what identifies the caller here.
 [functions.advisor-note]
 verify_jwt = true
+
+# Cron-triggered, same reasoning as categorize-llm/send-alerts above.
+[functions.advisor-daily]
+verify_jwt = false

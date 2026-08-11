@@ -18,7 +18,7 @@ import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js'
 import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildAlerts } from '../src/engine/alerts.js';
-import { calculateSafeToSpend } from '../src/budget/safe-to-spend.js';
+import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';

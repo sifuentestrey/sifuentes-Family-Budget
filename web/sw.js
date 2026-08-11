@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v10';
+const CACHE_VERSION = 'v11';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -58,7 +58,7 @@ const SHELL_ASSETS = [
   // Safe-to-spend: app.js imports calculateSafeToSpend statically, so without
   // this the module 404s offline and app.js fails to parse — taking the whole
   // app down, not just the safe-to-spend headline.
-  '../src/budget/safe-to-spend.js',
+  '../src/engine/budget/safe-to-spend.js',
 ];
 
 self.addEventListener('install', (event) => {

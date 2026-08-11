@@ -26,6 +26,12 @@ const RULES = [
   // has always imported against.
   { source: 'engine', dest: '' },
   { source: 'domain', dest: 'domain' },
+  // Nested the same way under src/engine/ and _shared/ so a file at either
+  // level (e.g. advisor-summary.js importing './budget/safe-to-spend.js')
+  // resolves identically on both sides — the flat engine rule above only
+  // works for siblings, so anything engine/*.js reaches outside itself has
+  // to nest symmetrically like this rather than via a '../' import.
+  { source: 'engine/budget', dest: 'budget' },
   { source: 'ingestion', dest: 'ingestion' },
   { source: 'sync', dest: 'sync' },
 ];
