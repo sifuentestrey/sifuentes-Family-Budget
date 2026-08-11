@@ -294,9 +294,17 @@ async function reconcileBills(supabase: any, householdId: string, transactions: 
     .neq('status', 'ignored');
   if (!billRows?.length) return;
 
+  // Two bills with a near-identical amount due around the same time (rent and
+  // a similarly priced insurance premium, say) could otherwise both match the
+  // one transaction that actually paid only one of them — each bill searches
+  // independently, so nothing stops it from claiming a transaction an earlier
+  // bill in this same pass already claimed. Once claimed, a transaction is
+  // removed from the pool for the rest of this run.
+  let pool = transactions;
+
   for (const row of billRows) {
     const bill = rowToBill(row);
-    const match = findPayingTransaction(bill, transactions);
+    const match = findPayingTransaction(bill, pool);
     if (!match) continue;
 
     const { error } = await supabase
@@ -310,6 +318,8 @@ async function reconcileBills(supabase: any, householdId: string, transactions: 
       .eq('id', bill.id)
       .neq('status', 'paid');
     if (error) throw new Error(`could not mark bill ${bill.id} paid: ${error.message}`);
+
+    pool = pool.filter((t: any) => t.id !== match.id);
   }
 }
 
