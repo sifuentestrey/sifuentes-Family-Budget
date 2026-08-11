@@ -38,3 +38,13 @@ verify_jwt = false
 # Same reasoning again: cron presents a Vault-held secret, not a user JWT.
 [functions.send-alerts]
 verify_jwt = false
+
+# Same reasoning again: cron presents a Vault-held secret, not a user JWT.
+[functions.categorize-llm]
+verify_jwt = false
+
+# Called directly by a signed-in household member from the Advisor tab, so
+# (unlike the cron-triggered functions above) a real Supabase JWT is exactly
+# what identifies the caller here.
+[functions.advisor-note]
+verify_jwt = true

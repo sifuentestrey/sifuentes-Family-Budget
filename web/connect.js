@@ -71,6 +71,26 @@ export async function listProviderConnections() {
 }
 
 /**
+ * Ask the advisor for a fresh check-in note. The summary is built entirely
+ * client-side from the same engine output the dashboard already renders —
+ * this call never sends raw transactions, only the aggregate numbers.
+ */
+export async function getAdvisorNote(summary) {
+  return callFunction('advisor-note', { summary });
+}
+
+/** Household-visible history of past advisor notes, most recent first. */
+export async function listAdvisorNotes() {
+  const { data, error } = await supabase
+    .from('advisor_notes')
+    .select('id, note, created_at')
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
  * Start the Gmail OAuth flow. Unlike Plaid Link, this is a full-page redirect
  * rather than a popup/modal — Google's consent screen is designed to be
  * navigated to, not embedded, and gmail-oauth-callback redirects the browser

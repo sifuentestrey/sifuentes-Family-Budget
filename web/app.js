@@ -72,6 +72,55 @@ async function refreshBills() {
   refreshAlerts();
 }
 
+/** Loads only the note history — generating a new one is a deliberate,
+ * user-triggered action (see the "Get check-in" button), not something
+ * that happens automatically on every visit to the tab. */
+async function refreshAdvisorNotes() {
+  state.advisorError = null;
+  if (!state.session || !state.householdId) return;
+
+  try {
+    const connect = await loadConnect();
+    state.advisorNotes = await connect.listAdvisorNotes();
+  } catch (e) {
+    state.advisorError = e.message;
+  }
+}
+
+/**
+ * Aggregate-only snapshot of the household's current numbers, built from the
+ * same engine output every other view already renders from. Sent to the
+ * advisor edge function instead of raw transactions — a narrative note has
+ * no use for individual purchases, only the shape of the whole picture.
+ */
+function buildAdvisorSummary() {
+  const topCategories = [...state.picture.categories]
+    .sort((a, b) => b.monthlyAverage - a.monthlyAverage)
+    .slice(0, 6)
+    .map((c) => ({ name: c.category, monthlyAverage: c.monthlyAverage, bucket: c.bucket }));
+
+  return {
+    safeToSpend: state.safeToSpend?.safeToSpend ?? null,
+    safeToSpendStatus: state.safeToSpend?.status ?? null,
+    reliableMonthlyIncome: state.income.reliable,
+    monthlySurplus: state.coverage.fullSurplus,
+    floorCoverageStatus: state.coverage.status,
+    survivalMonthlyCost: state.picture.survivalMonthlyCost,
+    trueMonthlyCost: state.picture.trueMonthlyCost,
+    topCategories,
+    subscriptionsAnnualCost: state.subs.totalAnnual,
+    subscriptionCount: state.subs.subscriptions.length,
+    priceIncreases: state.subs.priceIncreases.map((p) => ({
+      payee: p.payee,
+      changePercent: p.priceChange.changePercent,
+      annualImpact: p.annualImpactOfIncrease,
+    })),
+    activeAlerts: [...state.alerts.urgent, ...state.alerts.inApp]
+      .slice(0, 6)
+      .map((a) => `${a.title}: ${a.body}`),
+  };
+}
+
 /**
  * Recompute the alert set from whatever state is currently loaded.
  *
@@ -197,6 +246,10 @@ const state = {
   gmailBusy: false,
   gmailNotice: null,
   gmailError: null,
+  advisorNotes: [],
+  advisorAttempted: false,
+  advisorBusy: false,
+  advisorError: null,
   payProfile: null,
   payPeriod: null,
   timeEntries: [],
@@ -619,6 +672,7 @@ function renderNav() {
     ['shifts', 'Shifts'],
     ['paystubs', 'Paystubs'],
     ['bills', 'Bills'],
+    ['advisor', 'Advisor'],
     ['connect', 'Connect'],
   ];
   const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
@@ -1279,6 +1333,56 @@ function renderSubscriptions() {
 }
 
 // ---------------------------------------------------------------------------
+// Advisor
+// ---------------------------------------------------------------------------
+
+/**
+ * A check-in note, generated on request rather than automatically — it is a
+ * real API call with real latency and real (if small) cost, so it happens
+ * when asked for, not on every visit to the tab. Past notes stay visible
+ * below so the advisor reads as a running relationship, not a one-off tool.
+ */
+function renderAdvisor() {
+  if (!state.session) {
+    return `
+      <div class="note-box">
+        <strong>Sign in to use the advisor.</strong>
+        Check-ins are saved to the household, so they live in the database —
+        open the Connect tab to sign in.
+      </div>`;
+  }
+
+  return `
+    <h2>Advisor</h2>
+    <p class="muted">
+      A short, specific note on your actual numbers — never a number it made up,
+      only ones this app already computed correctly.
+    </p>
+
+    ${state.advisorError ? `<div class="banner banner-warn">${state.advisorError}</div>` : ''}
+
+    <button data-action="get-advisor-note" class="link"
+      style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;"
+      ${state.advisorBusy ? 'disabled' : ''}>
+      ${state.advisorBusy ? 'Thinking…' : '+ Get a check-in'}
+    </button>
+
+    <div class="stream-list" style="margin-top:14px;">
+      ${state.advisorNotes.length === 0 ? `
+        <p class="step-why">No check-ins yet — the first one starts the history.</p>
+      ` : state.advisorNotes.map((n) => `
+        <div class="stream">
+          <div class="stream-meta" style="margin-bottom:4px;">
+            ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          </div>
+          <div style="font-size:14px;line-height:1.5;">${n.note}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
 // Install prompt
 // ---------------------------------------------------------------------------
 
@@ -1895,6 +1999,7 @@ function render() {
     shifts: renderShifts,
     paystubs: renderPaystubs,
     bills: renderBills,
+    advisor: renderAdvisor,
     connect: renderConnect,
   }[state.view]();
 
@@ -1964,6 +2069,18 @@ function render() {
         (haveSession ? Promise.resolve() : refreshConnection())
           .then(() => (haveProfile ? Promise.resolve() : refreshShifts()))
           .then(refreshPaystubs)
+          .then(render);
+      }
+      // Advisor needs a session to read/write its note history, same pattern
+      // as the other tabs above — does not generate a note on visit, only
+      // loads past ones, since generating one is a real API call the user
+      // should trigger deliberately, not something that fires on every tab click.
+      if (state.view === 'advisor' && !state.advisorAttempted) {
+        state.advisorAttempted = true;
+        const haveSession = state.connectAttempted;
+        state.connectAttempted = true;
+        (haveSession ? Promise.resolve() : refreshConnection())
+          .then(refreshAdvisorNotes)
           .then(render);
       }
       render(); // shows the view immediately either way
@@ -2089,6 +2206,24 @@ function render() {
       render();
     });
   });
+
+  const advisorBtn = app.querySelector('[data-action="get-advisor-note"]');
+  if (advisorBtn) {
+    advisorBtn.addEventListener('click', async () => {
+      state.advisorBusy = true;
+      state.advisorError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        const note = await connect.getAdvisorNote(buildAdvisorSummary());
+        state.advisorNotes = [note, ...state.advisorNotes];
+      } catch (e) {
+        state.advisorError = e.message;
+      }
+      state.advisorBusy = false;
+      render();
+    });
+  }
 
   const inviteForm = document.getElementById('invite-form');
   if (inviteForm) {
