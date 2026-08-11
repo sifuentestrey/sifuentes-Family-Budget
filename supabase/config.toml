@@ -52,3 +52,8 @@ verify_jwt = true
 # Cron-triggered, same reasoning as categorize-llm/send-alerts above.
 [functions.advisor-daily]
 verify_jwt = false
+
+# Called directly by a signed-in household member from the "Add a bill" form,
+# same reasoning as advisor-note above.
+[functions.parse-bill-text]
+verify_jwt = true

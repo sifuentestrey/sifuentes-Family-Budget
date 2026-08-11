@@ -23,6 +23,7 @@ import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
 import { daysUntilDue } from '../src/domain/bill.js';
+import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
 // from a CDN, and the rest of this app is explicitly designed to run
@@ -261,6 +262,11 @@ const state = {
   billsNeedingReview: [],
   billsError: null,
   billsAttempted: false,
+  billFormOpen: false,
+  billFormBusy: false,
+  billFormError: null,
+  billParseText: '',
+  billDraft: { providerName: '', amountDue: '', dueDate: '', category: '' },
   paystubs: [],
   reconciliations: [],
   learnedAdjustments: null,
@@ -1836,10 +1842,11 @@ function renderBills() {
   );
   if (!gmailConnections.length) {
     return `
+      ${renderAddBillForm()}
       <div class="note-box">
-        <strong>No email connected yet.</strong>
-        Connect Gmail from the Connect tab to start finding bills automatically —
-        nothing here populates on its own before that.
+        <strong>No email connected.</strong>
+        Connect Gmail from the Connect tab to find bills automatically, or add
+        one yourself above.
       </div>`;
   }
   // Only used below for "has anything ever synced" messaging — bills from
@@ -1852,6 +1859,8 @@ function renderBills() {
   const urgency = (dueDate) => (daysUntilDue({ dueDate }) <= 7 ? 'variable' : 'stable');
 
   return `
+    ${renderAddBillForm()}
+
     ${review.length ? `
       <div class="step">
         <div class="step-head"><span class="step-title">Needs review (${review.length})</span></div>
@@ -1896,6 +1905,65 @@ function renderBills() {
           `).join('')}
         </div>
       `}
+    </div>
+  `;
+}
+
+const BILL_CATEGORIES = SEED_CATEGORIES.filter(([, , kind]) => kind !== 'income' && kind !== 'transfer');
+
+/**
+ * Add a bill by hand — always available, unlike the rest of the Bills tab,
+ * which needs Gmail connected. The "paste text" box is optional: providing
+ * it and clicking "Fill in with AI" pre-fills the fields below via
+ * parse-bill-text (Gemini), but every field stays a plain editable input, so
+ * typing them directly with no AI involved at all works exactly the same.
+ */
+function renderAddBillForm() {
+  const d = state.billDraft;
+  const fieldStyle = 'width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--border);'
+    + 'background:var(--surface);color:var(--text);font-size:14px;';
+
+  return `
+    <div class="step">
+      <div class="step-head">
+        <span class="step-title">Add a bill</span>
+        <button class="link" data-action="toggle-bill-form">${state.billFormOpen ? 'Cancel' : '+ Add'}</button>
+      </div>
+      ${state.billFormOpen ? `
+        ${state.billFormError ? `<div class="banner banner-warn">${state.billFormError}</div>` : ''}
+        <p class="step-why">
+          Paste a bill email, portal page, or screenshot text below and let AI fill in the
+          fields — or skip straight to typing them in yourself.
+        </p>
+        <textarea id="bill-parse-text" rows="3" placeholder="Paste bill text here (optional)…"
+          style="${fieldStyle}margin-bottom:8px;" ${state.billFormBusy ? 'disabled' : ''}
+        >${escapeHtml(state.billParseText)}</textarea>
+        <button data-action="parse-bill-text" class="link"
+          style="text-decoration:none;padding:8px 12px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-bottom:14px;"
+          ${state.billFormBusy ? 'disabled' : ''}>
+          ${state.billFormBusy ? 'Reading…' : 'Fill in with AI'}
+        </button>
+
+        <form id="bill-form" style="display:grid;gap:8px;">
+          <input name="providerName" placeholder="Provider (e.g. Netflix)" value="${escapeHtml(d.providerName)}"
+            required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
+          <input name="amountDue" type="number" step="0.01" min="0" placeholder="Amount due"
+            value="${d.amountDue}" required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
+          <input name="dueDate" type="date" value="${d.dueDate}"
+            required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
+          <select name="category" style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''}>
+            <option value="">Category…</option>
+            ${BILL_CATEGORIES.map(([, name]) => `
+              <option value="${name}" ${d.category === name ? 'selected' : ''}>${name}</option>
+            `).join('')}
+          </select>
+          <button type="submit" class="link"
+            style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;"
+            ${state.billFormBusy ? 'disabled' : ''}>
+            ${state.billFormBusy ? 'Saving…' : 'Save bill'}
+          </button>
+        </form>
+      ` : ''}
     </div>
   `;
 }
@@ -2566,6 +2634,87 @@ function render() {
       render();
     });
   });
+
+  const toggleBillFormBtn = app.querySelector('[data-action="toggle-bill-form"]');
+  if (toggleBillFormBtn) {
+    toggleBillFormBtn.addEventListener('click', () => {
+      state.billFormOpen = !state.billFormOpen;
+      state.billFormError = null;
+      if (state.billFormOpen) {
+        state.billParseText = '';
+        state.billDraft = { providerName: '', amountDue: '', dueDate: '', category: '' };
+      }
+      render();
+    });
+  }
+
+  const parseBillBtn = app.querySelector('[data-action="parse-bill-text"]');
+  if (parseBillBtn) {
+    parseBillBtn.addEventListener('click', async () => {
+      const text = document.getElementById('bill-parse-text')?.value.trim() ?? '';
+      state.billParseText = text;
+      if (!text) {
+        state.billFormError = 'Paste some bill text first.';
+        render();
+        return;
+      }
+
+      state.billFormBusy = true;
+      state.billFormError = null;
+      render();
+      try {
+        const bills = await loadBills();
+        const extracted = await bills.parseBillText(text);
+        state.billDraft = {
+          providerName: extracted.providerName ?? state.billDraft.providerName,
+          amountDue: extracted.amountDue != null ? String(extracted.amountDue) : state.billDraft.amountDue,
+          dueDate: extracted.dueDate ?? state.billDraft.dueDate,
+          category: BILL_CATEGORIES.some(([, name]) => name === extracted.category)
+            ? extracted.category
+            : state.billDraft.category,
+        };
+        if (extracted.confidence < 0.6) {
+          state.billFormError = 'Low confidence — double-check every field before saving.';
+        }
+      } catch (e) {
+        state.billFormError = e.message;
+      }
+      state.billFormBusy = false;
+      render();
+    });
+  }
+
+  const billForm = document.getElementById('bill-form');
+  if (billForm) {
+    billForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const providerName = billForm.providerName.value.trim();
+      const amountDue = Number(billForm.amountDue.value);
+      const dueDate = billForm.dueDate.value;
+      const category = billForm.category.value;
+      if (!providerName || !Number.isFinite(amountDue) || amountDue < 0 || !dueDate) {
+        state.billFormError = 'Provider, amount, and due date are required.';
+        render();
+        return;
+      }
+
+      state.billFormBusy = true;
+      state.billFormError = null;
+      render();
+      try {
+        const bills = await loadBills();
+        await bills.createBill({ providerName, amountDue, dueDate, category });
+        state.billFormOpen = false;
+        state.billParseText = '';
+        state.billDraft = { providerName: '', amountDue: '', dueDate: '', category: '' };
+        await refreshBills();
+      } catch (e) {
+        state.billFormError = e.message;
+      }
+      state.billFormBusy = false;
+      render();
+    });
+  }
 
   app.querySelectorAll('[data-action="revoke-invite"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
