@@ -125,9 +125,16 @@ const swJs = readFileSync(join(ROOT, 'web/sw.js'), 'utf8');
 
 test('every nav entry has a renderer', () => {
   // A nav button with no matching renderer throws on click: the view lookup
-  // returns undefined and is called immediately.
-  const navBlock = appJs.match(/const views = \[([\s\S]*?)\];/)[1];
-  const navIds = [...navBlock.matchAll(/\['([\w-]+)',/g)].map((m) => m[1]);
+  // returns undefined and is called immediately. Navigable ids come from two
+  // places since the bottom-nav restructure: the five primary tabs
+  // (NAV_GROUPS) and the secondary destinations listed on the More screen.
+  const groupsBlock = appJs.match(/const NAV_GROUPS = \[([\s\S]*?)\n\];/)[1];
+  const groupIds = [...groupsBlock.matchAll(/id: '([\w-]+)'/g)].map((m) => m[1]);
+
+  const moreBlock = appJs.match(/const rows = \[([\s\S]*?)\];/)[1];
+  const moreIds = [...moreBlock.matchAll(/\['([\w-]+)',/g)].map((m) => m[1]);
+
+  const navIds = [...new Set([...groupIds, ...moreIds])];
   const registry = appJs.match(/\}\[state\.view\]\(\);/)
     ? appJs.slice(appJs.lastIndexOf('const body =', appJs.indexOf('}[state.view]()')), appJs.indexOf('}[state.view]()'))
     : '';

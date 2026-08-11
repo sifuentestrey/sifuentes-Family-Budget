@@ -658,34 +658,73 @@ function el(html) {
   return div.firstElementChild;
 }
 
-function renderNav() {
-  const views = [
-    ['dashboard', 'Overview'],
-    ['paycheck', 'Paycheck'],
-    ['plan', 'Plan'],
-    ['expenses', 'Expenses'],
-    ['subscriptions', 'Subs'],
-    ['transactions', 'Transactions'],
-    ['review', 'Review'],
-    ['trends', 'Trends'],
-    ['income', 'Income'],
-    ['shifts', 'Shifts'],
-    ['paystubs', 'Paystubs'],
-    ['bills', 'Bills'],
-    ['advisor', 'Advisor'],
-    ['connect', 'Connect'],
-  ];
+/**
+ * Which underlying views each of the five primary tabs owns, for active-
+ * state highlighting — docs/ui/README.md's five-section IA (Home / Bills /
+ * Spending / Income / More) groups this app's ~13 views, not a 1:1 mapping
+ * of tab to view. Tapping a primary tab always lands on its first view;
+ * the rest are reached through More, but the tab bar still highlights the
+ * right group so navigating deeper never looks like navigating away.
+ */
+const NAV_GROUPS = [
+  { id: 'dashboard', label: 'Home', icon: '⌂', views: ['dashboard'] },
+  { id: 'bills', label: 'Bills', icon: '▣', views: ['bills'] },
+  { id: 'expenses', label: 'Spending', icon: '↗', views: ['expenses', 'transactions', 'review', 'trends', 'subscriptions'] },
+  { id: 'income', label: 'Income', icon: '＄', views: ['income', 'paycheck', 'plan', 'shifts', 'paystubs'] },
+  { id: 'more', label: 'More', icon: '•••', views: ['more', 'advisor', 'connect'] },
+];
+
+function renderBottomNav() {
   const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
   const billsReviewCount = state.billsNeedingReview.length;
 
   return `
-    <nav class="nav">
-      ${views.map(([id, label]) => `
-        <button class="nav-btn ${state.view === id ? 'active' : ''}" data-view="${id}">
-          ${label}${id === 'review' && reviewCount ? `<span class="badge">${reviewCount}</span>` : ''}${id === 'bills' && billsReviewCount ? `<span class="badge">${billsReviewCount}</span>` : ''}
+    <nav class="bottom-nav">
+      ${NAV_GROUPS.map((g) => {
+        const active = g.views.includes(state.view);
+        const dot = (g.id === 'bills' && billsReviewCount > 0) || (g.id === 'more' && reviewCount > 0);
+        return `
+          <button class="bottom-nav-btn ${active ? 'active' : ''}" data-view="${g.id}">
+            <span class="bottom-nav-icon">${g.icon}</span>
+            ${g.label}
+            ${dot ? '<span class="bottom-nav-dot"></span>' : ''}
+          </button>
+        `;
+      }).join('')}
+    </nav>
+  `;
+}
+
+/**
+ * Everything that does not fit one of the four primary tabs — the doc's
+ * own "More" section. A plain tappable list rather than another styled
+ * view: this screen's only job is getting out of the way to the real one.
+ */
+function renderMore() {
+  const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
+  const rows = [
+    ['paycheck', 'Paycheck'],
+    ['plan', 'Plan'],
+    ['transactions', 'Transactions'],
+    ['review', 'Review', reviewCount],
+    ['trends', 'Trends'],
+    ['subscriptions', 'Subscriptions'],
+    ['shifts', 'Shifts'],
+    ['paystubs', 'Paystubs'],
+    ['advisor', 'Advisor'],
+    ['connect', 'Connect'],
+  ];
+
+  return `
+    <h2>More</h2>
+    <div class="more-grid">
+      ${rows.map(([id, label, count]) => `
+        <button class="more-row" data-view="${id}">
+          <span>${label}${count ? `<span class="badge">${count}</span>` : ''}</span>
+          <span class="more-row-chev">›</span>
         </button>
       `).join('')}
-    </nav>
+    </div>
   `;
 }
 
@@ -1311,7 +1350,7 @@ function renderSubscriptions() {
 
     ${s.duplicates.map((d) => `
       <div class="note-box"><strong>${d.question}</strong>
-        ${d.services.map((x) => x.payee).join(', middle')} — ${money(d.combinedAnnual)}/yr combined.
+        ${d.services.map((x) => x.payee).join(', ')} — ${money(d.combinedAnnual)}/yr combined.
       </div>`).join('')}
 
     <h3>Recurring bills</h3>
@@ -2001,6 +2040,7 @@ function render() {
     bills: renderBills,
     advisor: renderAdvisor,
     connect: renderConnect,
+    more: renderMore,
   }[state.view]();
 
   app.innerHTML = `
@@ -2008,9 +2048,9 @@ function render() {
       <h1>Family Budget</h1>
     </header>
     ${renderSyncBanner()}
-    ${renderNav()}
     <main class="content">${body}</main>
     ${renderInstallHint()}
+    ${renderBottomNav()}
   `;
 
   const dismiss = app.querySelector('[data-action="dismiss-install"]');

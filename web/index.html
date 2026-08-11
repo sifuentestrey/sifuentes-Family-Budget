@@ -24,56 +24,52 @@
 <link rel="stylesheet" href="./vendor/open-props-normalize.min.css" />
 <link rel="stylesheet" href="./vendor/open-props.min.css" />
 <style>
-  /* Semantic roles, built on Open Props' raw ramps/scale rather than
-   * hand-picked hex. A single confident violet brand color carries both UI
-   * chrome and positive-money emphasis — red stays reserved for negative/
-   * danger rather than reflexively pairing every positive number with
-   * green, which is both a well-worn fintech cliche and one color decision
-   * fewer to keep consistent across ~13 different views. */
+  /* Follows docs/ui/README.md — this app's own pre-existing design
+   * direction (written before this file was), Rocket-Money-inspired but
+   * adapted: calm household control center, one restrained accent, warm
+   * off-white rather than the cool grays a generic template defaults to,
+   * no serif anywhere, generous rounded corners, avoid neon/gradients.
+   * Light-mode values are the doc's own hex, taken directly rather than
+   * re-derived. Dark mode extends the same warm philosophy — the doc
+   * predates this app having a dark mode at all, so there was nothing to
+   * take literally there. */
   :root {
-    --bg: var(--gray-2);
+    --bg: #f6f6f3;
     --surface: #fff;
-    --border: var(--gray-4);
-    --text: var(--gray-9);
-    --muted: var(--gray-6);
-    --accent: var(--violet-8);
-    --accent-soft: var(--violet-0);
-    --warn: var(--orange-8);
-    --warn-soft: var(--orange-0);
-    --info-soft: var(--gray-1);
-    --negative: var(--red-7);
-    --negative-soft: var(--red-0);
-    --bar: var(--teal-7);
-    --radius: var(--radius-3);
-    --radius-sm: var(--radius-2);
+    --border: #e7e7e2;
+    --text: #171717;
+    --muted: #777;
+    --accent: #1f7a57;
+    --accent-soft: #edf6f1;
+    --warn: #a15a1f;
+    --warn-soft: #fbf0e2;
+    --info-soft: #f0f0ed;
+    --negative: #b3362f;
+    --negative-soft: #fbeae8;
+    --bar: #1f7a57;
+    --radius: 20px;
+    --radius-sm: 13px;
     --radius-full: 999px;
-    --font-display: ui-serif, Georgia, "Times New Roman", serif;
-    --shadow-sm: var(--shadow-1);
-    --shadow-lg: var(--shadow-3);
+    --shadow-sm: 0 1px 2px rgba(23, 23, 23, 0.04);
+    --shadow-lg: 0 1px 2px rgba(23, 23, 23, 0.04), 0 10px 24px -12px rgba(23, 23, 23, 0.16);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --shadow-color: 0 0% 0%;
-      --shadow-strength: 15%;
-      --bg: var(--gray-11);
-      --surface: var(--gray-10);
-      --border: var(--gray-8);
-      --text: var(--gray-1);
-      --muted: var(--gray-5);
-      --accent: var(--violet-4);
-      /* Dark-mode "soft" backgrounds blend a low percentage of the ramp
-       * color into the surface rather than using a raw ramp step directly
-       * — every Open Props step is a fully saturated swatch, none of them
-       * are a muted wash on their own, so a raw step (e.g. orange-11) reads
-       * as a bold alarm fill instead of the gentle tint the light-mode
-       * near-white steps (orange-0) give for free. */
-      --accent-soft: color-mix(in srgb, var(--violet-6) 22%, var(--surface));
-      --warn: var(--orange-4);
-      --warn-soft: color-mix(in srgb, var(--orange-6) 20%, var(--surface));
-      --info-soft: var(--gray-9);
-      --negative: var(--red-4);
-      --negative-soft: color-mix(in srgb, var(--red-6) 20%, var(--surface));
-      --bar: var(--teal-4);
+      --bg: #17160f;
+      --surface: #211f17;
+      --border: #35331f;
+      --text: #f3f2ea;
+      --muted: #a39c86;
+      --accent: #4fbf8f;
+      --accent-soft: color-mix(in srgb, #1f7a57 30%, var(--surface));
+      --warn: #dba05a;
+      --warn-soft: color-mix(in srgb, #a15a1f 30%, var(--surface));
+      --info-soft: #262418;
+      --negative: #e4897e;
+      --negative-soft: color-mix(in srgb, #b3362f 25%, var(--surface));
+      --bar: #4fbf8f;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 28px -14px rgba(0, 0, 0, 0.55);
     }
   }
 
@@ -82,32 +78,31 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 16px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    background-image: radial-gradient(ellipse 900px 400px at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent);
-    background-repeat: no-repeat;
   }
-  /* Respect the notch and the home indicator when launched standalone. */
+  /* Respect the notch and the home indicator when launched standalone.
+   * Bottom padding clears the fixed bottom tab bar (see .bottom-nav). */
   #app {
     max-width: 720px; margin: 0 auto;
     padding: env(safe-area-inset-top) calc(16px + env(safe-area-inset-right))
-             calc(64px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+             calc(92px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   }
 
-  /* Big numbers that carry a decision. The one figure on the page that gets
-   * a serif treatment and real elevation — everywhere else stays plain sans
-   * and flat so this one stays legible as THE number, not one of many. */
+  /* Big numbers that carry a decision — docs/ui/README.md's hero card:
+   * "$1,284 / Safe to spend / through Aug 17", 48px, tight tracking, plain
+   * bold sans, not heavy shadows. */
   .headline {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 22px 18px; margin-bottom: 12px;
-    box-shadow: var(--shadow-lg);
+    border-radius: var(--radius); padding: 22px 20px; margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
   }
-  .headline-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+  .headline-label { font-size: 13px; color: var(--muted); }
   .headline-value {
-    font-family: var(--font-display); font-size: 40px; font-weight: 500;
-    letter-spacing: -0.02em; margin: 6px 0 3px; font-variant-numeric: tabular-nums;
+    font-size: 48px; font-weight: 750;
+    letter-spacing: -0.04em; line-height: 1.05; margin: 7px 0 3px; font-variant-numeric: tabular-nums;
   }
-  .headline-value.good { color: var(--accent); }
+  .headline-value.good { color: var(--text); }
   .headline-value.bad { color: var(--negative); }
   .headline-note { font-size: 13px; color: var(--muted); line-height: 1.45; }
 
@@ -156,7 +151,7 @@
 
   .install-hint {
     position: fixed; left: 12px; right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    bottom: calc(84px + env(safe-area-inset-bottom));
     max-width: 696px; margin: 0 auto;
     background: var(--surface); border: 1px solid var(--accent);
     border-radius: var(--radius); padding: 13px 15px;
@@ -170,30 +165,55 @@
   }
 
   .header { padding: 22px 0 10px; }
-  .header h1 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 500; letter-spacing: -0.01em; }
+  .header h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
 
   h2 { font-size: 18px; margin: 20px 0 12px; font-weight: 620; }
   h3 { font-size: 15px; margin: 24px 0 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .muted { color: var(--muted); font-size: 14px; }
 
-  /* Nav ------------------------------------------------------------------ */
-  .nav {
-    display: flex; gap: 2px; overflow-x: auto; padding: 4px;
-    background: var(--info-soft); border: 1px solid var(--border);
-    border-radius: var(--radius-full); margin-bottom: 16px;
-    scrollbar-width: none;
+  /* Bottom tab bar ---------------------------------------------------------
+   * docs/ui/README.md's primary navigation: Home / Bills / Spending /
+   * Income / More, fixed to the bottom like the mockup rather than the
+   * horizontal-scrolling pill row this replaces — a bottom tab bar is the
+   * one element that most makes an app read as this genre at a glance. */
+  .bottom-nav {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 0; width: 100%; max-width: 720px;
+    height: 72px; padding-bottom: env(safe-area-inset-bottom);
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-around; align-items: center;
+    z-index: 40;
   }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav-btn {
-    flex: 1 0 auto; padding: 9px 16px; border: 0; border-radius: var(--radius-full);
-    background: transparent; color: var(--muted); font: inherit; font-size: 14px;
-    font-weight: 550; cursor: pointer; white-space: nowrap;
-    transition: background-color 0.15s ease, color 0.15s ease;
+  .bottom-nav-btn {
+    background: none; border: 0; font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    color: var(--muted); font-size: 11px; font-weight: 600;
+    padding: 6px 10px; position: relative;
   }
-  .nav-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 650; }
+  .bottom-nav-btn.active { color: var(--text); }
+  .bottom-nav-icon { font-size: 19px; line-height: 1; }
+  .bottom-nav-dot {
+    position: absolute; top: 2px; right: 3px;
+    width: 8px; height: 8px; border-radius: var(--radius-full);
+    background: var(--negative); border: 1.5px solid var(--surface);
+  }
+
+  /* More menu -------------------------------------------------------------- */
+  .more-grid { display: flex; flex-direction: column; gap: 2px; }
+  .more-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+    font-size: 15px; font-weight: 550; cursor: pointer; text-align: left;
+    font-family: inherit; color: var(--text);
+  }
+  .more-row-chev { color: var(--muted); font-size: 14px; }
+
   .badge {
     display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px;
-    background: var(--accent); color: var(--surface); border-radius: var(--radius-full);
+    background: var(--accent); color: #fff; border-radius: var(--radius-full);
     font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
   }
 
