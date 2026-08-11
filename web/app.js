@@ -353,7 +353,10 @@ function gatherSafeToSpendInputs() {
   const pendingOutflows = pendingTxns.reduce((sum, t) => sum + t.amount, 0);
 
   // Daily variable spending: average of groceries, fuel, dining from recent months.
-  const variableCategories = ['Groceries', 'Gas & Fuel', 'Dining & Restaurants'];
+  // These strings must match what the categorizer actually emits (see
+  // src/engine/seed-rules.js) — a label that never occurs silently contributes
+  // zero, which inflates safe-to-spend rather than failing visibly.
+  const variableCategories = ['Groceries', 'Gas', 'Dining Out'];
   const recentMonths = state.months.slice(-3).filter((m) => m < state.month);
   let variableDailyTotal = 0;
   let variableDayCount = 0;
@@ -376,9 +379,27 @@ function gatherSafeToSpendInputs() {
   const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;
   const bufferBalance = 0;
 
-  // Expected income before next payday: conservative floor for this income stream.
-  // For demo purposes, use the typical biweekly amount if available.
-  const expectedIncomeBeforePayday = state.variableStream?.typical_amount ?? 0;
+  // Income landing strictly BEFORE the horizon — never the paycheck that defines
+  // it. The horizon is the variable stream's next_expected, so that check is what
+  // the household is surviving until, not money available to survive on; counting
+  // it inflates the headline by an amount that has not arrived.
+  //
+  // Other streams are a different matter. This household has a stable Meridian
+  // paycheck as well as the variable Northstar one, and when Meridian lands
+  // before the horizon it is genuinely spendable money — excluding it understates
+  // the number just as surely as including the horizon check overstated it.
+  //
+  // Valued at the p20 floor rather than the typical amount, matching the
+  // incomeBasis: 'floor' passed below: a better-than-usual check should make this
+  // number rise later, never make it fall short now.
+  const horizon = state.variableStream.next_expected;
+  const today = new Date().toISOString().slice(0, 10);
+  const expectedIncomeBeforePayday = (state.streams ?? [])
+    .filter((s) => s !== state.variableStream
+      && s.next_expected
+      && s.next_expected >= today
+      && s.next_expected < horizon)
+    .reduce((sum, s) => sum + (s.distribution?.floor ?? 0), 0);
 
   return {
     currentBalance,
