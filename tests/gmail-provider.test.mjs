@@ -7,9 +7,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createGmailProvider, decodeBase64Url, findHeader, parseFromHeader,
+  createGmailProvider, decodeBase64Url, decodeBase64UrlToBytes, findHeader, parseFromHeader,
   extractBody, buildGmailQuery,
 } from '../src/providers/gmail-email-provider.js';
+
+function b64urlBytes(bytes) {
+  return Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
 function b64url(text) {
   return Buffer.from(text, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -37,6 +41,26 @@ test('decodeBase64Url tolerates missing padding at every remainder length', () =
 test('decodeBase64Url returns empty string for falsy input', () => {
   assert.equal(decodeBase64Url(undefined), '');
   assert.equal(decodeBase64Url(''), '');
+});
+
+// ---------------------------------------------------------------------------
+// decodeBase64UrlToBytes — the raw path, used for attachments (a PDF is not
+// UTF-8 and must never go through TextDecoder, which is exactly what would
+// corrupt it if the two decoders shared a code path all the way through).
+// ---------------------------------------------------------------------------
+
+test('decodeBase64UrlToBytes round-trips arbitrary binary, including bytes that are not valid UTF-8', () => {
+  // 0xFF and 0xFE are invalid UTF-8 lead bytes on their own — a decoder that
+  // routed through TextDecoder would replace them with U+FFFD and the
+  // original bytes would never come back.
+  const original = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x01, 0x7f]);
+  const decoded = decodeBase64UrlToBytes(b64urlBytes(original));
+  assert.deepEqual([...decoded], [...original]);
+});
+
+test('decodeBase64UrlToBytes returns an empty array for falsy input', () => {
+  assert.equal(decodeBase64UrlToBytes(undefined).length, 0);
+  assert.equal(decodeBase64UrlToBytes('').length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -101,9 +125,40 @@ test('extractBody recurses into nested multipart/mixed with an attachment siblin
   assert.equal(extractBody(payload).text, 'the bill text');
 });
 
-test('extractBody returns empty strings for a payload with no data anywhere', () => {
-  assert.deepEqual(extractBody({ mimeType: 'multipart/mixed', parts: [] }), { text: '', html: '' });
-  assert.deepEqual(extractBody(null), { text: '', html: '' });
+test('extractBody returns empty strings and no attachments for a payload with no data anywhere', () => {
+  assert.deepEqual(extractBody({ mimeType: 'multipart/mixed', parts: [] }), { text: '', html: '', attachments: [] });
+  assert.deepEqual(extractBody(null), { text: '', html: '', attachments: [] });
+});
+
+test('extractBody collects a PDF attachment alongside the plain-text part', () => {
+  const payload = {
+    mimeType: 'multipart/mixed',
+    parts: [
+      { mimeType: 'text/plain', body: { data: b64url('Your statement is attached.') } },
+      { filename: 'statement.pdf', mimeType: 'application/pdf', body: { attachmentId: 'att_1', size: 40213 } },
+    ],
+  };
+  const result = extractBody(payload);
+  assert.equal(result.text, 'Your statement is attached.');
+  assert.equal(result.attachments.length, 1);
+  assert.deepEqual(result.attachments[0], {
+    id: 'att_1', filename: 'statement.pdf', mimeType: 'application/pdf', sizeBytes: 40213,
+  });
+});
+
+test('extractBody finds an attachment nested under multipart/alternative inside multipart/mixed', () => {
+  const payload = {
+    mimeType: 'multipart/mixed',
+    parts: [
+      {
+        mimeType: 'multipart/alternative',
+        parts: [{ mimeType: 'text/plain', body: { data: b64url('see attached') } }],
+      },
+      { filename: 'bill.pdf', mimeType: 'application/pdf', body: { attachmentId: 'att_2', size: 1000 } },
+    ],
+  };
+  assert.equal(extractBody(payload).attachments.length, 1);
+  assert.equal(extractBody(payload).attachments[0].id, 'att_2');
 });
 
 // ---------------------------------------------------------------------------
@@ -238,4 +293,40 @@ test('info declares isLive: true and the read-only scope', () => {
   assert.equal(provider.info.isLive, true);
   assert.equal(provider.info.key, 'gmail');
   assert.deepEqual(provider.info.scopes, ['https://www.googleapis.com/auth/gmail.readonly']);
+});
+
+test('getMessage reports a PDF attachment alongside a thin body', () => {
+  const fetchImpl = fakeFetch({
+    '/messages/msg_pdf': {
+      id: 'msg_pdf',
+      internalDate: '1',
+      payload: {
+        headers: [{ name: 'From', value: 'billing@examplepower.com' }, { name: 'Subject', value: 'Your statement' }],
+        mimeType: 'multipart/mixed',
+        parts: [
+          { mimeType: 'text/plain', body: { data: b64url('Your e-bill is attached.') } },
+          { filename: 'statement.pdf', mimeType: 'application/pdf', body: { attachmentId: 'att_99', size: 12345 } },
+        ],
+      },
+    },
+  });
+  const provider = createGmailProvider({ getAccessToken: async () => 'tok', fetchImpl });
+
+  return provider.getMessage('msg_pdf').then((message) => {
+    assert.equal(message.bodyText, 'Your e-bill is attached.');
+    assert.equal(message.attachments.length, 1);
+    assert.equal(message.attachments[0].filename, 'statement.pdf');
+    assert.equal(message.attachments[0].mimeType, 'application/pdf');
+  });
+});
+
+test('getAttachment fetches and decodes the raw bytes, not text', async () => {
+  const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0xff]); // "%PDF-1" + a non-UTF8 byte
+  const fetchImpl = fakeFetch({
+    '/messages/msg_1/attachments/att_99': { size: pdfBytes.length, data: b64urlBytes(pdfBytes) },
+  });
+  const provider = createGmailProvider({ getAccessToken: async () => 'tok', fetchImpl });
+
+  const bytes = await provider.getAttachment('msg_1', 'att_99');
+  assert.deepEqual([...bytes], [...pdfBytes]);
 });

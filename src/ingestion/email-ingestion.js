@@ -132,6 +132,8 @@ export function providerFromSender(message) {
  * @param {object[]} [options.existingBills] - for duplicate detection
  * @param {string[]} [options.fromDomains]
  * @param {number} [options.limit]
+ * @param {import('../providers/types.js').DocumentParser} [options.pdfParser] - tried when the body alone
+ *   doesn't yield an amount and due date and the message has a PDF attachment; see src/ingestion/pdf-parser.js
  * @returns {Promise<IngestResult>}
  */
 export async function ingestBillsFromEmail(provider, options) {
@@ -188,11 +190,39 @@ export async function ingestBillsFromEmail(provider, options) {
         : htmlToText(message.bodyHtml ?? '');
 
       const providerName = options.providerNameOverride ?? providerFromSender(message);
-      const fields = parseBillText(text, {
+      let fields = parseBillText(text, {
         subject: message.subject,
         fromAddress: message.from,
         providerName,
       });
+
+      // A common real pattern: "Your e-bill is attached" with almost nothing
+      // in the body and the actual amount/date only in the PDF. Tried only
+      // when the body-only parse came up short, since the body is cheaper and
+      // usually sufficient — this is a fallback, not a second opinion asked
+      // for every message.
+      let sourceDocumentId;
+      if ((fields.amountDue == null || !fields.dueDate) && options.pdfParser && provider.getAttachment) {
+        const pdfAttachment = message.attachments?.find((a) => a.mimeType === 'application/pdf');
+        if (pdfAttachment) {
+          try {
+            const bytes = await provider.getAttachment(message.id, pdfAttachment.id);
+            const input = { kind: 'pdf', bytes, subject: message.subject, fromAddress: message.from, providerName };
+            if (options.pdfParser.canParse(input)) {
+              const parsed = await options.pdfParser.parse(input);
+              // Only switch to the PDF's fields if it actually found what the
+              // body parse missed — a PDF that also came up empty shouldn't
+              // discard a partial body-only result.
+              if (parsed.fields.amountDue != null && parsed.fields.dueDate) {
+                fields = parsed.fields;
+                sourceDocumentId = pdfAttachment.id;
+              }
+            }
+          } catch (error) {
+            result.errors.push({ stage: 'pdf', messageId: message.id, message: error.message });
+          }
+        }
+      }
 
       // An amount and a due date are the minimum useful bill. Without both, the
       // budget cannot say what is owed or when, so it is not stored as a bill —
@@ -218,8 +248,12 @@ export async function ingestBillsFromEmail(provider, options) {
         statementDate: fields.statementDate,
         statementPeriod: fields.statementPeriod,
         status: 'detected',
-        source: 'email',
+        // A bill resolved from the attached PDF is backed by the actual
+        // statement, not a teaser email — sourceDocumentId set, source type
+        // reflects the more authoritative origin (see dedupe.js's SOURCE_AUTHORITY).
+        source: sourceDocumentId ? 'pdf' : 'email',
         sourceMessageId: message.id,
+        sourceDocumentId,
         confidence: fields.confidence,
         detectedAt: new Date().toISOString(),
         raw: { amountLabel: fields.amountLabel, warnings: fields.warnings, subject: message.subject },

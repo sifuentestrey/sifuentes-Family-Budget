@@ -564,6 +564,55 @@ test('low balance produces an urgent alert', () => {
   assert.ok(toEmail.includes(low), 'urgent alerts email');
 });
 
+function isoDaysFromNow(n) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+test('an overdue bill produces an urgent, separately-keyed alert from a due-soon one', () => {
+  const { alerts } = buildAlerts({
+    bills: [
+      { id: 'bill_overdue', providerName: 'Example Power', amountDue: 203.17, dueDate: isoDaysFromNow(-2), status: 'detected' },
+      { id: 'bill_soon', providerName: 'Example Water', amountDue: 74.2, dueDate: isoDaysFromNow(2), status: 'confirmed' },
+    ],
+  });
+
+  const overdue = alerts.find((a) => a.type === 'bill_overdue');
+  const soon = alerts.find((a) => a.type === 'bill_due_soon');
+  assert.ok(overdue, 'overdue bill produces an alert');
+  assert.ok(overdue.urgent);
+  assert.equal(overdue.key, 'bill_overdue:bill_overdue');
+  assert.ok(soon, 'a bill due within the window produces an alert');
+  assert.equal(soon.key, 'bill_due_soon:bill_soon');
+  assert.notEqual(overdue.key, soon.key, 'overdue and due-soon use different keys so dismissing one does not silence the other');
+});
+
+test('a bill due further out than the window produces no alert', () => {
+  const { alerts } = buildAlerts({
+    bills: [{ id: 'bill_far', providerName: 'Example Insurance', amountDue: 1428, dueDate: isoDaysFromNow(30), status: 'detected' }],
+  });
+  assert.equal(alerts.filter((a) => a.type.startsWith('bill_')).length, 0);
+});
+
+test('paid, ignored, and needs-review bills never alert', () => {
+  const { alerts } = buildAlerts({
+    bills: [
+      { id: 'b1', providerName: 'P', amountDue: 10, dueDate: isoDaysFromNow(-5), status: 'paid' },
+      { id: 'b2', providerName: 'P', amountDue: 10, dueDate: isoDaysFromNow(-5), status: 'ignored' },
+      { id: 'b3', providerName: 'P', amountDue: 10, dueDate: isoDaysFromNow(-5), status: 'detected', needsReview: true },
+    ],
+  });
+  assert.equal(alerts.filter((a) => a.type.startsWith('bill_')).length, 0, 'nothing budgeted-against or unreviewed should alert');
+});
+
+test('an overdue bill alert reaches email', () => {
+  const { toEmail } = buildAlerts({
+    bills: [{ id: 'bill_overdue', providerName: 'Example Power', amountDue: 203.17, dueDate: isoDaysFromNow(-1), status: 'detected' }],
+  });
+  assert.ok(toEmail.some((a) => a.type === 'bill_overdue'));
+});
+
 test('dismissed alerts do not come back on the next sync', () => {
   const state = {
     forecast: {

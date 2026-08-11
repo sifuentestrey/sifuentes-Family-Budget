@@ -13,8 +13,14 @@
  */
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+// npm: here, not a bare specifier — this is the one piece pdf-parser.js
+// deliberately doesn't import itself (see that file's own comment): Node
+// tests reach unpdf as a bare specifier via node_modules, Deno reaches the
+// same package through its npm compat layer instead.
+import { extractText, getDocumentProxy } from 'npm:unpdf';
 import { createGmailProvider } from '../_shared/providers/gmail-email-provider.js';
 import { ingestBillsFromEmail } from '../_shared/ingestion/email-ingestion.js';
+import { createPdfParser } from '../_shared/ingestion/pdf-parser.js';
 import { syncBills } from '../_shared/sync/sync-engine.js';
 import { billToRow, rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
 
@@ -22,6 +28,14 @@ import { billToRow, rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
 // from. 90 days catches a handful of monthly-cadence bills without pulling a
 // whole mailbox history.
 const INITIAL_LOOKBACK_DAYS = 90;
+
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  const pdf = await getDocumentProxy(bytes);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return text;
+}
+
+const pdfParser = createPdfParser({ extractText: extractPdfText });
 
 function secretsMatch(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -180,8 +194,13 @@ Deno.serve(async (req) => {
         ? new Date(connection.last_synced_at).toISOString().slice(0, 10)
         : new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
 
+      // syncBills() only threads (provider, opts) through to the ingester —
+      // pdfParser rides along via closure rather than a new syncBills option,
+      // so the already-tested sync-engine.js contract doesn't need to change.
+      const emailIngester = (p: any, opts: any) => ingestBillsFromEmail(p, { ...opts, pdfParser });
+
       const run = await syncBills({
-        provider, store, householdId: connection.household_id, since, emailIngester: ingestBillsFromEmail,
+        provider, store, householdId: connection.household_id, since, emailIngester,
       });
 
       if (run.status === 'success' || run.status === 'partial') {

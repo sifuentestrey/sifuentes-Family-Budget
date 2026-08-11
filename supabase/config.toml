@@ -34,3 +34,7 @@ verify_jwt = false
 # a user JWT.
 [functions.sync-bills]
 verify_jwt = false
+
+# Same reasoning again: cron presents a Vault-held secret, not a user JWT.
+[functions.send-alerts]
+verify_jwt = false

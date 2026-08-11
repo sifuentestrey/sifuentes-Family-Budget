@@ -27,6 +27,9 @@ const LARGE_TRANSACTION_MULTIPLE = 2.5;
 /** Hours without a successful sync before the data is considered stale. */
 const STALE_SYNC_HOURS = 48;
 
+/** A bill inside this window is worth flagging before it's actually overdue. */
+const BILL_DUE_SOON_DAYS = 3;
+
 function median(values) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -43,6 +46,7 @@ function median(values) {
  *
  * @param {object} state
  * @param {object} [state.forecast] - from projectBalance
+ * @param {Array<object>} [state.bills] - active Bills (see src/domain/bill.js); paid/ignored/needsReview are skipped
  * @param {Array<object>} [state.transactions]
  * @param {object} [state.subscriptions] - from analyzeSubscriptions
  * @param {object} [state.syncHealth] - { last_success, status, institution_name }
@@ -104,6 +108,42 @@ export function buildAlerts(state = {}) {
           : `Lowest point is ${money(low.balance)} on ${low.date}. Cutting it close.`,
         date: low.date,
         amount: low.balance,
+      });
+    }
+  }
+
+  // --- Bills due soon or overdue.
+  //
+  // Overdue and due-soon get separate keys per bill rather than one that
+  // updates in place: dismissing "due in 3 days" should not silence the bill
+  // going overdue two days later, which is a materially more urgent state and
+  // deserves its own alert even though it's the same bill.
+  for (const bill of state.bills ?? []) {
+    if (bill.status === 'paid' || bill.status === 'ignored' || bill.needsReview) continue;
+
+    const dueMs = new Date(`${bill.dueDate}T00:00:00Z`).getTime();
+    const todayMs = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+    const daysUntil = Math.round((dueMs - todayMs) / 86400000);
+
+    if (daysUntil < 0) {
+      push({
+        key: `bill_overdue:${bill.id}`,
+        type: 'bill_overdue',
+        urgent: true,
+        title: `${bill.providerName} is overdue`,
+        body: `${money(bill.amountDue)} was due ${bill.dueDate}.`,
+        date: bill.dueDate,
+        amount: bill.amountDue,
+      });
+    } else if (daysUntil <= BILL_DUE_SOON_DAYS) {
+      push({
+        key: `bill_due_soon:${bill.id}`,
+        type: 'bill_due_soon',
+        urgent: true,
+        title: `${bill.providerName} due ${daysUntil === 0 ? 'today' : `in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}`,
+        body: `${money(bill.amountDue)} due ${bill.dueDate}.`,
+        date: bill.dueDate,
+        amount: bill.amountDue,
       });
     }
   }

@@ -13,6 +13,21 @@
 const API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 /**
+ * The raw bytes behind a base64url payload. Gmail uses base64url (not
+ * standard base64) for both text body parts and binary attachments alike —
+ * this is the shared decode step; `decodeBase64Url` below adds UTF-8 text
+ * decoding on top for the body-part case, and PDF attachments use these bytes
+ * directly, since running a PDF through TextDecoder would corrupt it.
+ */
+export function decodeBase64UrlToBytes(data) {
+  if (!data) return new Uint8Array(0);
+  const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/**
  * Gmail sends body parts as base64url, not standard base64, and the payload
  * is UTF-8 — `atob()` alone decodes to a binary string, which mangles any
  * multi-byte character (curly quotes in a statement's boilerplate, an accented
@@ -20,11 +35,7 @@ const API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
  */
 export function decodeBase64Url(data) {
   if (!data) return '';
-  const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-  const binary = atob(padded);
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  return new TextDecoder('utf-8').decode(bytes);
+  return new TextDecoder('utf-8').decode(decodeBase64UrlToBytes(data));
 }
 
 export function findHeader(headers, name) {
@@ -42,30 +53,47 @@ export function parseFromHeader(raw) {
 }
 
 /**
- * Gmail messages are a MIME tree, not a flat body — a bill with an HTML part
- * and a plain-text fallback nests both under `payload.parts`. Walks it once
- * and keeps the first plain-text and first HTML part found, which is all the
- * parser downstream (`bill-parser.js`) ever looks at.
+ * Gmail messages are a MIME tree, not a flat body — a bill with an HTML part,
+ * a plain-text fallback, and a PDF statement attached all nest under
+ * `payload.parts`. Walks it once and keeps the first plain-text part, the
+ * first HTML part, and every attachment found (identified by a non-empty
+ * `filename` paired with `body.attachmentId` — Gmail's convention for "this
+ * part must be fetched separately," as opposed to `body.data`, which is
+ * inline).
  */
 export function extractBody(payload) {
-  if (!payload) return { text: '', html: '' };
+  if (!payload) return { text: '', html: '', attachments: [] };
+
+  if (payload.filename && payload.body?.attachmentId) {
+    return {
+      text: '', html: '',
+      attachments: [{
+        id: payload.body.attachmentId,
+        filename: payload.filename,
+        mimeType: payload.mimeType,
+        sizeBytes: payload.body.size,
+      }],
+    };
+  }
   if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    return { text: decodeBase64Url(payload.body.data), html: '' };
+    return { text: decodeBase64Url(payload.body.data), html: '', attachments: [] };
   }
   if (payload.mimeType === 'text/html' && payload.body?.data) {
-    return { text: '', html: decodeBase64Url(payload.body.data) };
+    return { text: '', html: decodeBase64Url(payload.body.data), attachments: [] };
   }
   if (payload.parts?.length) {
     let text = '';
     let html = '';
+    const attachments = [];
     for (const part of payload.parts) {
       const nested = extractBody(part);
       if (nested.text && !text) text = nested.text;
       if (nested.html && !html) html = nested.html;
+      attachments.push(...nested.attachments);
     }
-    return { text, html };
+    return { text, html, attachments };
   }
-  return { text: '', html: '' };
+  return { text: '', html: '', attachments: [] };
 }
 
 /**
@@ -106,7 +134,7 @@ export function createGmailProvider({ getAccessToken, fetchImpl = fetch }) {
     const message = await authedFetch(`${API_BASE}/messages/${id}?format=full`);
     const headers = message.payload?.headers;
     const { from, fromName } = parseFromHeader(findHeader(headers, 'From'));
-    const { text, html } = extractBody(message.payload);
+    const { text, html, attachments } = extractBody(message.payload);
 
     return {
       id: message.id,
@@ -116,7 +144,14 @@ export function createGmailProvider({ getAccessToken, fetchImpl = fetch }) {
       receivedAt: new Date(Number(message.internalDate)).toISOString(),
       bodyText: text || undefined,
       bodyHtml: html || undefined,
+      attachments: attachments.length ? attachments : undefined,
     };
+  }
+
+  /** Raw bytes of one attachment — a second API call, since Gmail never inlines them into getMessage(). */
+  async function getAttachment(messageId, attachmentId) {
+    const result = await authedFetch(`${API_BASE}/messages/${messageId}/attachments/${attachmentId}`);
+    return decodeBase64UrlToBytes(result.data);
   }
 
   async function searchMessages(query = {}) {
@@ -163,5 +198,6 @@ export function createGmailProvider({ getAccessToken, fetchImpl = fetch }) {
 
     searchMessages,
     getMessage,
+    getAttachment,
   };
 }

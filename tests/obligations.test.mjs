@@ -16,7 +16,10 @@ test('excludes transfers and income from obligation discovery', () => {
   ];
   const results = discoverObligations(txs);
   assert.equal(results.length, 1);
-  assert.equal(results[0].normalizedMerchant, 'electric co');
+  // "Co" is a corporate suffix normalizePayee strips by design (see the test
+  // above), same as "Inc." — "Electric Co" normalizes to "electric", not
+  // "electric co".
+  assert.equal(results[0].normalizedMerchant, 'electric');
   assert.equal(results[0].frequency, 'monthly');
   assert.equal(results[0].needsReview, true);
 });
