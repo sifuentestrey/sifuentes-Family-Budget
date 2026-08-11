@@ -7,7 +7,7 @@
 
 <!-- Installable to the home screen on Android and iOS. -->
 <link rel="manifest" href="./manifest.webmanifest" />
-<meta name="theme-color" content="#1a1d23" />
+<meta name="theme-color" content="#121009" />
 
 <!-- iOS ignores the manifest for the home-screen icon and launch behaviour,
      so these have to be declared separately. -->
@@ -17,36 +17,50 @@
 <meta name="apple-mobile-web-app-title" content="Budget" />
 <meta name="mobile-web-app-capable" content="yes" />
 <style>
-  /* Light and dark both defined explicitly — the phone decides which. */
+  /* Light and dark both defined explicitly — the phone decides which.
+   * Warm paper neutrals rather than cool blue-gray, and a single confident
+   * indigo brand color carrying both UI chrome and positive-money emphasis
+   * — red stays reserved for negative/danger rather than reflexively
+   * pairing every positive number with green, which is both a well-worn
+   * fintech cliche and one color-decision fewer to keep consistent. */
   :root {
-    --bg: #f6f7f9;
-    --surface: #ffffff;
-    --border: #e2e5ea;
-    --text: #14171c;
-    --muted: #6b7280;
-    --accent: #2f6f4f;
-    --accent-soft: #e6f0ea;
-    --warn: #8a5a00;
-    --warn-soft: #fdf3dc;
-    --info-soft: #eef2f7;
-    --negative: #a03030;
-    --bar: #4a8a68;
-    --radius: 12px;
+    --bg: #f7f5f0;
+    --surface: #fffdf9;
+    --border: #e8e2d4;
+    --text: #1c1912;
+    --muted: #776f5d;
+    --accent: #4b3aa4;
+    --accent-soft: #ece7fb;
+    --warn: #a8630a;
+    --warn-soft: #fbf1de;
+    --info-soft: #f0ebe0;
+    --negative: #b3362f;
+    --negative-soft: #f8e9e7;
+    --bar: #1f8f6f;
+    --radius: 14px;
+    --radius-sm: 9px;
+    --radius-full: 999px;
+    --font-display: ui-serif, Georgia, "Times New Roman", serif;
+    --shadow-sm: 0 1px 2px rgba(28, 22, 6, 0.05);
+    --shadow-lg: 0 1px 2px rgba(28, 22, 6, 0.04), 0 12px 28px -14px rgba(28, 22, 6, 0.22);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14161a;
-      --surface: #1c1f25;
-      --border: #2c313a;
-      --text: #e8eaed;
-      --muted: #9aa1ac;
-      --accent: #6fbf95;
-      --accent-soft: #1e2a24;
-      --warn: #e0b458;
-      --warn-soft: #2a2418;
-      --info-soft: #1f242c;
-      --negative: #e08585;
-      --bar: #4f9a75;
+      --bg: #121009;
+      --surface: #1d1a13;
+      --border: #362f21;
+      --text: #f5f1e6;
+      --muted: #ab9f89;
+      --accent: #a394ec;
+      --accent-soft: #292142;
+      --warn: #e2ab55;
+      --warn-soft: #2d2414;
+      --info-soft: #221d15;
+      --negative: #e4897e;
+      --negative-soft: #2c1c19;
+      --bar: #45c99a;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+      --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 32px -14px rgba(0, 0, 0, 0.6);
     }
   }
 
@@ -57,6 +71,8 @@
     color: var(--text);
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(ellipse 900px 400px at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent);
+    background-repeat: no-repeat;
   }
   /* Respect the notch and the home indicator when launched standalone. */
   #app {
@@ -65,13 +81,19 @@
              calc(64px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   }
 
-  /* Big numbers that carry a decision. */
+  /* Big numbers that carry a decision. The one figure on the page that gets
+   * a serif treatment and real elevation — everywhere else stays plain sans
+   * and flat so this one stays legible as THE number, not one of many. */
   .headline {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 18px 16px; margin-bottom: 12px;
+    border-radius: var(--radius); padding: 22px 18px; margin-bottom: 12px;
+    box-shadow: var(--shadow-lg);
   }
-  .headline-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  .headline-value { font-size: 34px; font-weight: 680; letter-spacing: -0.03em; margin: 4px 0 2px; }
+  .headline-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+  .headline-value {
+    font-family: var(--font-display); font-size: 40px; font-weight: 500;
+    letter-spacing: -0.02em; margin: 6px 0 3px; font-variant-numeric: tabular-nums;
+  }
   .headline-value.good { color: var(--accent); }
   .headline-value.bad { color: var(--negative); }
   .headline-note { font-size: 13px; color: var(--muted); line-height: 1.45; }
@@ -91,6 +113,7 @@
   .step {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 14px; margin-bottom: 8px;
+    box-shadow: var(--shadow-sm);
   }
   .step.done { opacity: 0.62; }
   .step-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
@@ -125,7 +148,7 @@
     background: var(--surface); border: 1px solid var(--accent);
     border-radius: var(--radius); padding: 13px 15px;
     font-size: 13px; line-height: 1.45; color: var(--text);
-    box-shadow: 0 6px 24px rgba(0,0,0,0.22); z-index: 50;
+    box-shadow: var(--shadow-lg); z-index: 50;
   }
   .install-hint strong { color: var(--accent); }
   .install-hint button {
@@ -133,8 +156,8 @@
     color: var(--muted); text-decoration: underline; font: inherit; font-size: 12px; cursor: pointer;
   }
 
-  .header { padding: 20px 0 8px; }
-  .header h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+  .header { padding: 22px 0 10px; }
+  .header h1 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 500; letter-spacing: -0.01em; }
 
   h2 { font-size: 18px; margin: 20px 0 12px; font-weight: 620; }
   h3 { font-size: 15px; margin: 24px 0 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -142,21 +165,22 @@
 
   /* Nav ------------------------------------------------------------------ */
   .nav {
-    display: flex; gap: 4px; overflow-x: auto; padding: 4px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); margin-bottom: 16px;
+    display: flex; gap: 2px; overflow-x: auto; padding: 4px;
+    background: var(--info-soft); border: 1px solid var(--border);
+    border-radius: var(--radius-full); margin-bottom: 16px;
     scrollbar-width: none;
   }
   .nav::-webkit-scrollbar { display: none; }
   .nav-btn {
-    flex: 1 0 auto; padding: 9px 14px; border: 0; border-radius: 8px;
+    flex: 1 0 auto; padding: 9px 16px; border: 0; border-radius: var(--radius-full);
     background: transparent; color: var(--muted); font: inherit; font-size: 14px;
     font-weight: 550; cursor: pointer; white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
-  .nav-btn.active { background: var(--accent-soft); color: var(--accent); }
+  .nav-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 650; }
   .badge {
     display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px;
-    background: var(--accent); color: var(--bg); border-radius: 9px;
+    background: var(--accent); color: var(--surface); border-radius: var(--radius-full);
     font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
   }
 
@@ -182,6 +206,7 @@
   .stat {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 14px 12px;
+    box-shadow: var(--shadow-sm);
   }
   .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-value { font-size: 20px; font-weight: 650; margin-top: 4px; letter-spacing: -0.02em; }
