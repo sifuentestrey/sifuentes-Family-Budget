@@ -379,16 +379,27 @@ function gatherSafeToSpendInputs() {
   const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;
   const bufferBalance = 0;
 
-  // Income landing strictly BEFORE the horizon — not the paycheck that defines
-  // it. next_expected is when this stream's next check arrives, so that check is
-  // what the household is surviving until, not money available to survive on.
-  // Counting it here added a full paycheck to the starting balance and inflated
-  // the headline by exactly the amount that has not arrived yet.
+  // Income landing strictly BEFORE the horizon — never the paycheck that defines
+  // it. The horizon is the variable stream's next_expected, so that check is what
+  // the household is surviving until, not money available to survive on; counting
+  // it inflates the headline by an amount that has not arrived.
   //
-  // With a single detected stream there is by definition no income between now
-  // and next_expected, so this is zero. It stays a named variable because a
-  // second stream (or a known one-off) would legitimately land in here.
-  const expectedIncomeBeforePayday = 0;
+  // Other streams are a different matter. This household has a stable Meridian
+  // paycheck as well as the variable Northstar one, and when Meridian lands
+  // before the horizon it is genuinely spendable money — excluding it understates
+  // the number just as surely as including the horizon check overstated it.
+  //
+  // Valued at the p20 floor rather than the typical amount, matching the
+  // incomeBasis: 'floor' passed below: a better-than-usual check should make this
+  // number rise later, never make it fall short now.
+  const horizon = state.variableStream.next_expected;
+  const today = new Date().toISOString().slice(0, 10);
+  const expectedIncomeBeforePayday = (state.streams ?? [])
+    .filter((s) => s !== state.variableStream
+      && s.next_expected
+      && s.next_expected >= today
+      && s.next_expected < horizon)
+    .reduce((sum, s) => sum + (s.distribution?.floor ?? 0), 0);
 
   return {
     currentBalance,
