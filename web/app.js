@@ -1193,16 +1193,22 @@ function renderExpenses() {
     </div>
 
     <h3>By category</h3>
-    <div class="breakdown">
-      ${p.categories.map((c) => `
-        <div class="breakdown-row">
-          <span class="breakdown-label">
-            ${c.category}
-            <span class="pill">${c.bucket}</span>
-            ${c.reclassified ? '<span class="pill">reclassified</span>' : ''}
-          </span>
-          <span>${moneyExact(c.monthlyAverage)}</span>
-        </div>`).join('')}
+    <div class="cat-list">
+      ${(() => {
+        const catMax = Math.max(...p.categories.map((c) => c.monthlyAverage), 1);
+        return p.categories.map((c) => `
+          <div class="cat-row">
+            <div class="cat-head">
+              <span class="cat-name">
+                ${c.category}
+                <span class="pill">${c.bucket}</span>
+                ${c.reclassified ? '<span class="pill">reclassified</span>' : ''}
+              </span>
+              <span class="cat-amount">${moneyExact(c.monthlyAverage)}</span>
+            </div>
+            <div class="bar"><div class="bar-fill" style="width:${(c.monthlyAverage / catMax) * 100}%"></div></div>
+          </div>`).join('');
+      })()}
     </div>
     <p class="muted" style="margin-top:10px">
       "Reclassified" means the spending pattern overrode the category label — an
@@ -1239,13 +1245,13 @@ function renderSubscriptions() {
            (+${p.priceChange.changePercent}%, ${money(p.annualImpactOfIncrease)}/yr)`).join(' · ')}
       </div>` : ''}
 
-    <div class="breakdown">
-      ${s.subscriptions.map((sub) => `
-        <div class="breakdown-row">
-          <span class="breakdown-label">${sub.payee}
-            ${sub.confidence === 'low' ? '<span class="pill">new</span>' : ''}
-          </span>
-          <span>${moneyExact(sub.last_amount)}/mo · ${money(sub.annualCost)}/yr</span>
+    <div class="sub-grid">
+      ${s.subscriptions.map((sub, i) => `
+        <div class="sub-tile">
+          <div class="sub-avatar sub-avatar-${i % 5}">${sub.payee.trim().charAt(0).toUpperCase()}</div>
+          <div class="sub-name">${sub.payee}${sub.confidence === 'low' ? ' <span class="pill">new</span>' : ''}</div>
+          <div class="sub-price">${moneyExact(sub.last_amount)}<span class="sub-cadence">/mo</span></div>
+          <div class="sub-annual">${money(sub.annualCost)}/yr</div>
         </div>`).join('')}
     </div>
 
@@ -1323,16 +1329,18 @@ function renderConnect() {
         </button>
       </div>
       ${items.length === 0 ? `<p class="step-why">No accounts connected yet. Plaid Link opens in its own secure window — your bank credentials never touch this app.</p>` : `
-        <div class="stream-list" style="margin-top:10px;">
+        <div class="bank-grid" style="margin-top:10px;">
           ${items.map((item) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${item.institution_name}</span>
+            <div class="bank-tile">
+              <div class="bank-tile-head">
+                <span class="bank-name">${item.institution_name}</span>
                 <span class="pill ${item.status === 'good' ? 'stable' : 'variable'}">${item.status}</span>
               </div>
-              <div class="stream-meta">
-                ${(item.accounts ?? []).map((a) => `${a.nickname} ····${a.mask ?? ''}`).join(' · ') || 'No accounts yet'}
-              </div>
+              ${(item.accounts?.length ? item.accounts : [null]).map((a) => a ? `
+                <div class="bank-account">
+                  <span>${a.nickname}</span>
+                  <span class="bank-mask">····${a.mask ?? ''}</span>
+                </div>` : `<div class="bank-account muted">No accounts yet</div>`).join('')}
             </div>
           `).join('')}
         </div>

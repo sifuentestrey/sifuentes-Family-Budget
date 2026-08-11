@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -24,6 +24,8 @@ const SHELL_ASSETS = [
   './index.html',
   './app.js',
   './manifest.webmanifest',
+  './vendor/open-props.min.css',
+  './vendor/open-props-normalize.min.css',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
