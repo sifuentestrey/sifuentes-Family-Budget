@@ -282,6 +282,13 @@ const money = (n) =>
 const moneyExact = (n) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
+// Only used for text the household typed themselves (an advisor question,
+// not a payee/category pulled from a bank feed) — free-form input stored and
+// re-rendered later has to be escaped before it goes back into innerHTML.
+const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+
 const monthKey = (d) => d.slice(0, 7);
 const monthLabel = (key) => {
   const [y, m] = key.split('-');
@@ -1400,6 +1407,17 @@ function renderAdvisor() {
 
     ${state.advisorError ? `<div class="banner banner-warn">${state.advisorError}</div>` : ''}
 
+    <form id="advisor-ask-form" style="display:flex;gap:8px;margin-bottom:10px;">
+      <input type="text" name="question" placeholder="Ask about your numbers…" autocomplete="off"
+        style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;"
+        ${state.advisorBusy ? 'disabled' : ''} />
+      <button type="submit" class="link"
+        style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;white-space:nowrap;"
+        ${state.advisorBusy ? 'disabled' : ''}>
+        ${state.advisorBusy ? '…' : 'Ask'}
+      </button>
+    </form>
+
     <button data-action="get-advisor-note" class="link"
       style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;"
       ${state.advisorBusy ? 'disabled' : ''}>
@@ -1413,7 +1431,9 @@ function renderAdvisor() {
         <div class="stream">
           <div class="stream-meta" style="margin-bottom:4px;">
             ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+            ${n.source === 'daily' ? '· daily check-in' : ''}
           </div>
+          ${n.question ? `<div style="font-size:14px;font-weight:600;margin-bottom:4px;">You asked: “${escapeHtml(n.question)}”</div>` : ''}
           <div style="font-size:14px;line-height:1.5;">${n.note}</div>
         </div>
       `).join('')}
@@ -2256,6 +2276,28 @@ function render() {
       try {
         const connect = await loadConnect();
         const note = await connect.getAdvisorNote(buildAdvisorSummary());
+        state.advisorNotes = [note, ...state.advisorNotes];
+      } catch (e) {
+        state.advisorError = e.message;
+      }
+      state.advisorBusy = false;
+      render();
+    });
+  }
+
+  const advisorAskForm = document.getElementById('advisor-ask-form');
+  if (advisorAskForm) {
+    advisorAskForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const question = advisorAskForm.question.value.trim();
+      if (!question) return;
+
+      state.advisorBusy = true;
+      state.advisorError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        const note = await connect.getAdvisorNote(buildAdvisorSummary(), question);
         state.advisorNotes = [note, ...state.advisorNotes];
       } catch (e) {
         state.advisorError = e.message;

@@ -71,19 +71,20 @@ export async function listProviderConnections() {
 }
 
 /**
- * Ask the advisor for a fresh check-in note. The summary is built entirely
- * client-side from the same engine output the dashboard already renders —
- * this call never sends raw transactions, only the aggregate numbers.
+ * Ask the advisor for a fresh check-in note, or answer a direct question.
+ * The summary is built entirely client-side from the same engine output the
+ * dashboard already renders — this call never sends raw transactions, only
+ * the aggregate numbers.
  */
-export async function getAdvisorNote(summary) {
-  return callFunction('advisor-note', { summary });
+export async function getAdvisorNote(summary, question) {
+  return callFunction('advisor-note', question ? { summary, question } : { summary });
 }
 
 /** Household-visible history of past advisor notes, most recent first. */
 export async function listAdvisorNotes() {
   const { data, error } = await supabase
     .from('advisor_notes')
-    .select('id, note, created_at')
+    .select('id, note, question, source, created_at')
     .order('created_at', { ascending: false })
     .limit(10);
   if (error) throw error;

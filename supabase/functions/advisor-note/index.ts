@@ -20,6 +20,12 @@
  * stateless one-shot: the last few notes ride along in the prompt so a new
  * note has continuity instead of repeating the same observation every time
  * it is asked.
+ *
+ * An optional `question` in the request switches the prompt from an
+ * unprompted check-in to answering that question directly — still grounded
+ * only in the same summary, still refusing to invent a number it was not
+ * given. Both shapes save into the same advisor_notes row; `question` is
+ * null for a plain check-in.
  */
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -60,9 +66,12 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!membership) return json({ error: 'no_household', message: 'User is not in a household' }, 400);
 
-    const { summary } = await req.json();
+    const { summary, question } = await req.json();
     if (!summary || typeof summary !== 'object') {
       return json({ error: 'bad_request', message: 'summary is required' }, 400);
+    }
+    if (question !== undefined && (typeof question !== 'string' || !question.trim())) {
+      return json({ error: 'bad_request', message: 'question must be a non-empty string' }, 400);
     }
 
     const admin = createClient(
@@ -72,17 +81,17 @@ Deno.serve(async (req) => {
 
     const { data: history } = await admin
       .from('advisor_notes')
-      .select('note, created_at')
+      .select('note, question, created_at')
       .eq('household_id', membership.household_id)
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT);
 
-    const note = await askGemini(apiKey, summary, history ?? []);
+    const note = await askGemini(apiKey, summary, history ?? [], question?.trim());
 
     const { data: saved, error: saveError } = await admin
       .from('advisor_notes')
-      .insert({ household_id: membership.household_id, note })
-      .select('id, note, created_at')
+      .insert({ household_id: membership.household_id, note, question: question?.trim() ?? null })
+      .select('id, note, question, created_at')
       .single();
     if (saveError) throw new Error(`could not save note: ${saveError.message}`);
 
@@ -95,25 +104,36 @@ Deno.serve(async (req) => {
 async function askGemini(
   apiKey: string,
   summary: Record<string, unknown>,
-  history: { note: string; created_at: string }[],
+  history: { note: string; question: string | null; created_at: string }[],
+  question?: string,
 ): Promise<string> {
   const prompt = [
     'You are a calm, specific household financial advisor speaking directly to a couple.',
     'You are given a JSON summary of their actual current finances, already computed correctly',
-    '— never invent, adjust, or recompute a number that is not present in this JSON.',
+    '— never invent, adjust, or recompute a number that is not present in this JSON. If answering',
+    'the question requires a number this summary does not contain, say plainly that you do not have',
+    'that figure rather than estimating one.',
     '',
-    'Write 3 to 5 sentences of plain, direct commentary a thoughtful friend who is good with money',
-    'would say after seeing these numbers. Be specific — reference actual figures and category names',
-    'from the data. Prioritize the single most useful thing to notice, not a checklist of everything.',
+    question ? [
+      `The household is asking you directly: "${question}"`,
+      'Answer their question in 2 to 5 sentences, directly and specifically, grounded only in the',
+      'summary below. Do not pivot into an unrelated observation about their finances — answer what',
+      'was actually asked.',
+    ].join('\n') : [
+      'Write 3 to 5 sentences of plain, direct commentary a thoughtful friend who is good with money',
+      'would say after seeing these numbers. Be specific — reference actual figures and category names',
+      'from the data. Prioritize the single most useful thing to notice, not a checklist of everything.',
+      'If nothing notable stands out, say that plainly rather than manufacturing concern.',
+    ].join('\n'),
     'No disclaimers, no "consult a financial professional", no generic encouragement with no content.',
-    'If nothing notable stands out, say that plainly rather than manufacturing concern.',
     'Write dollar amounts as normal currency ($2,350, $346.39) — never spelled out in words',
     '("two thousand three hundred fifty dollars"), which reads as robotic, not like a person talking.',
     '',
     history.length ? [
       'Your last few check-ins with this household, most recent first — do not repeat the same',
       'observation unless the underlying number has materially changed:',
-      ...history.map((h, i) => `${i + 1}. (${h.created_at.slice(0, 10)}) ${h.note}`),
+      ...history.map((h, i) => `${i + 1}. (${h.created_at.slice(0, 10)}) `
+        + (h.question ? `[household asked: "${h.question}"] ${h.note}` : h.note)),
       '',
     ].join('\n') : '',
     'Current financial summary:',
