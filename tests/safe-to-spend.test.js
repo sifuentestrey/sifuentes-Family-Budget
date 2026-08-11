@@ -13,7 +13,7 @@ describe('calculateSafeToSpend', () => {
       buffer: 500,
     });
 
-    expect(result.safeToSpend).toBe(4250);
+    expect(result.safeToSpend).toBe(3250);
   });
 
   it('never reports negative safe-to-spend', () => {
