@@ -25,12 +25,20 @@ jobs:
         id: creds
         env:
           TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           if [ -z "$TOKEN" ]; then
             echo "has_token=false" >> "$GITHUB_OUTPUT"
             echo "::warning::SUPABASE_ACCESS_TOKEN is not set — skipping deploy."
           else
             echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "has_db_password=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SUPABASE_DB_PASSWORD is not set — skipping migrations."
+          else
+            echo "has_db_password=true" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: supabase/setup-cli@v1
@@ -41,8 +49,16 @@ jobs:
       # Migrations first: a function deployed against a schema that has not
       # been migrated yet fails at runtime, while the reverse ordering is safe
       # because migrations here are additive.
+      #
+      # The condition used to read `env.DB_PASSWORD != ''` directly, but a
+      # step's own `env:` block is not visible to its own `if:` — the
+      # workflow-level `env` context only sees vars exported to $GITHUB_ENV by
+      # an earlier step. That made the condition permanently false, so this
+      # step silently never ran no matter what secrets were configured; every
+      # migration actually shipped this far went in by hand instead. Fixed by
+      # computing the check in the credentials step above, same as has_token.
       - name: Push migrations
-        if: steps.creds.outputs.has_token == 'true' && env.DB_PASSWORD != ''
+        if: steps.creds.outputs.has_token == 'true' && steps.creds.outputs.has_db_password == 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
