@@ -82,17 +82,19 @@ export async function connectGmail() {
 }
 
 /**
- * Drops the connection row so the UI stops treating Gmail as connected and
- * the daily bill sync stops picking this household up.
+ * Drops one connection row (a household can have more than one Gmail
+ * connection now, so this always targets a specific id — never all of a
+ * provider_key at once) so the UI stops treating that address as connected
+ * and the daily bill sync stops picking it up.
  *
  * Does not revoke the underlying Google grant or purge the stored refresh
- * token from Vault — reconnecting overwrites it, and revoking it entirely is
- * one click at myaccount.google.com/permissions in the meantime. Read-only
- * mail scope, so the residual risk of a lingering token is low; noted here
- * rather than silently treated as fully handled.
+ * token from Vault — reconnecting the same address overwrites it, and
+ * revoking it entirely is one click at myaccount.google.com/permissions in
+ * the meantime. Read-only mail scope, so the residual risk of a lingering
+ * token is low; noted here rather than silently treated as fully handled.
  */
-export async function disconnectGmail() {
-  const { error } = await supabase.from('provider_connections').delete().eq('provider_key', 'gmail');
+export async function disconnectGmail(id) {
+  const { error } = await supabase.from('provider_connections').delete().eq('id', id);
   if (error) throw error;
 }
 

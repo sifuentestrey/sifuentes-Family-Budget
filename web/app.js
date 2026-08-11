@@ -1296,42 +1296,49 @@ function renderConnect() {
       </div>
       ${state.gmailNotice ? `<div class="banner banner-good">${state.gmailNotice}</div>` : ''}
       ${state.gmailError ? `<div class="banner banner-warn">${state.gmailError}</div>` : ''}
+      <p class="step-why">
+        Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
+        else — read-only access, no email is ever sent or modified. Google's own consent
+        screen is where you approve this, not this app. Connect more than one inbox if bills
+        land in different household members' email.
+      </p>
       ${(() => {
-        const gmail = state.providerConnections.find((c) => c.provider_key === 'gmail');
-        if (!gmail || gmail.status === 'disconnected') {
-          return `
-            <p class="step-why">
-              Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
-              else — read-only access, no email is ever sent or modified. Google's own consent
-              screen is where you approve this, not this app.
-            </p>
-            <button data-action="connect-gmail" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;" ${state.gmailBusy ? 'disabled' : ''}>
-              ${state.gmailBusy ? 'Connecting…' : '+ Connect Gmail'}
-            </button>`;
-        }
+        const gmailConnections = state.providerConnections.filter(
+          (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
+        );
+        if (!gmailConnections.length) return '';
         const statusLabel = {
           connected: 'connected', needs_reauth: 'needs reconnect', error: 'error',
-        }[gmail.status] ?? gmail.status;
+        };
         return `
-          <div class="stream">
-            <div class="stream-head">
-              <span class="stream-payee">Gmail</span>
-              <span class="pill ${gmail.status === 'connected' ? 'stable' : 'variable'}">${statusLabel}</span>
-            </div>
-            <div class="stream-meta">
-              ${gmail.last_synced_at ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}` : 'Not scanned yet — runs on the next daily sync'}
-              ${gmail.status_detail ? ` · ${gmail.status_detail}` : ''}
-            </div>
+          <div class="stream-list" style="margin-top:10px;">
+            ${gmailConnections.map((gmail) => `
+              <div class="stream">
+                <div class="stream-head">
+                  <span class="stream-payee">${gmail.display_name}</span>
+                  <span class="pill ${gmail.status === 'connected' ? 'stable' : 'variable'}">${statusLabel[gmail.status] ?? gmail.status}</span>
+                </div>
+                <div class="stream-meta">
+                  ${gmail.last_synced_at ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}` : 'Not scanned yet — runs on the next daily sync'}
+                  ${gmail.status_detail ? ` · ${gmail.status_detail}` : ''}
+                </div>
+                <div style="margin-top:8px;display:flex;gap:8px;">
+                  <button data-action="disconnect-gmail" data-id="${gmail.id}" class="link" ${state.gmailBusy ? 'disabled' : ''}>
+                    ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
+                  </button>
+                  ${gmail.status === 'needs_reauth' ? `
+                    <button data-action="connect-gmail" class="link" ${state.gmailBusy ? 'disabled' : ''}>
+                      Reconnect
+                    </button>` : ''}
+                </div>
+              </div>
+            `).join('')}
           </div>
-          <button data-action="disconnect-gmail" class="link" style="margin-top:10px;" ${state.gmailBusy ? 'disabled' : ''}>
-            ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
-          </button>
-          ${gmail.status === 'needs_reauth' ? `
-            <button data-action="connect-gmail" class="link" style="margin-top:10px;margin-left:8px;" ${state.gmailBusy ? 'disabled' : ''}>
-              Reconnect
-            </button>` : ''}
         `;
       })()}
+      <button data-action="connect-gmail" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-top:10px;" ${state.gmailBusy ? 'disabled' : ''}>
+        ${state.gmailBusy ? 'Connecting…' : (state.providerConnections.some((c) => c.provider_key === 'gmail' && c.status !== 'disconnected') ? '+ Connect another Gmail' : '+ Connect Gmail')}
+      </button>
     </div>
 
     <div class="step">
@@ -1604,8 +1611,10 @@ function renderBills() {
     return `<div class="banner banner-warn">${state.billsError}</div>`;
   }
 
-  const gmail = state.providerConnections.find((c) => c.provider_key === 'gmail');
-  if (!gmail || gmail.status === 'disconnected') {
+  const gmailConnections = state.providerConnections.filter(
+    (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
+  );
+  if (!gmailConnections.length) {
     return `
       <div class="note-box">
         <strong>No email connected yet.</strong>
@@ -1613,6 +1622,10 @@ function renderBills() {
         nothing here populates on its own before that.
       </div>`;
   }
+  // Only used below for "has anything ever synced" messaging — bills from
+  // every connected inbox land in the same household-wide bills table, so
+  // there's nothing per-connection left to show once you're past this point.
+  const anySynced = gmailConnections.some((c) => c.last_synced_at);
 
   const review = state.billsNeedingReview;
   const bills = state.bills;
@@ -1649,7 +1662,7 @@ function renderBills() {
       <div class="step-head"><span class="step-title">Upcoming bills</span></div>
       ${bills.length === 0 ? `
         <p class="step-why">
-          No bills detected yet. ${gmail.last_synced_at ? 'The last scan found nothing due — check back after the next daily sync.' : 'The first scan runs on the next daily sync.'}
+          No bills detected yet. ${anySynced ? 'The last scan found nothing due — check back after the next daily sync.' : 'The first scan runs on the next daily sync.'}
         </p>` : `
         <div class="stream-list" style="margin-top:10px;">
           ${bills.map((b) => `
@@ -2002,14 +2015,14 @@ function render() {
     });
   });
 
-  const disconnectGmailBtn = app.querySelector('[data-action="disconnect-gmail"]');
-  if (disconnectGmailBtn) {
-    disconnectGmailBtn.addEventListener('click', async () => {
+  app.querySelectorAll('[data-action="disconnect-gmail"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
       state.gmailBusy = true;
       render();
       try {
         const connect = await loadConnect();
-        await connect.disconnectGmail();
+        await connect.disconnectGmail(id);
         await refreshConnection();
         state.gmailNotice = 'Gmail disconnected.';
       } catch (e) {
@@ -2018,7 +2031,7 @@ function render() {
       state.gmailBusy = false;
       render();
     });
-  }
+  });
 
   const inviteForm = document.getElementById('invite-form');
   if (inviteForm) {
