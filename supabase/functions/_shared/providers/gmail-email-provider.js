@@ -157,6 +157,20 @@ export function createGmailProvider({ getAccessToken, fetchImpl = fetch }) {
     return decodeBase64UrlToBytes(result.data);
   }
 
+  /**
+   * How many messages to fetch at once within a page.
+   *
+   * getMessage is one Gmail API round trip per message with no batch
+   * endpoint in play here, so fetching a page's worth one at a time is pure
+   * added wall-clock for no benefit — a 90-day initial sync against a real
+   * inbox can turn up close to the full 200-message limit, and 200
+   * sequential round trips is exactly what exceeded the edge function's
+   * resource limit on this household's very first real sync. Bounded
+   * concurrency keeps the improvement without opening enough simultaneous
+   * connections to trip Gmail's own per-user rate limit.
+   */
+  const MESSAGE_FETCH_CONCURRENCY = 10;
+
   async function searchMessages(query = {}) {
     const q = buildGmailQuery(query);
     const limit = query.limit ?? 200;
@@ -170,9 +184,10 @@ export function createGmailProvider({ getAccessToken, fetchImpl = fetch }) {
       if (pageToken) url.searchParams.set('pageToken', pageToken);
 
       const page = await authedFetch(url.toString());
-      for (const { id } of page.messages ?? []) {
-        results.push(await getMessage(id));
-        if (results.length >= limit) break;
+      const ids = (page.messages ?? []).slice(0, limit - results.length).map((m) => m.id);
+      for (let i = 0; i < ids.length; i += MESSAGE_FETCH_CONCURRENCY) {
+        const batch = ids.slice(i, i + MESSAGE_FETCH_CONCURRENCY);
+        results.push(...(await Promise.all(batch.map((id) => getMessage(id)))));
       }
       pageToken = page.nextPageToken;
     } while (pageToken && results.length < limit);
