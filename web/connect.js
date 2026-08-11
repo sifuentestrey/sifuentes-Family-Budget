@@ -101,10 +101,33 @@ export async function disconnectGmail(id) {
 export async function listConnectedItems() {
   const { data, error } = await supabase
     .from('items')
-    .select('id, institution_name, status, status_detail, accounts(id, nickname, mask, type, current_balance)')
+    .select('id, institution_name, status, status_detail, updated_at, accounts(id, nickname, mask, type, current_balance)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * The household's real transactions, already categorized and transfer/income
+ * -tagged — sync-transactions runs the same categorize/detectTransfers/
+ * markIncome pipeline server-side on every sync, so this is the settled
+ * result, not raw Plaid data needing that pipeline run again client-side.
+ *
+ * category comes back as the name (joined from categories), matching the
+ * shape the rest of the app already expects from the fixture path.
+ */
+export async function listTransactions() {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select(`
+      id, plaid_transaction_id, account_id, posted_date, amount,
+      raw_description, payee, categorized_by, is_transfer, transfer_pair_id,
+      is_income, manually_categorized, parent_transaction_id, pending,
+      categories(name)
+    `)
+    .order('posted_date', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(({ categories, ...t }) => ({ ...t, category: categories?.name ?? null }));
 }
 
 /**

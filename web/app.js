@@ -308,7 +308,56 @@ async function refreshConnection() {
     ]);
   } catch (e) {
     state.connectError = e.message;
+    return;
   }
+
+  // Once a real bank is connected, the dashboard switches off the demo
+  // fixture permanently for this session — even before the first sync has
+  // produced any transactions, an honest empty state beats fake numbers.
+  // Contained in its own try/catch: a failure here must not take down
+  // Connect-tab state that already loaded successfully above.
+  if (state.connectedItems.length) {
+    try {
+      await refreshRealTransactions(connect);
+    } catch (e) {
+      state.connectError = e.message;
+    }
+  }
+}
+
+/**
+ * Replace the demo fixture with the household's actual transactions.
+ * Real rows arrive already categorized and transfer/income-tagged by the
+ * nightly sync (sync-transactions runs the same categorizeBatch/
+ * detectTransfers/markIncome pipeline server-side), so unlike load()'s
+ * fixture path this does not re-run that pipeline client-side — doing so
+ * twice risked drifting from what the server already decided and persisted.
+ */
+async function refreshRealTransactions(connect) {
+  const txns = await connect.listTransactions();
+
+  state.transactions = txns;
+  state.streams = detectIncomeStreams(txns);
+  state.accounts = new Map(
+    state.connectedItems.flatMap((item) => item.accounts ?? []).map((a) => [a.id, a]),
+  );
+
+  const months = [...new Set(txns.map((t) => monthKey(t.posted_date)))].sort();
+  state.months = months;
+  state.month = months.at(-1) ?? monthKey(new Date().toISOString());
+
+  const loginRequiredItem = state.connectedItems.find((i) => i.status === 'login_required');
+  const lastSyncTimes = state.connectedItems
+    .map((i) => Date.parse(i.updated_at))
+    .filter((t) => !Number.isNaN(t));
+  state.syncHealth = {
+    demo: false,
+    status: loginRequiredItem ? 'login_required' : 'good',
+    institution_name: loginRequiredItem?.institution_name,
+    last_success: lastSyncTimes.length ? new Date(Math.min(...lastSyncTimes)).toISOString() : null,
+  };
+
+  buildPlan();
 }
 
 /**

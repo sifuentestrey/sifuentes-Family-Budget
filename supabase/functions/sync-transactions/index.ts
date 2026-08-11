@@ -128,10 +128,19 @@ async function syncItem(supabase: any, item: any) {
 
     const incoming = [...added, ...modified]
       .filter((t) => accountMap.has(t.account_id))
-      .map((t) => ({
-        ...normalizePlaidTransaction(t, accountMap.get(t.account_id)),
-        household_id: item.household_id,
-      }));
+      .map((t) => {
+        // category and plaidCategory aren't transactions columns — category_id
+        // is, and reprocessWindow() fills it in immediately after this insert
+        // by re-deriving it from categorizeBatch. Upserting either as-is
+        // fails outright: Postgrest rejects unknown columns in the payload,
+        // so every real sync's very first insert has always errored before
+        // reaching reprocessWindow at all.
+        const { category: _category, plaidCategory: _plaidCategory, ...row } = normalizePlaidTransaction(
+          t,
+          accountMap.get(t.account_id),
+        );
+        return { ...row, household_id: item.household_id };
+      });
 
     if (removed.length) {
       await supabase.from('transactions').delete().in('plaid_transaction_id', removed);
