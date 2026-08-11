@@ -18,6 +18,7 @@ import { buildGuidance, incomeStructureAdvice } from '../src/engine/guidance.js'
 import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildAlerts } from '../src/engine/alerts.js';
+import { calculateSafeToSpend } from '../src/budget/safe-to-spend.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -220,6 +221,7 @@ const state = {
   connectBusy: false,
   connectError: null,
   authError: null,
+  safeToSpend: null,
 };
 
 const money = (n) =>
@@ -336,6 +338,64 @@ function consumeGmailOAuthReturn() {
 }
 
 /**
+ * Gather inputs for the Safe-to-Spend calculation from current state.
+ * Returns null if critical inputs are missing (no variable income stream, no bills).
+ */
+function gatherSafeToSpendInputs() {
+  if (!state.variableStream) return null;
+
+  // Current balance: sum checking/savings accounts minus credit card balances.
+  // For demo fixtures, assume $5,000 in checking as the spendable balance.
+  const currentBalance = 5000;
+
+  // Pending outflows: recently authorized but not posted transactions.
+  const pendingTxns = state.transactions.filter((t) => t.pending && t.amount > 0);
+  const pendingOutflows = pendingTxns.reduce((sum, t) => sum + t.amount, 0);
+
+  // Daily variable spending: average of groceries, fuel, dining from recent months.
+  const variableCategories = ['Groceries', 'Gas & Fuel', 'Dining & Restaurants'];
+  const recentMonths = state.months.slice(-3).filter((m) => m < state.month);
+  let variableDailyTotal = 0;
+  let variableDayCount = 0;
+
+  for (const month of recentMonths) {
+    const txns = spendingIn(month).filter((t) =>
+      variableCategories.includes(t.category || '')
+    );
+    const monthTotal = txns.reduce((s, t) => s + t.amount, 0);
+    const daysInMonth = new Date(+month.split('-')[0], +month.split('-')[1], 0).getDate();
+    variableDailyTotal += monthTotal / daysInMonth;
+    variableDayCount += 1;
+  }
+  const dailyVariableSpend = variableDayCount > 0 ? variableDailyTotal / variableDayCount : 0;
+
+  // Sinking fund: irregular annual bills spread monthly.
+  const sinkingFundContribution = state.picture?.monthly?.irregular ?? 0;
+
+  // Emergency buffer: 3 months of necessary spending.
+  const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;
+  const bufferBalance = 0;
+
+  // Expected income before next payday: conservative floor for this income stream.
+  // For demo purposes, use the typical biweekly amount if available.
+  const expectedIncomeBeforePayday = state.variableStream?.typical_amount ?? 0;
+
+  return {
+    currentBalance,
+    pendingOutflows: pendingOutflows > 0 ? pendingOutflows : 0,
+    bills: state.bills,
+    dailyVariableSpend: Math.max(0, dailyVariableSpend),
+    bufferTarget,
+    bufferBalance,
+    savingsGoals: [],
+    sinkingFundContribution,
+    nextPayday: state.variableStream.next_expected,
+    expectedIncomeBeforePayday,
+    incomeBasis: 'floor',
+  };
+}
+
+/**
  * Run the planning engines over the loaded transactions.
  *
  * Recomputed whenever transactions change (a recategorization moves spending
@@ -397,6 +457,9 @@ function buildPlan() {
     },
     yearsAway: 2,
   });
+
+  const stsInputs = gatherSafeToSpendInputs();
+  state.safeToSpend = stsInputs ? calculateSafeToSpend(stsInputs) : null;
 
   refreshAlerts();
 }
@@ -569,6 +632,10 @@ function renderDashboard() {
 
   const max = categories.length ? categories[0][1] : 1;
 
+  // Safe-to-Spend calculation for the current period.
+  const sts = gatherSafeToSpendInputs();
+  const safeToSpendResult = sts ? calculateSafeToSpend(sts) : null;
+
   return `
     ${renderAlerts()}
     <div class="month-picker">
@@ -576,6 +643,48 @@ function renderDashboard() {
       <h2>${monthLabel(state.month)}</h2>
       <button class="chev" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>›</button>
     </div>
+
+    ${safeToSpendResult ? `
+      <div class="headline">
+        <div class="headline-label">Safe to spend</div>
+        <div class="headline-value ${safeToSpendResult.status === 'negative' ? 'bad' : safeToSpendResult.status === 'tight' ? '' : 'good'}">
+          ${moneyExact(safeToSpendResult.safeToSpend)}
+        </div>
+        <div class="headline-note">${safeToSpendResult.headline}</div>
+      </div>
+
+      <div class="breakdown">
+        <div class="breakdown-row">
+          <span class="breakdown-label">Starting: balance + expected income</span>
+          <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
+        </div>
+        ${safeToSpendResult.deductions.map((d) => `
+          <div class="breakdown-row">
+            <span class="breakdown-label">${d.label}</span>
+            <span>−${moneyExact(d.amount)}</span>
+          </div>
+        `).join('')}
+        <div class="breakdown-row emphasis">
+          <span class="breakdown-label">Safe to spend</span>
+          <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+        </div>
+        ${safeToSpendResult.daysUntilPayday > 0 ? `
+          <div class="breakdown-row">
+            <span class="breakdown-label">Per day</span>
+            <span>${moneyExact(safeToSpendResult.perDay)}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      ${safeToSpendResult.warnings.length ? `
+        <div class="note-box">
+          <strong>Worth knowing:</strong>
+          <ul style="margin:8px 0 0; padding-left:18px;">
+            ${safeToSpendResult.warnings.map((w) => `<li style="margin-bottom:4px">${w}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+    ` : ''}
 
     <div class="stat-row">
       <div class="stat">
