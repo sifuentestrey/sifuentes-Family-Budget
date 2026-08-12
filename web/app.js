@@ -73,7 +73,63 @@ async function refreshBills() {
   } catch (e) {
     state.billsError = e.message;
   }
+  // Both halves of the Budget tab, fetched together: a screen that had bills
+  // but not the household's targets would quietly fall back to averages and
+  // show numbers neither person set.
+  await refreshBudgetTargets();
   refreshAlerts();
+}
+
+let budgetTargetsModule = null;
+async function loadBudgetTargetsModule() {
+  if (!budgetTargetsModule) budgetTargetsModule = await import('./budget-targets.js');
+  return budgetTargetsModule;
+}
+
+/**
+ * Budget targets live in the database because a budget is an agreement
+ * between the two people in the household — a number only one phone can see
+ * is not an agreement. Fetched with bills, since both feed the Budget tab.
+ */
+async function refreshBudgetTargets() {
+  state.budgetTargetsError = null;
+  if (!state.session || !state.householdId) return;
+
+  try {
+    const mod = await loadBudgetTargetsModule();
+    await migrateLocalBudgetTargets(mod);
+    state.budgetTargets = await mod.listBudgetTargets();
+  } catch (e) {
+    state.budgetTargetsError = e.message;
+  }
+}
+
+/**
+ * Targets set before they were shared were kept in localStorage. Push them
+ * up once on the first signed-in load and drop the local copy, so nobody
+ * loses the numbers they already entered and the two sources can't drift.
+ * Existing household targets win — the shared value is the agreed one.
+ */
+async function migrateLocalBudgetTargets(mod) {
+  let local;
+  try {
+    local = JSON.parse(localStorage.getItem('budgetTargets') ?? 'null');
+  } catch {
+    local = null;
+  }
+  if (!local || !Object.keys(local).length) return;
+
+  const existing = await mod.listBudgetTargets();
+  for (const [category, amount] of Object.entries(local)) {
+    if (existing[category] !== undefined) continue;
+    if (!Number.isFinite(Number(amount))) continue;
+    await mod.saveBudgetTarget(state.householdId, category, Number(amount));
+  }
+  try {
+    localStorage.removeItem('budgetTargets');
+  } catch {
+    /* Nothing to do — the rows are saved either way. */
+  }
 }
 
 /** Loads only the note history — generating a new one is a deliberate,
@@ -297,8 +353,11 @@ const state = {
   dismissedSuggestions: loadDismissedSuggestions(),
   // Budget targets the household set by hand, category -> monthly amount.
   // Everything else on the Budget tab is derived, so this is the only thing
-  // that has to be remembered.
-  budgetTargets: loadBudgetTargets(),
+  // that has to be remembered — and it's remembered for the household, not
+  // for this browser (see refreshBudgetTargets).
+  budgetTargets: {},
+  budgetTargetsError: null,
+  savingTarget: null,
   editingTarget: null,
   // The category whose transactions the "Where it went" drilldown is showing.
   category: null,
@@ -332,31 +391,36 @@ function dismissSuggestion(key) {
 }
 
 /**
- * Budget targets, on the device rather than in the database.
+ * Set or clear one target, for the whole household.
  *
- * Same call as dismissed suggestions: a target is a household's own guess at
- * what a month should look like, it costs nothing to re-enter, and typing one
- * has to feel instant. Moving it to Supabase later is a small change — the
- * rest of the Budget tab reads it through one function.
+ * Applied to the local state first and rendered immediately, then written —
+ * typing a number and waiting on a round-trip to see it feels broken. If the
+ * write fails the number is rolled back rather than left on screen as a
+ * change the other phone will never see.
  */
-function loadBudgetTargets() {
-  try {
-    const raw = JSON.parse(localStorage.getItem('budgetTargets') ?? '{}');
-    return Object.fromEntries(
-      Object.entries(raw).filter(([, v]) => Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function setBudgetTarget(category, amount) {
+async function setBudgetTarget(category, amount) {
+  const previous = state.budgetTargets[category];
   if (amount === null) delete state.budgetTargets[category];
   else state.budgetTargets[category] = amount;
+
+  state.budgetTargetsError = null;
+  if (!state.session || !state.householdId) {
+    // Demo numbers, nobody to share with. Kept for this session only, the
+    // same way nothing else on the demo dashboard is written anywhere.
+    return;
+  }
+
+  state.savingTarget = category;
   try {
-    localStorage.setItem('budgetTargets', JSON.stringify(state.budgetTargets));
-  } catch {
-    /* A full or blocked localStorage must not break setting a target. */
+    const mod = await loadBudgetTargetsModule();
+    if (amount === null) await mod.clearBudgetTarget(state.householdId, category);
+    else await mod.saveBudgetTarget(state.householdId, category, amount);
+  } catch (e) {
+    if (previous === undefined) delete state.budgetTargets[category];
+    else state.budgetTargets[category] = previous;
+    state.budgetTargetsError = `Couldn't save that target: ${e.message}`;
+  } finally {
+    state.savingTarget = null;
   }
 }
 
@@ -1812,6 +1876,11 @@ function renderBudget() {
     ${segmented(BUDGET_TABS)}
     ${renderMonthPicker()}
 
+    ${state.budgetTargetsError ? `
+      <div class="banner banner-warn">
+        <div class="banner-body">${escapeHtml(state.budgetTargetsError)}</div>
+      </div>` : ''}
+
     <div class="hero">
       <div class="hero-label">The plan for ${monthLabel(state.month)}</div>
       <div class="hero-value">${moneyExact(t.planned)}</div>
@@ -1857,8 +1926,9 @@ function renderBudget() {
       <div class="note" style="margin-top:10px;">
         <strong>Targets start from your own spending.</strong>
         Each one is the average of recent months, rounded — change any of them and
-        the number sticks. Categories a bill already covers aren't repeated here,
-        so nothing is counted twice.
+        it's saved for the whole household, so both of you are planning against the
+        same numbers. Categories a bill already covers aren't repeated here, so
+        nothing is counted twice.
       </div>
     ` : emptyState({
       iconName: 'list',
@@ -2966,21 +3036,28 @@ function render() {
   );
 
   app.querySelectorAll('[data-action="clear-target"]').forEach((btn) =>
-    btn.addEventListener('click', () => {
-      setBudgetTarget(btn.dataset.category, null);
+    btn.addEventListener('click', async () => {
       state.editingTarget = null;
+      const done = setBudgetTarget(btn.dataset.category, null);
       render();
+      await done;
+      render(); // shows the failure if the write didn't land
     }),
   );
 
   app.querySelectorAll('[data-target-form]').forEach((form) =>
-    form.addEventListener('submit', (ev) => {
+    form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const amount = Number(form.amount.value);
+      state.editingTarget = null;
       // An empty or nonsense entry clears the override rather than storing a
       // NaN target that would make every derived figure on the tab garbage.
-      setBudgetTarget(form.dataset.targetForm, Number.isFinite(amount) && amount > 0 ? amount : null);
-      state.editingTarget = null;
+      const done = setBudgetTarget(
+        form.dataset.targetForm,
+        Number.isFinite(amount) && amount > 0 ? amount : null,
+      );
+      render();
+      await done;
       render();
     }),
   );
@@ -3030,6 +3107,10 @@ function render() {
         }
         await refreshConnection();
         await refreshShifts();
+        // Bills and the household's budget targets, so signing in lands on a
+        // populated Budget tab rather than one that looks empty until reload.
+        state.billsAttempted = true;
+        await refreshBills();
       } catch (e) {
         state.authError = e.message;
       }

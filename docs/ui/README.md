@@ -95,7 +95,9 @@ The plan for the month, in the two parts a household actually reasons about:
   money goes out anyway. Each line shows spent against a target, and the
   target defaults to what this household actually spent in prior months, so
   the screen is useful before anybody has set a single number. Tap Edit to
-  override one; it is kept on the device (`budgetTargets` in localStorage).
+  override one — targets are saved per household in `budget_targets`
+  (migration 0018), behind the same RLS as everything else, so both people
+  plan against the same numbers rather than each phone holding its own.
 
 A category a tracked bill already covers is deliberately not repeated as a
 necessity line — showing rent as both a bill and a category makes the month
