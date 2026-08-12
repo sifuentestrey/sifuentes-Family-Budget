@@ -121,6 +121,24 @@ whatever looks good in isolation rather than for this:
 - Amber/red stay reserved for genuinely actionable problems.
 - Buttons are compact pills; avoid oversized marketing-style CTAs.
 
+## Merchant logos
+
+Rows show the merchant's own logo where one can be found, falling back to a
+coloured initial. Three things about it are load-bearing:
+
+- The domain is **derived from the payee** (`src/engine/merchant-domain.js`),
+  because Plaid supplies a logo for only a minority of transactions. Wrong is
+  worse than missing, so guessing refuses on a lone or generic word.
+- Each logo has **two sources on different hosts**, tried in order. Either can
+  404 for a site the other knows, and both are the kind of host a content
+  blocker or filtering DNS blocks wholesale — which strips every logo at once
+  and reads as a broken feature. A URL that fails is remembered for the
+  session so re-renders don't re-request it.
+- The **initial is the base layer** and the logo paints on top once loaded.
+  A pending or blocked request therefore shows a normal row, never a blank
+  plate. Never build this on swapping the img out on error: only a 404 fires
+  an error event — a hang and a block do not.
+
 ## Budget screen
 
 The plan for the month, in the two parts a household actually reasons about:
