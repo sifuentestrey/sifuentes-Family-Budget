@@ -1,10 +1,35 @@
 # Handoff — Family Budget
 
-Paste this into a new chat to resume. Last updated 2026-08-11 (afternoon —
-supersedes the morning version of the same date, which itself superseded a
-2026-08-10 version that described work as still in progress on branch
-`claude/family-budget-shared-accounts-djv89t`; all of it has since merged to
-`main` through PR #9).
+Paste this into a new chat to resume. Last updated 2026-08-11 (evening —
+supersedes the afternoon version of the same date, which superseded the
+morning one; everything described in those has merged to `main`).
+
+## Newest work (2026-08-11 evening)
+
+- **The UI was rebuilt on one design system.** `web/index.html`'s stylesheet
+  is now tokens plus a fixed set of components (`.hero`, `.card`, `.row`,
+  `.kv`, `.chip`, `.btn`, `.field`, `.empty`, `.seg`), and every view composes
+  those instead of its own inline styles. Before this, each screen had its own
+  row shape and its own button styling, which is why the app read as several
+  apps stapled together. `docs/ui/README.md` documents the components and the
+  navigation model — read it before adding a screen.
+- **Navigation changed shape.** Still five tabs, but Spending and Income now
+  carry segmented controls for their sibling views (Overview / Transactions /
+  Recurring / Trends, and Overview / Paycheck / Shifts / Paystubs). "More" is
+  down to settings-ish destinations. Two tests in `tests/shifts.test.mjs`
+  guard both directions: every navigable id has a renderer, and every renderer
+  is reachable from the nav.
+- **Bills can now be added from transactions.** New pure module
+  `src/engine/bill-suggestions.js` (18 tests) proposes bills from recurring
+  charges already in the household's own transactions — the "Found in your
+  transactions" section on Bills, with one-tap Track as bill / Not a bill.
+  Nothing is saved without a tap. Accepted bills are `source: 'bank'`, a new
+  value on the `bill_source_type` enum — **migration `0017_bill_source_bank.sql`
+  is already applied to the live database** (verified), so the repo file is a
+  record, not a pending change.
+- Dismissed suggestions live in `localStorage` under
+  `dismissedBillSuggestions`, deliberately not in the database.
+- Service worker is at `v17`; `npm test` is **311 passing, 0 failing**.
 
 ## What this is
 
@@ -25,7 +50,7 @@ PWA frontend, deployed to GitHub Pages. Zero-cost stack by design.
 
 ## Current state (verified 2026-08-11 against live Supabase + local repo)
 
-- **269 tests passing** (`npm test`), 0 failing. Note: `node_modules` is not
+- **311 tests passing** (`npm test`), 0 failing. Note: `node_modules` is not
   checked in — a fresh clone/machine needs `npm install` before tests will
   run (the `unpdf` dependency fails to resolve otherwise).
 - **1 user in `auth.users`** — the owner has signed up. Household exists.

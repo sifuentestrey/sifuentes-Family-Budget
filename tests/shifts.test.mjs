@@ -125,16 +125,25 @@ const swJs = readFileSync(join(ROOT, 'web/sw.js'), 'utf8');
 
 test('every nav entry has a renderer', () => {
   // A nav button with no matching renderer throws on click: the view lookup
-  // returns undefined and is called immediately. Navigable ids come from two
-  // places since the bottom-nav restructure: the five primary tabs
-  // (NAV_GROUPS) and the secondary destinations listed on the More screen.
+  // returns undefined and is called immediately.
+  //
+  // Navigable ids now come from three places. The five primary tabs
+  // (NAV_GROUPS); the segmented controls that carry each tab's sibling views
+  // (SPENDING_TABS / INCOME_TABS — these replaced the old More menu, which
+  // used to be where everything but the tabs lived); and what remains on the
+  // More screen, now only the genuinely peripheral destinations.
   const groupsBlock = appJs.match(/const NAV_GROUPS = \[([\s\S]*?)\n\];/)[1];
   const groupIds = [...groupsBlock.matchAll(/id: '([\w-]+)'/g)].map((m) => m[1]);
 
-  const moreBlock = appJs.match(/const rows = \[([\s\S]*?)\];/)[1];
+  const segIds = ['SPENDING_TABS', 'INCOME_TABS'].flatMap((name) => {
+    const block = appJs.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\n\\];`))[1];
+    return [...block.matchAll(/\['([\w-]+)',/g)].map((m) => m[1]);
+  });
+
+  const moreBlock = appJs.match(/const rows = \[([\s\S]*?)\n  \];/)[1];
   const moreIds = [...moreBlock.matchAll(/\['([\w-]+)',/g)].map((m) => m[1]);
 
-  const navIds = [...new Set([...groupIds, ...moreIds])];
+  const navIds = [...new Set([...groupIds, ...segIds, ...moreIds])];
   const registry = appJs.match(/\}\[state\.view\]\(\);/)
     ? appJs.slice(appJs.lastIndexOf('const body =', appJs.indexOf('}[state.view]()')), appJs.indexOf('}[state.view]()'))
     : '';
@@ -142,6 +151,34 @@ test('every nav entry has a renderer', () => {
   assert.ok(navIds.includes('shifts'), 'shifts must be reachable from the nav');
   for (const id of navIds) {
     assert.match(registry, new RegExp(`\\b${id}:\\s*render`), `no renderer wired for "${id}"`);
+  }
+});
+
+test('every view the app can render is reachable from the nav', () => {
+  // The other direction, and the one that actually bit during the nav
+  // rebuild: a renderer that no longer appears in any tab, segmented control
+  // or More row is dead weight nobody can reach, and the app silently loses a
+  // screen. 'review' is the one deliberate exception — it is reached from a
+  // banner on Transactions and from Home, not from the nav itself.
+  const registry = appJs.slice(
+    appJs.lastIndexOf('const body =', appJs.indexOf('}[state.view]()')),
+    appJs.indexOf('}[state.view]()'),
+  );
+  const viewIds = [...registry.matchAll(/^\s{4}([\w-]+):\s*render/gm)].map((m) => m[1]);
+
+  const navSource = [
+    appJs.match(/const NAV_GROUPS = \[([\s\S]*?)\n\];/)[1],
+    appJs.match(/const SPENDING_TABS = \[([\s\S]*?)\n\];/)[1],
+    appJs.match(/const INCOME_TABS = \[([\s\S]*?)\n\];/)[1],
+    appJs.match(/const rows = \[([\s\S]*?)\n  \];/)[1],
+  ].join('\n');
+
+  for (const id of viewIds) {
+    if (id === 'review') continue;
+    assert.ok(
+      navSource.includes(`'${id}'`),
+      `"${id}" has a renderer but nothing in the nav can reach it`,
+    );
   }
 });
 

@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v16';
+const CACHE_VERSION = 'v17';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -61,6 +61,11 @@ const SHELL_ASSETS = [
   '../src/engine/budget/safe-to-spend.js',
   // Bills-by-paycheck: same reason as the modules above — imported statically.
   '../src/engine/bill-paycheck-plan.js',
+  // Bill suggestions from recurring charges: imported statically by app.js and
+  // reaches into domain/provider-match.js, so both have to be here or the
+  // Bills tab 404s offline.
+  '../src/engine/bill-suggestions.js',
+  '../src/domain/provider-match.js',
 ];
 
 self.addEventListener('install', (event) => {

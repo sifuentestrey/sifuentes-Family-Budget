@@ -1,0 +1,14 @@
+-- Bills the household starts tracking from a recurring charge the bank feed
+-- already shows.
+--
+-- Until now every bill arrived from outside the bank: an email, a PDF, a
+-- provider API, or somebody typing it in. But the most reliable evidence a
+-- household has that a bill exists is that they have already paid it, twelve
+-- months running, from the account this app is reading. Recording those as
+-- 'manual' would lose that provenance — the UI could no longer say where the
+-- amount came from, and 'manual' would come to mean two different things
+-- (a number somebody typed, and a number the bank observed).
+--
+-- Additive only. No existing row changes source, and nothing reads the enum
+-- exhaustively, so this is safe to apply to a live database.
+alter type bill_source_type add value if not exists 'bank';

@@ -24,6 +24,7 @@ import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '..
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
 import { daysUntilDue } from '../src/domain/bill.js';
 import { planPaycheckCoverage } from '../src/engine/bill-paycheck-plan.js';
+import { suggestBillsFromTransactions } from '../src/engine/bill-suggestions.js';
 import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -288,7 +289,39 @@ const state = {
   connectError: null,
   authError: null,
   safeToSpend: null,
+  // Bills proposed from recurring charges in the household's own transactions.
+  // `trackingBill` is the key of the one currently being saved, so only that
+  // row shows a pending state rather than the whole list going dead.
+  trackingBill: null,
+  dismissedSuggestions: loadDismissedSuggestions(),
 };
+
+/**
+ * Suggestions the household has waved off.
+ *
+ * Kept on the device rather than in the database on purpose: "not a bill" is
+ * a judgement about one person's own list, it costs nothing to re-offer on a
+ * new device, and it needs no round-trip to feel instant.
+ */
+function loadDismissedSuggestions() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('dismissedBillSuggestions') ?? '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function dismissSuggestion(key) {
+  state.dismissedSuggestions.add(key);
+  try {
+    localStorage.setItem(
+      'dismissedBillSuggestions',
+      JSON.stringify([...state.dismissedSuggestions]),
+    );
+  } catch {
+    /* A full or blocked localStorage must not break dismissing. */
+  }
+}
 
 const money = (n) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -678,72 +711,256 @@ function el(html) {
   return div.firstElementChild;
 }
 
+// ---------------------------------------------------------------------------
+// UI primitives
+//
+// Every screen builds from these. Before, each view invented its own row, its
+// own button styling and its own inline CSS, so the same information looked
+// different depending on which tab you happened to be on — the single biggest
+// reason the app read as several apps stapled together. There is now one row,
+// one button scale, one field, one avatar.
+// ---------------------------------------------------------------------------
+
 /**
- * Which underlying views each of the five primary tabs owns, for active-
- * state highlighting — docs/ui/README.md's five-section IA (Home / Bills /
- * Spending / Income / More) groups this app's ~13 views, not a 1:1 mapping
- * of tab to view. Tapping a primary tab always lands on its first view;
- * the rest are reached through More, but the tab bar still highlights the
- * right group so navigating deeper never looks like navigating away.
+ * Line icons, drawn at 1.6px stroke in currentColor.
+ *
+ * Inline SVG rather than an emoji or a unicode glyph: those render differently
+ * on every platform (and some, like ＄ and •••, are visibly not from the same
+ * family as each other), which is exactly the kind of small incoherence that
+ * makes an interface feel assembled rather than designed.
+ */
+const ICONS = {
+  home: '<path d="M3 9.5 10 4l7 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z"/>',
+  bills: '<path d="M4.5 3h11v14l-2.2-1.4L11 17l-2.3-1.4L6.4 17l-1.9-1.2z"/><path d="M7.5 7.5h5M7.5 11h3.5"/>',
+  spending: '<path d="M3 15.5 7.5 10l3.2 3 5.3-6.5"/><path d="M12.5 6.5H16V10"/>',
+  income: '<path d="M10 3.5v13"/><path d="M13.2 6.2A3 3 0 0 0 10.4 4.5h-.8a2.6 2.6 0 0 0-.4 5.2l1.6.3a2.6 2.6 0 0 1-.4 5.2h-.8a3 3 0 0 1-2.8-1.7"/>',
+  more: '<circle cx="5" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1.3" fill="currentColor" stroke="none"/>',
+  chevron: '<path d="M7.5 4.5 13 10l-5.5 5.5"/>',
+  back: '<path d="M12.5 4.5 7 10l5.5 5.5"/>',
+  plus: '<path d="M10 4.5v11M4.5 10h11"/>',
+  search: '<circle cx="9" cy="9" r="5"/><path d="M12.8 12.8 16.5 16.5"/>',
+  settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7"/>',
+  bank: '<path d="M3 8 10 4l7 4"/><path d="M4.5 8v7M8 8v7M12 8v7M15.5 8v7"/><path d="M3 16.5h14"/>',
+  mail: '<rect x="3" y="5" width="14" height="10" rx="1.5"/><path d="m3.5 6 6.5 5 6.5-5"/>',
+  sparkle: '<path d="M10 3.5 11.6 8 16 9.6 11.6 11.2 10 15.7 8.4 11.2 4 9.6 8.4 8z"/>',
+  check: '<path d="m4.5 10.5 3.5 3.5 7.5-8"/>',
+  clock: '<circle cx="10" cy="10" r="7"/><path d="M10 6v4.3l2.8 1.7"/>',
+  calendar: '<rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 3v3M13 3v3"/>',
+  repeat: '<path d="M4 9.2V8a3 3 0 0 1 3-3h7"/><path d="m11.5 2.5 2.5 2.5-2.5 2.5"/><path d="M16 10.8V12a3 3 0 0 1-3 3H6"/><path d="m8.5 17.5-2.5-2.5 2.5-2.5"/>',
+  trend: '<path d="M3.5 16.5v-6M8.5 16.5v-11M13.5 16.5v-8"/>',
+  list: '<path d="M6.5 5.5h10M6.5 10h10M6.5 14.5h10M3.5 5.5h.01M3.5 10h.01M3.5 14.5h.01"/>',
+  people: '<circle cx="8" cy="7.5" r="2.8"/><path d="M3 16.5a5 5 0 0 1 10 0"/><path d="M13.5 5.2a2.8 2.8 0 0 1 0 5.4M14.5 16.5a5 5 0 0 0-1.6-3.7"/>',
+  inbox: '<rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M3 11.5h3.5l1 2h5l1-2H17"/>',
+};
+
+function icon(name, size = 18) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none"
+    stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
+}
+
+/**
+ * A colored initial for a payee.
+ *
+ * Same name always gets the same color — a household recognizes "the orange
+ * one" long before they read the label, and a color that shuffled between
+ * renders would make the list feel unstable.
+ */
+function avatarFor(name) {
+  const label = (name || '?').trim();
+  let hash = 0;
+  for (let i = 0; i < label.length; i += 1) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
+  return `<div class="row-avatar av-${hash % 6}">${escapeHtml(label.charAt(0).toUpperCase() || '?')}</div>`;
+}
+
+/**
+ * The one list row. Slots, all optional except title:
+ *   avatar | title (+ chips) | sub | amount | amountSub | chevron | actions
+ */
+function row({
+  avatar, iconName, title, sub, amount, amountSub, amountClass = '',
+  chips = '', chevron = false, actions = '', tone = '', attrs = '', tag = 'div',
+}) {
+  const lead = avatar
+    ? avatarFor(avatar)
+    : iconName ? `<div class="row-avatar ghost">${icon(iconName, 17)}</div>` : '';
+
+  const inner = `
+    ${lead}
+    <div class="row-body">
+      <div class="row-title">${title}${chips}</div>
+      ${sub ? `<div class="row-sub">${sub}</div>` : ''}
+    </div>
+    ${amount != null ? `
+      <div class="row-end">
+        <div class="row-amount ${amountClass}">${amount}</div>
+        ${amountSub ? `<div class="row-amount-sub">${amountSub}</div>` : ''}
+      </div>` : ''}
+    ${chevron ? `<span class="row-chev">${icon('chevron', 16)}</span>` : ''}
+  `;
+
+  // Actions push the row into a stacked layout — buttons crammed onto the same
+  // line as an amount make both harder to hit and harder to read.
+  if (actions) {
+    return `<div class="row row-stack ${tone}" ${attrs}>
+      <div style="display:flex;align-items:center;gap:12px;">${inner}</div>
+      <div class="row-actions">${actions}</div>
+    </div>`;
+  }
+  return `<${tag} class="row ${tone}" ${attrs}>${inner}</${tag}>`;
+}
+
+/** Section wrapper: title, optional subtitle, optional right-hand action. */
+function section(title, body, { sub = '', action = '' } = {}) {
+  return `
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="section-title">${title}</div>
+          ${sub ? `<div class="section-sub">${sub}</div>` : ''}
+        </div>
+        ${action}
+      </div>
+      ${body}
+    </section>
+  `;
+}
+
+/** Sub-navigation inside one primary tab. */
+function segmented(items) {
+  return `
+    <div class="seg">
+      ${items.map(([view, label]) => `
+        <button class="seg-btn ${state.view === view ? 'active' : ''}" data-view="${view}">${label}</button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function emptyState({ iconName = 'inbox', title, body = '', action = '' }) {
+  return `
+    <div class="empty">
+      <div class="empty-icon">${icon(iconName, 26)}</div>
+      <div class="empty-title">${title}</div>
+      ${body ? `<div class="empty-body">${body}</div>` : ''}
+      ${action}
+    </div>
+  `;
+}
+
+/** Shown wherever a view needs a session the household hasn't started yet. */
+function signInPrompt(what) {
+  return emptyState({
+    iconName: 'people',
+    title: `Sign in to ${what}`,
+    body: 'This is shared across the household, so it lives in the database rather than on one phone.',
+    action: '<button class="btn btn-primary" data-view="connect">Go to sign in</button>',
+  });
+}
+
+/**
+ * The five primary tabs, and which views each owns.
+ *
+ * docs/ui/README.md's five-section IA (Home / Bills / Spending / Income /
+ * More) groups this app's views rather than mapping one tab to one view.
+ * Tapping a tab lands on its first view; siblings are reached by a segmented
+ * control at the top of that tab, NOT by a menu — the old "More" screen listed
+ * ten destinations of wildly different importance as ten identical rows, which
+ * is how Trends, Paystubs and Connect all ended up equally buried.
+ *
+ * The tab bar highlights the owning group whichever sibling is open, so
+ * moving between them never reads as leaving the section.
  */
 const NAV_GROUPS = [
-  { id: 'dashboard', label: 'Home', icon: '⌂', views: ['dashboard'] },
-  { id: 'bills', label: 'Bills', icon: '▣', views: ['bills'] },
-  { id: 'expenses', label: 'Spending', icon: '↗', views: ['expenses', 'transactions', 'review', 'trends', 'subscriptions'] },
-  { id: 'income', label: 'Income', icon: '＄', views: ['income', 'paycheck', 'plan', 'shifts', 'paystubs'] },
-  { id: 'more', label: 'More', icon: '•••', views: ['more', 'advisor', 'connect'] },
+  { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
+  { id: 'bills', label: 'Bills', icon: 'bills', views: ['bills'] },
+  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'subscriptions', 'trends', 'review'] },
+  { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
+  { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan'] },
 ];
 
+/** Sub-navigation for the two tabs that own more than one view. */
+const SPENDING_TABS = [
+  ['spending', 'Overview'],
+  ['transactions', 'Transactions'],
+  ['subscriptions', 'Recurring'],
+  ['trends', 'Trends'],
+];
+const INCOME_TABS = [
+  ['income', 'Overview'],
+  ['paycheck', 'Paycheck'],
+  ['shifts', 'Shifts'],
+  ['paystubs', 'Paystubs'],
+];
+
+function uncategorizedCount() {
+  return state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income && !t.pending).length;
+}
+
 function renderBottomNav() {
-  const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
-  const billsReviewCount = state.billsNeedingReview.length;
+  const dots = {
+    bills: state.billsNeedingReview.length > 0,
+    spending: uncategorizedCount() > 0,
+  };
 
   return `
-    <nav class="bottom-nav">
-      ${NAV_GROUPS.map((g) => {
-        const active = g.views.includes(state.view);
-        const dot = (g.id === 'bills' && billsReviewCount > 0) || (g.id === 'more' && reviewCount > 0);
-        return `
-          <button class="bottom-nav-btn ${active ? 'active' : ''}" data-view="${g.id}">
-            <span class="bottom-nav-icon">${g.icon}</span>
-            ${g.label}
-            ${dot ? '<span class="bottom-nav-dot"></span>' : ''}
-          </button>
-        `;
-      }).join('')}
+    <nav class="tabbar">
+      ${NAV_GROUPS.map((g) => `
+        <button class="tab ${g.views.includes(state.view) ? 'active' : ''}" data-view="${g.id}">
+          <span class="tab-icon">${icon(g.icon, 21)}</span>
+          ${g.label}
+          ${dots[g.id] ? '<span class="tab-dot"></span>' : ''}
+        </button>
+      `).join('')}
     </nav>
   `;
 }
 
 /**
- * Everything that does not fit one of the four primary tabs — the doc's
- * own "More" section. A plain tappable list rather than another styled
- * view: this screen's only job is getting out of the way to the real one.
+ * Settings and the occasional destination — not a dumping ground for views
+ * that belong on a real tab. Everything with a home somewhere else moved
+ * there; what's left is genuinely peripheral.
  */
 function renderMore() {
-  const reviewCount = state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income).length;
   const rows = [
-    ['paycheck', 'Paycheck'],
-    ['plan', 'Plan'],
-    ['transactions', 'Transactions'],
-    ['review', 'Review', reviewCount],
-    ['trends', 'Trends'],
-    ['subscriptions', 'Subscriptions'],
-    ['shifts', 'Shifts'],
-    ['paystubs', 'Paystubs'],
-    ['advisor', 'Advisor'],
-    ['connect', 'Connect'],
+    ['connect', 'Accounts & sync', 'bank', state.connectedItems.length
+      ? `${state.connectedItems.length} connected` : 'No bank connected'],
+    ['advisor', 'Advisor', 'sparkle', state.advisorNotes.length
+      ? `${state.advisorNotes.length} check-in${state.advisorNotes.length === 1 ? '' : 's'}` : 'Ask about your numbers'],
+    ['plan', 'Long-term plan', 'trend', 'Priorities, debt, the child transition'],
   ];
 
   return `
-    <h2>More</h2>
-    <div class="more-grid">
-      ${rows.map(([id, label, count]) => `
-        <button class="more-row" data-view="${id}">
-          <span>${label}${count ? `<span class="badge">${count}</span>` : ''}</span>
-          <span class="more-row-chev">›</span>
-        </button>
-      `).join('')}
+    ${section('More', `
+      <div class="list">
+        ${rows.map(([id, label, iconName, sub]) => row({
+          iconName, title: label, sub, chevron: true,
+          tag: 'button', attrs: `data-view="${id}"`,
+        })).join('')}
+      </div>
+    `)}
+
+    ${section('This household', `
+      <div class="list">
+        ${state.session
+          ? row({
+            iconName: 'people',
+            title: escapeHtml(state.session.user.email),
+            sub: 'Signed in',
+            actions: '<button class="btn btn-sm btn-outline" data-action="sign-out">Sign out</button>',
+          })
+          : row({
+            iconName: 'people', title: 'Not signed in',
+            sub: 'The app is showing demo numbers', chevron: true,
+            tag: 'button', attrs: 'data-view="connect"',
+          })}
+      </div>
+    `)}
+
+    <div class="disclaimer">
+      Every figure here is computed from your own transactions. Nothing is
+      advice, and nothing leaves this household except the aggregate summary
+      the advisor is given when you ask it for a check-in.
     </div>
   `;
 }
@@ -753,24 +970,33 @@ function renderSyncBanner() {
   if (!health) return '';
 
   if (health.demo) {
-    return `<div class="banner banner-info">
-      Demo mode — synthetic data. No accounts connected, nothing real is being shown.
+    return `<div class="banner">
+      <div class="banner-body">
+        <strong>Demo numbers.</strong>
+        Nothing here is real yet — connect a bank to see your own.
+      </div>
+      <button class="linkbtn" data-view="connect">Connect</button>
     </div>`;
   }
 
-  const hours = (Date.now() - new Date(health.last_success).getTime()) / 3600000;
   if (health.status === 'login_required') {
     return `<div class="banner banner-warn">
-      <strong>${health.institution_name} needs reconnecting.</strong>
-      Your bank ended the connection — this happens a few times a year.
-      <button class="link" data-action="reauth">Reconnect</button>
+      <div class="banner-body">
+        <strong>${health.institution_name} needs reconnecting.</strong>
+        Your bank ended the connection — this happens a few times a year.
+      </div>
+      <button class="linkbtn" data-action="reauth">Reconnect</button>
     </div>`;
   }
+
   // A dashboard rendering stale numbers looks exactly like a working one.
   // Staleness has to be visible or it isn't caught.
+  const hours = (Date.now() - new Date(health.last_success).getTime()) / 3600000;
   if (hours > 48) {
     return `<div class="banner banner-warn">
-      Last synced ${Math.floor(hours / 24)} days ago. These numbers may be out of date.
+      <div class="banner-body">
+        Last synced ${Math.floor(hours / 24)} days ago — these numbers may be out of date.
+      </div>
     </div>`;
   }
   return '';
@@ -795,34 +1021,30 @@ function renderAlerts() {
   if (!items.length) return '';
 
   const renderOne = (a) => `
-    <div class="banner ${a.urgent ? 'banner-warn' : 'banner-info'}" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-      <div>
+    <div class="banner ${a.urgent ? 'banner-warn' : ''}">
+      <div class="banner-body">
         <strong>${a.title}</strong>
-        <div style="margin-top:2px;">${a.body}</div>
+        <div>${a.body}</div>
       </div>
-      <button class="link" data-action="dismiss-alert" data-key="${a.key}" style="white-space:nowrap;">Dismiss</button>
+      <button class="linkbtn quiet" data-action="dismiss-alert" data-key="${a.key}">Dismiss</button>
     </div>
   `;
 
   const [first, ...rest] = items;
 
   return `
-    <div class="stream-list" style="margin-bottom:14px;">
-      ${renderOne(first)}
-      ${rest.length ? `
-        <details style="margin-top:8px;">
-          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">+${rest.length} more ${rest.length === 1 ? 'insight' : 'insights'}</summary>
-          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
-            ${rest.map(renderOne).join('')}
-          </div>
-        </details>
-      ` : ''}
-    </div>
+    ${renderOne(first)}
+    ${rest.length ? `
+      <details class="fold" style="margin:-4px 0 14px;">
+        <summary>${rest.length} more ${rest.length === 1 ? 'insight' : 'insights'}</summary>
+        <div class="fold-body">${rest.map(renderOne).join('')}</div>
+      </details>
+    ` : ''}
   `;
 }
 
 /** Categories shown before "Where it went" folds the rest behind a tap. */
-const CATEGORY_LIST_LIMIT = 6;
+const CATEGORY_LIST_LIMIT = 5;
 
 function renderCategoryRows(categories, max) {
   return categories.map(([name, amount]) => {
@@ -830,15 +1052,17 @@ function renderCategoryRows(categories, max) {
     const delta = avg ? ((amount - avg) / avg) * 100 : 0;
     const showDelta = avg !== null && Math.abs(delta) > 15;
     return `
-      <div class="cat-row" data-category="${name}">
-        <div class="cat-head">
-          <span class="cat-name">${name}</span>
-          <span class="cat-amount">${moneyExact(amount)}</span>
+      <div class="row" data-category="${name}" style="display:block;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+          <span class="row-title">${name}</span>
+          <span class="row-amount">${moneyExact(amount)}</span>
         </div>
-        <div class="bar"><div class="bar-fill ${name === 'Uncategorized' ? 'muted' : ''}" style="width:${(amount / max) * 100}%"></div></div>
+        <div class="meter">
+          <div class="meter-fill ${name === 'Uncategorized' ? 'quiet' : ''}" style="width:${Math.min(100, (amount / max) * 100)}%"></div>
+        </div>
         ${showDelta ? `
-          <div class="cat-note ${delta > 0 ? 'up' : 'down'}">
-            ${delta > 0 ? '▲' : '▼'} ${Math.abs(Math.round(delta))}% vs recent average
+          <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--accent)'};">
+            ${delta > 0 ? '↑' : '↓'} ${Math.abs(Math.round(delta))}% vs recent average
           </div>` : ''}
       </div>
     `;
@@ -864,108 +1088,146 @@ function renderDashboard() {
   const sts = gatherSafeToSpendInputs();
   const safeToSpendResult = sts ? calculateSafeToSpend(sts) : null;
 
+  const reviewCount = uncategorizedCount();
+
   return `
     ${renderAlerts()}
+
     <div class="month-picker">
-      <button class="chev" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>‹</button>
-      <h2>${monthLabel(state.month)}</h2>
-      <button class="chev" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>›</button>
+      <button class="chev-btn" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>${icon('back', 16)}</button>
+      <div class="month-picker-label">${monthLabel(state.month)}</div>
+      <button class="chev-btn" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>${icon('chevron', 16)}</button>
     </div>
 
     ${safeToSpendResult ? `
-      <div class="headline">
-        <div class="headline-label">Safe to spend</div>
-        <div class="headline-value ${safeToSpendResult.status === 'negative' ? 'bad' : safeToSpendResult.status === 'tight' ? '' : 'good'}">
+      <div class="hero">
+        <div class="hero-label">Safe to spend</div>
+        <div class="hero-value ${safeToSpendResult.status === 'negative' ? 'bad' : ''}">
           ${moneyExact(safeToSpendResult.safeToSpend)}
         </div>
-        <div class="headline-note">${safeToSpendResult.headline}</div>
+        <div class="hero-note">${safeToSpendResult.headline}</div>
+        <div class="hero-foot">
+          <span><b>${money(safeToSpendResult.startingPoint)}</b> coming in</span>
+          ${safeToSpendResult.deductions.slice(0, 2).map((d) =>
+            `<span><b>${money(d.amount)}</b> ${d.label.toLowerCase()}</span>`).join('')}
+        </div>
       </div>
 
-      <details style="margin-top:10px;">
-        <summary style="cursor:pointer;color:var(--muted);font-size:13px;">See how this is calculated</summary>
-        <div class="breakdown" style="margin-top:8px;">
-          <div class="breakdown-row">
-            <span class="breakdown-label">Starting: balance + expected income</span>
-            <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
-          </div>
-          ${safeToSpendResult.deductions.map((d) => `
-            <div class="breakdown-row">
-              <span class="breakdown-label">${d.label}</span>
-              <span>−${moneyExact(d.amount)}</span>
+      <details class="fold">
+        <summary>See how this is calculated</summary>
+        <div class="fold-body">
+          <div class="kv">
+            <div class="kv-row">
+              <span class="kv-label">Starting: balance + expected income</span>
+              <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
             </div>
-          `).join('')}
-          <div class="breakdown-row emphasis">
-            <span class="breakdown-label">Safe to spend</span>
-            <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+            ${safeToSpendResult.deductions.map((d) => `
+              <div class="kv-row">
+                <span class="kv-label">${d.label}</span>
+                <span>−${moneyExact(d.amount)}</span>
+              </div>
+            `).join('')}
+            <div class="kv-row total">
+              <span class="kv-label">Safe to spend</span>
+              <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+            </div>
           </div>
-        </div>
-      </details>
-
-      ${safeToSpendResult.warnings.length ? `
-        <div class="note-box">
-          <strong>Worth knowing:</strong>
-          <ul style="margin:8px 0 0; padding-left:18px;">
-            ${safeToSpendResult.warnings.map((w) => `<li style="margin-bottom:4px">${w}</li>`).join('')}
-          </ul>
-        </div>
-      ` : ''}
-    ` : ''}
-
-    <div class="stat-row">
-      <div class="stat">
-        <div class="stat-label">Income</div>
-        <div class="stat-value income">${money(income.total)}</div>
-        <div class="stat-note">${income.detail.map((d) => `${d.paychecks} checks`).join(' + ')}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Spent</div>
-        <div class="stat-value">${money(total)}</div>
-        <div class="stat-note">${txns.length} transactions</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Left over</div>
-        <div class="stat-value ${net < 0 ? 'negative' : 'positive'}">${money(net)}</div>
-        <div class="stat-note">${net < 0 ? 'overspending' : 'saved'}</div>
-      </div>
-    </div>
-
-    ${income.detail.some((d) => d.paychecks === 3) ? `
-      <div class="banner banner-good">
-        <strong>Three-paycheck month.</strong>
-        ${income.detail.find((d) => d.paychecks === 3).payee} pays every two weeks, so this
-        month has an extra check — about ${money(state.streams.find((s) => s.cadence === 'biweekly')?.typical_amount || 0)}
-        more than a normal month. Good month to fund a sinking fund.
-      </div>
-    ` : ''}
-
-    <h3>Where it went</h3>
-    <div class="cat-list">
-      ${renderCategoryRows(categories.slice(0, CATEGORY_LIST_LIMIT), max)}
-    </div>
-    ${categories.length > CATEGORY_LIST_LIMIT ? `
-      <details>
-        <summary style="cursor:pointer;color:var(--muted);font-size:13px;margin-top:6px;">
-          Show all ${categories.length} categories
-        </summary>
-        <div class="cat-list" style="margin-top:8px;">
-          ${renderCategoryRows(categories.slice(CATEGORY_LIST_LIMIT), max)}
+          ${safeToSpendResult.warnings.length ? `
+            <div class="note" style="margin-top:8px;">
+              <strong>Worth knowing:</strong>
+              <ul>${safeToSpendResult.warnings.map((w) => `<li>${w}</li>`).join('')}</ul>
+            </div>` : ''}
         </div>
       </details>
     ` : ''}
 
-    ${transferTotal > 0 ? `
-      <div class="note-box">
-        <strong>${moneyExact(transferTotal)} in transfers excluded.</strong>
-        Card payments and money moved to savings aren't spending — that spending
-        already counted when each purchase was made. Counting it twice would
-        overstate this month by ${money(transferTotal)}.
-        <details>
-          <summary>Show them</summary>
-          ${transfers.map((t) => `<div class="mini-row"><span>${t.posted_date}</span><span>${t.payee}</span><span>${moneyExact(t.amount)}</span></div>`).join('')}
-        </details>
+    ${renderUpcoming()}
+
+    ${section('This month', `
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-label">Income</div>
+          <div class="stat-value positive">${money(income.total)}</div>
+          <div class="stat-note">${income.detail.map((d) => `${d.paychecks} checks`).join(' + ')}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Spent</div>
+          <div class="stat-value">${money(total)}</div>
+          <div class="stat-note">${txns.length} transactions</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Left over</div>
+          <div class="stat-value ${net < 0 ? 'negative' : 'positive'}">${money(net)}</div>
+          <div class="stat-note">${net < 0 ? 'overspending' : 'saved'}</div>
+        </div>
       </div>
-    ` : ''}
+
+      ${income.detail.some((d) => d.paychecks === 3) ? `
+        <div class="banner banner-good" style="margin:10px 0 0;">
+          <div class="banner-body">
+            <strong>Three-paycheck month.</strong>
+            ${income.detail.find((d) => d.paychecks === 3).payee} pays every two weeks, so
+            there's an extra check — about
+            ${money(state.streams.find((s) => s.cadence === 'biweekly')?.typical_amount || 0)}
+            more than a normal month. Good month to fund a sinking fund.
+          </div>
+        </div>` : ''}
+    `)}
+
+    ${section('Where it went', `
+      <div class="list tight">
+        ${renderCategoryRows(categories.slice(0, CATEGORY_LIST_LIMIT), max)}
+      </div>
+      ${transferTotal > 0 ? `
+        <div class="note" style="margin-top:10px;">
+          <strong>${moneyExact(transferTotal)} in transfers excluded.</strong>
+          Card payments and money moved to savings aren't spending — that spending
+          already counted when each purchase was made.
+        </div>` : ''}
+    `, {
+      action: '<button class="section-action" data-view="spending">See all</button>',
+    })}
+
+    ${reviewCount ? section('Needs a decision', `
+      <div class="list">
+        ${row({
+          iconName: 'inbox',
+          title: `${reviewCount} transaction${reviewCount === 1 ? '' : 's'} to categorize`,
+          sub: 'Setting one teaches that payee permanently',
+          chevron: true, tag: 'button', attrs: 'data-view="review"',
+        })}
+      </div>
+    `) : ''}
   `;
+}
+
+/**
+ * What's due before the household's next paycheck.
+ *
+ * Home's job is the one question the whole app exists for — how much can we
+ * safely spend — and the answer is meaningless without the obligations that
+ * are about to eat into it. Previously bills lived only on their own tab, so
+ * the dashboard's headline number was the only thing on screen and nothing
+ * explained what was pressing against it.
+ */
+function renderUpcoming() {
+  const upcoming = [...state.bills]
+    .filter((b) => b.status !== 'paid' && b.status !== 'ignored')
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, 4);
+
+  if (!upcoming.length) return '';
+
+  const total = upcoming.reduce((s, b) => s + b.amountDue, 0);
+
+  return section('Coming up', `
+    <div class="list">
+      ${upcoming.map((b) => renderBillRow(b)).join('')}
+    </div>
+  `, {
+    sub: `${moneyExact(total)} across the next ${upcoming.length}`,
+    action: '<button class="section-action" data-view="bills">All bills</button>',
+  });
 }
 
 function renderTransactions() {
@@ -973,32 +1235,60 @@ function renderTransactions() {
     .filter((t) => monthKey(t.posted_date) === state.month && !t.pending)
     .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
 
+  const reviewCount = uncategorizedCount();
+
   return `
-    <h2>${monthLabel(state.month)}</h2>
-    <input class="search" id="search" placeholder="Search transactions…" />
-    <div class="txn-list" id="txn-list">
-      ${txns.map(renderTransactionRow).join('')}
-    </div>
+    ${segmented(SPENDING_TABS)}
+    ${renderMonthPicker()}
+
+    ${reviewCount ? `
+      <div class="banner">
+        <div class="banner-body">
+          <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
+          Setting one teaches that payee permanently.
+        </div>
+        <button class="linkbtn" data-view="review">Review</button>
+      </div>` : ''}
+
+    <label class="field" style="margin-bottom:12px;">
+      <input class="input" id="search" placeholder="Search transactions…" autocomplete="off" />
+    </label>
+
+    ${txns.length ? `
+      <div class="list tight" id="txn-list">${txns.map(renderTransactionRow).join('')}</div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'No transactions this month',
+      body: 'Nothing has posted for this period yet.',
+    })}
   `;
 }
 
 function renderTransactionRow(t) {
-  const tag = t.is_transfer ? 'transfer' : t.is_income ? 'income' : null;
+  const kind = t.is_transfer ? 'transfer' : t.is_income ? 'income' : null;
+  const date = new Date(`${t.posted_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const chips = [
+    kind ? `<span class="chip ${kind === 'income' ? 'chip-ok' : ''}">${kind}</span>` : '',
+    !kind && t.categorized_by !== 'none'
+      ? `<span class="chip chip-outline" title="Decided by: ${t.categorized_by}">${t.categorized_by}</span>` : '',
+  ].join('');
+
   return `
-    <div class="txn" data-id="${t.plaid_transaction_id}" data-search="${(t.payee + ' ' + (t.category || '')).toLowerCase()}">
-      <div class="txn-main">
-        <div class="txn-payee">${t.payee}</div>
-        <div class="txn-meta">
-          ${t.posted_date}
-          ${tag ? `<span class="tag tag-${tag}">${tag}</span>` : ''}
-          ${t.categorized_by !== 'none' && !tag ? `<span class="tag tag-src" title="Decided by: ${t.categorized_by}">${t.categorized_by}</span>` : ''}
-        </div>
-      </div>
-      <div class="txn-right">
-        <div class="txn-amount ${t.amount < 0 ? 'income' : ''}">${moneyExact(Math.abs(t.amount))}</div>
-        ${tag ? '' : `<select class="cat-select" data-id="${t.plaid_transaction_id}">
+    <div class="row" data-id="${t.plaid_transaction_id}"
+      data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
+      ${avatarFor(t.payee)}
+      <div class="row-body">
+        <div class="row-title">${t.payee}</div>
+        <div class="row-sub">${date}${chips ? ` ${chips}` : ''}</div>
+        ${kind ? '' : `<select class="cat-select select-sm" style="margin-top:7px;" data-id="${t.plaid_transaction_id}">
           ${categoryOptions(t.category)}
         </select>`}
+      </div>
+      <div class="row-end">
+        <div class="row-amount ${t.amount < 0 ? 'income' : ''}">
+          ${t.amount < 0 ? '+' : ''}${moneyExact(Math.abs(t.amount))}
+        </div>
       </div>
     </div>
   `;
@@ -1020,26 +1310,39 @@ function renderReview() {
 
   if (!queue.length) {
     return `
-      <h2>Review</h2>
-      <div class="empty">
-        <p>Nothing to review.</p>
-        <p class="muted">${stats.coverage}% of transactions categorized automatically.</p>
-      </div>
+      ${segmented(SPENDING_TABS)}
+      ${emptyState({
+        iconName: 'check',
+        title: 'Nothing to review',
+        body: `${stats.coverage}% of transactions were categorized automatically.`,
+        action: '<button class="btn btn-secondary" data-view="transactions">Back to transactions</button>',
+      })}
     `;
   }
 
   return `
-    <h2>Review</h2>
-    <p class="muted">
-      ${queue.length} transaction${queue.length > 1 ? 's' : ''} we couldn't categorize confidently.
-      Setting one here teaches it permanently — that payee will never need reviewing again.
-    </p>
-    <div class="txn-list">${queue.map(renderTransactionRow).join('')}</div>
-    <div class="note-box">
-      <strong>${stats.coverage}% categorized automatically.</strong>
-      By layer: ${Object.entries(stats.counts).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(', ')}.
-      Unknowns are shown rather than guessed at — a wrong category silently
-      corrupts your trends, an empty one just asks a question.
+    ${segmented(SPENDING_TABS)}
+    ${section('Needs a category', `
+      <div class="list tight">${queue.map(renderTransactionRow).join('')}</div>
+      <div class="note" style="margin-top:12px;">
+        <strong>${stats.coverage}% categorized automatically.</strong>
+        By layer: ${Object.entries(stats.counts).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(', ')}.
+        Unknowns are shown rather than guessed at — a wrong category silently
+        corrupts your trends, an empty one just asks a question.
+      </div>
+    `, {
+      sub: `${queue.length} the categorizer wasn't confident about`,
+    })}
+  `;
+}
+
+/** Shared by every view that is scoped to one month. */
+function renderMonthPicker() {
+  return `
+    <div class="month-picker">
+      <button class="chev-btn" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>${icon('back', 16)}</button>
+      <div class="month-picker-label">${monthLabel(state.month)}</div>
+      <button class="chev-btn" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>${icon('chevron', 16)}</button>
     </div>
   `;
 }
@@ -1058,32 +1361,31 @@ function renderTrends() {
     .sort((a, b) => b.values.reduce((x, y) => x + y, 0) - a.values.reduce((x, y) => x + y, 0));
 
   return `
-    <h2>Trends</h2>
-    <p class="muted">
-      What to budget for, from what you actually spent — not from guesses.
-    </p>
-    <div class="trend-table">
-      <div class="trend-head">
-        <span>Category</span>
-        ${state.months.map((m) => `<span>${monthLabel(m).split(' ')[0].slice(0, 3)}</span>`).join('')}
-        <span>Avg</span>
+    ${segmented(SPENDING_TABS)}
+    ${section('Month by month', `
+      <div class="table">
+        <div class="table-head">
+          <span>Category</span>
+          ${state.months.map((m) => `<span>${monthLabel(m).split(' ')[0].slice(0, 3)}</span>`).join('')}
+          <span>Avg</span>
+        </div>
+        ${rows.map((r) => {
+          // Same rule as the dashboard: average only over months with activity,
+          // and don't call a single month an average.
+          const active = r.values.filter((v) => v > 0);
+          const avg = active.length >= MIN_MONTHS_FOR_AVERAGE
+            ? active.reduce((a, b) => a + b, 0) / active.length
+            : null;
+          return `
+            <div class="table-row">
+              <span class="strong">${r.cat}</span>
+              ${r.values.map((v) => `<span class="${v === 0 ? 'muted' : ''}">${v ? money(v) : '–'}</span>`).join('')}
+              <span class="strong ${avg === null ? 'muted' : ''}">${avg === null ? '–' : money(avg)}</span>
+            </div>
+          `;
+        }).join('')}
       </div>
-      ${rows.map((r) => {
-        // Same rule as the dashboard: average only over months with activity,
-        // and don't call a single month an average.
-        const active = r.values.filter((v) => v > 0);
-        const avg = active.length >= MIN_MONTHS_FOR_AVERAGE
-          ? active.reduce((a, b) => a + b, 0) / active.length
-          : null;
-        return `
-          <div class="trend-row">
-            <span class="trend-cat">${r.cat}</span>
-            ${r.values.map((v) => `<span class="${v === 0 ? 'muted' : ''}">${v ? money(v) : '–'}</span>`).join('')}
-            <span class="trend-avg ${avg === null ? 'muted' : ''}">${avg === null ? '–' : money(avg)}</span>
-          </div>
-        `;
-      }).join('')}
-    </div>
+    `, { sub: 'What to budget for, from what you actually spent' })}
   `;
 }
 
@@ -1091,48 +1393,60 @@ function renderIncome() {
   const [year, month] = state.month.split('-').map(Number);
   const projection = projectMonthlyIncome(state.streams, year, month);
 
+  const next = [...state.streams]
+    .filter((s) => s.next_expected)
+    .sort((a, b) => a.next_expected.localeCompare(b.next_expected))[0];
+
   return `
-    <h2>Income</h2>
-    <p class="muted">
-      Detected from recurring deposits. These are net amounts — what actually lands
-      in the account. Gross pay and withholding live on the pay stub, which isn't
-      connected.
-    </p>
+    ${segmented(INCOME_TABS)}
 
-    <div class="stream-list">
-      ${state.streams.map((s) => `
-        <div class="stream">
-          <div class="stream-head">
-            <span class="stream-payee">${s.payee}</span>
-            <span class="stream-amount">${moneyExact(s.typical_amount)}</span>
-          </div>
-          <div class="stream-meta">
-            ${s.cadence} · next expected ${s.next_expected}
-          </div>
+    ${next ? `
+      <div class="hero hero-sm">
+        <div class="hero-label">Next deposit</div>
+        <div class="hero-value">${moneyExact(next.typical_amount)}</div>
+        <div class="hero-note">
+          ${next.payee} · expected
+          ${new Date(`${next.next_expected}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
         </div>
-      `).join('')}
-    </div>
+      </div>` : ''}
 
-    <h3>${monthLabel(state.month)} projection</h3>
-    <div class="proj-list">
-      ${projection.detail.map((d) => `
-        <div class="proj-row ${d.paychecks === 3 ? 'highlight' : ''}">
-          <span>${d.payee}</span>
-          <span>${d.paychecks} × ${moneyExact(d.amount / d.paychecks)}</span>
-          <span>${moneyExact(d.amount)}</span>
-        </div>
-      `).join('')}
-      <div class="proj-row total">
-        <span>Total</span><span></span><span>${moneyExact(projection.total)}</span>
+    ${section('Your income streams', `
+      <div class="list">
+        ${state.streams.map((s) => row({
+          avatar: s.payee,
+          title: s.payee,
+          sub: `${s.cadence} · next ${s.next_expected}`,
+          chips: s.distribution?.stability && s.distribution.stability !== 'stable'
+            ? '<span class="chip chip-warn">varies</span>'
+            : '<span class="chip chip-ok">steady</span>',
+          amount: moneyExact(s.typical_amount),
+          amountClass: 'income',
+          amountSub: 'typical',
+        })).join('')}
       </div>
-    </div>
+    `, { sub: 'Detected from recurring deposits — net amounts, what actually lands' })}
 
-    <div class="note-box">
-      <strong>Why the total moves month to month.</strong>
-      A biweekly paycheck arrives 26 times a year, so two months out of twelve
-      carry a third check. Planning against a flat "monthly income" figure
-      under-counts those two months and over-counts the other ten.
-    </div>
+    ${section(`${monthLabel(state.month)} projection`, `
+      <div class="kv">
+        ${projection.detail.map((d) => `
+          <div class="kv-row">
+            <span class="kv-label">${d.payee} · ${d.paychecks} × ${moneyExact(d.amount / d.paychecks)}</span>
+            <span>${moneyExact(d.amount)}</span>
+          </div>
+        `).join('')}
+        <div class="kv-row total">
+          <span class="kv-label">Total</span>
+          <span>${moneyExact(projection.total)}</span>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:10px;">
+        <strong>Why the total moves month to month.</strong>
+        A biweekly paycheck arrives 26 times a year, so two months out of twelve
+        carry a third check. Planning against a flat "monthly income" figure
+        under-counts those two months and over-counts the other ten.
+      </div>
+    `)}
   `;
 }
 
@@ -1142,77 +1456,87 @@ function renderIncome() {
 
 function renderPaycheck() {
   if (!state.allocation) {
-    return `<h2>Paycheck</h2><div class="empty">No variable-income stream detected yet.</div>`;
+    return `
+      ${segmented(INCOME_TABS)}
+      ${emptyState({
+        iconName: 'income',
+        title: 'No variable income detected yet',
+        body: 'This screen splits a check that changes size. Once a few paychecks have landed, it fills in.',
+      })}
+    `;
   }
 
   const latest = state.allocation.allocations.at(-1);
   const isShort = latest.status !== 'surplus';
 
   return `
-    <h2>This paycheck</h2>
+    ${segmented(INCOME_TABS)}
 
-    <div class="headline">
-      <div class="headline-label">${isShort ? 'Shortfall' : 'Put away'}</div>
-      <div class="headline-value ${isShort ? 'bad' : 'good'}">
+    <div class="hero">
+      <div class="hero-label">${isShort ? 'Shortfall' : 'Put away from this check'}</div>
+      <div class="hero-value ${isShort ? 'bad' : ''}">
         ${moneyExact(isShort ? latest.shortfall : latest.surplus)}
       </div>
-      <div class="headline-note">${latest.message}</div>
+      <div class="hero-note">${latest.message}</div>
     </div>
 
-    <div class="breakdown">
-      <div class="breakdown-row">
-        <span class="breakdown-label">Check on ${latest.paycheckDate}</span>
-        <span>${moneyExact(latest.paycheckAmount)}</span>
+    ${section('How this check splits', `
+      <div class="kv">
+        <div class="kv-row">
+          <span class="kv-label">Check on ${latest.paycheckDate}</span>
+          <span>${moneyExact(latest.paycheckAmount)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Hold for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Sinking funds</span><span>−${moneyExact(latest.moveToSinking)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Groceries &amp; gas (${latest.daysCovered} days)</span>
+          <span>−${moneyExact(latest.keepForNecessary)}</span>
+        </div>
+        <div class="kv-row total">
+          <span class="kv-label">${isShort ? 'Short by' : 'Put away'}</span>
+          <span>${moneyExact(isShort ? latest.shortfall : latest.surplus)}</span>
+        </div>
       </div>
-      <div class="breakdown-row">
-        <span class="breakdown-label">Hold for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="breakdown-label">Sinking funds</span><span>−${moneyExact(latest.moveToSinking)}</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="breakdown-label">Groceries &amp; gas (${latest.daysCovered} days)</span>
-        <span>−${moneyExact(latest.keepForNecessary)}</span>
-      </div>
-      <div class="breakdown-row emphasis">
-        <span class="breakdown-label">${isShort ? 'Short by' : 'Put away'}</span>
-        <span>${moneyExact(isShort ? latest.shortfall : latest.surplus)}</span>
-      </div>
-    </div>
+    `)}
 
     ${state.extraPaycheckMonths?.length ? `
-      <div class="banner banner-good">
-        <strong>Three-paycheck month${state.extraPaycheckMonths.length > 1 ? 's' : ''}:
-        ${state.extraPaycheckMonths.map((m) => monthLabel(m.month)).join(', ')}.</strong>
-        Monthly bills are covered by the first two checks, so the third is almost
-        entirely spare. Worth deciding where it goes before it arrives.
+      <div class="banner banner-good" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>Three-paycheck month${state.extraPaycheckMonths.length > 1 ? 's' : ''}:
+          ${state.extraPaycheckMonths.map((m) => monthLabel(m.month)).join(', ')}.</strong>
+          Monthly bills are covered by the first two checks, so the third is almost
+          entirely spare. Worth deciding where it goes before it arrives.
+        </div>
       </div>` : ''}
 
-    <h3>Every check</h3>
-    <p class="muted">
-      Bill funding is levelled across checks rather than tied to due dates, so what
-      you can save tracks how big the check was — not which bills happened to land.
-    </p>
-    <div class="breakdown">
-      ${state.allocation.allocations.map((a) => `
-        <div class="breakdown-row ${a.bufferDraw > 0 ? '' : ''}">
-          <span class="breakdown-label">${a.paycheckDate} · ${moneyExact(a.paycheckAmount)}</span>
-          <span class="${a.status === 'surplus' ? '' : 'negative'}">
-            ${a.status === 'surplus' ? moneyExact(a.surplus) : `−${moneyExact(a.shortfall)}`}
-          </span>
-        </div>`).join('')}
-      <div class="breakdown-row emphasis">
-        <span class="breakdown-label">Net saved</span>
-        <span>${moneyExact(state.allocation.netSaved)}</span>
+    ${section('Every check', `
+      <div class="kv">
+        ${state.allocation.allocations.map((a) => `
+          <div class="kv-row">
+            <span class="kv-label">${a.paycheckDate} · ${moneyExact(a.paycheckAmount)}</span>
+            <span class="${a.status === 'surplus' ? '' : 'negative'}">
+              ${a.status === 'surplus' ? moneyExact(a.surplus) : `−${moneyExact(a.shortfall)}`}
+            </span>
+          </div>`).join('')}
+        <div class="kv-row total">
+          <span class="kv-label">Net saved</span>
+          <span>${moneyExact(state.allocation.netSaved)}</span>
+        </div>
       </div>
-    </div>
 
-    ${state.allocation.checksNeedingBuffer > 0 ? `
-      <div class="note-box">
-        ${state.allocation.checksNeedingBuffer} of ${state.allocation.allocations.length} checks
-        needed the buffer. That is the buffer doing its job — but if it happens often,
-        the floor is set too high rather than anything being wrong.
-      </div>` : ''}
+      ${state.allocation.checksNeedingBuffer > 0 ? `
+        <div class="note" style="margin-top:10px;">
+          ${state.allocation.checksNeedingBuffer} of ${state.allocation.allocations.length} checks
+          needed the buffer. That is the buffer doing its job — but if it happens often,
+          the floor is set too high rather than anything being wrong.
+        </div>` : ''}
+    `, {
+      sub: 'Bill funding is levelled across checks, not tied to due dates',
+    })}
   `;
 }
 
@@ -1225,62 +1549,65 @@ function renderPlan() {
   const child = state.child;
 
   return `
-    <h2>What to do next</h2>
+    ${section('What to do next', `
+      ${state.structure ? `
+        <div class="note" style="margin-bottom:10px;">
+          <strong>Structure.</strong> ${state.structure.recommendation}
+        </div>` : ''}
 
-    ${state.structure ? `
-      <div class="note-box">
-        <strong>Structure.</strong> ${state.structure.recommendation}
-      </div>` : ''}
+      ${g.steps.map((step) => `
+        <div class="card ${step.status === 'done' ? 'done' : ''}">
+          <div class="card-head">
+            <span class="card-title">
+              ${step.status === 'done' ? `<span style="color:var(--accent);">${icon('check', 15)}</span> ` : `${step.priority}. `}${step.title}
+            </span>
+            ${step.amount ? `<span class="row-amount">${money(step.amount)}</span>` : ''}
+          </div>
+          ${step.monthsToGoal ? `<div class="row-sub">~${step.monthsToGoal} months at current surplus</div>` : ''}
+          <div class="prose-sm" style="margin-top:8px;">${step.why}</div>
+          ${step.comparison ? renderDebtComparison(step.comparison) : ''}
+        </div>`).join('')}
+    `)}
 
-    ${g.steps.map((step) => `
-      <div class="step ${step.status === 'done' ? 'done' : ''}">
-        <div class="step-head">
-          <span class="step-title">${step.priority}. ${step.title}</span>
-          ${step.amount ? `<span class="step-amount">${money(step.amount)}</span>` : ''}
-          ${step.status === 'done' ? '<span class="step-amount">✓</span>' : ''}
+    ${section('The child, ~2 years out', `
+      <div class="stat-row two">
+        <div class="stat">
+          <div class="stat-label">Spare now</div>
+          <div class="stat-value positive">${money(child.surplus.now)}</div>
+          <div class="stat-note">per month</div>
         </div>
-        ${step.monthsToGoal ? `<div class="step-meta">~${step.monthsToGoal} months at current surplus</div>` : ''}
-        <div class="step-why">${step.why}</div>
-        ${step.comparison ? renderDebtComparison(step.comparison) : ''}
-      </div>`).join('')}
-
-    <h3>The child, ~2 years out</h3>
-    <div class="split">
-      <div class="headline">
-        <div class="headline-label">Spare now</div>
-        <div class="headline-value good">${money(child.surplus.now)}</div>
-        <div class="headline-note">per month</div>
+        <div class="stat">
+          <div class="stat-label">After childcare</div>
+          <div class="stat-value ${child.surplus.after < 0 ? 'negative' : ''}">${money(child.surplus.after)}</div>
+          <div class="stat-note">${child.surplus.reductionPercent}% absorbed</div>
+        </div>
       </div>
-      <div class="headline">
-        <div class="headline-label">After childcare</div>
-        <div class="headline-value ${child.surplus.after < 0 ? 'bad' : ''}">${money(child.surplus.after)}</div>
-        <div class="headline-note">${child.surplus.reductionPercent}% absorbed</div>
+
+      <div class="kv" style="margin-top:8px;">
+        <div class="kv-row"><span class="kv-label">Childcare</span><span>${moneyExact(child.childcare.monthly)}/mo</span></div>
+        <div class="kv-row"><span class="kv-label">Birth (deductible + OOP max)</span><span>${moneyExact(child.birth.cost)}</span></div>
+        ${child.leave ? `<div class="kv-row"><span class="kv-label">Leave income gap</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
+        <div class="kv-row total">
+          <span class="kv-label">Set aside monthly</span>
+          <span>${moneyExact(child.monthlySetAside)}</span>
+        </div>
       </div>
-    </div>
 
-    <div class="breakdown">
-      <div class="breakdown-row"><span class="breakdown-label">Childcare</span><span>${moneyExact(child.childcare.monthly)}/mo</span></div>
-      <div class="breakdown-row"><span class="breakdown-label">Birth (deductible + OOP max)</span><span>${moneyExact(child.birth.cost)}</span></div>
-      ${child.leave ? `<div class="breakdown-row"><span class="breakdown-label">Leave income gap</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
-      <div class="breakdown-row emphasis">
-        <span class="breakdown-label">Set aside monthly</span>
-        <span>${moneyExact(child.monthlySetAside)}</span>
-      </div>
-    </div>
+      ${child.insights.length ? `
+        <div class="list" style="margin-top:10px;">
+          ${child.insights.map((i) => row({
+            title: i.title,
+            sub: i.detail,
+            tone: i.severity === 'high' ? 'warn' : '',
+          })).join('')}
+        </div>` : ''}
 
-    ${child.insights.map((i) => `
-      <div class="insight ${i.severity}">
-        <div class="insight-title">${i.title}</div>
-        <div class="insight-body">${i.detail}</div>
-      </div>`).join('')}
-
-    ${child.unknowns.length ? `
-      <div class="note-box">
-        <strong>Worth finding out — none of this is visible from your transactions:</strong>
-        <ul style="margin:8px 0 0; padding-left:18px;">
-          ${child.unknowns.map((u) => `<li style="margin-bottom:4px">${u}</li>`).join('')}
-        </ul>
-      </div>` : ''}
+      ${child.unknowns.length ? `
+        <div class="note" style="margin-top:10px;">
+          <strong>Worth finding out — none of this is visible from your transactions:</strong>
+          <ul>${child.unknowns.map((u) => `<li>${u}</li>`).join('')}</ul>
+        </div>` : ''}
+    `)}
 
     <div class="disclaimer">${g.disclaimer}</div>
   `;
@@ -1288,81 +1615,85 @@ function renderPlan() {
 
 function renderDebtComparison(c) {
   return `
-    <div class="breakdown" style="margin-top:10px">
-      <div class="breakdown-row">
-        <span class="breakdown-label">Avalanche · ${c.avalanche.months} mo</span>
+    <div class="kv" style="margin-top:10px;">
+      <div class="kv-row">
+        <span class="kv-label">Avalanche · ${c.avalanche.months} mo</span>
         <span>${moneyExact(c.avalanche.interestPaid)} interest</span>
       </div>
-      <div class="breakdown-row">
-        <span class="breakdown-label">Snowball · ${c.snowball.months} mo</span>
+      <div class="kv-row">
+        <span class="kv-label">Snowball · ${c.snowball.months} mo</span>
         <span>${moneyExact(c.snowball.interestPaid)} interest</span>
       </div>
     </div>
-    <div class="step-why">${c.note}</div>`;
+    <div class="prose-sm" style="margin-top:8px;">${c.note}</div>`;
 }
 
 // ---------------------------------------------------------------------------
 // Expenses
 // ---------------------------------------------------------------------------
 
-function renderExpenses() {
+function renderSpending() {
   const p = state.picture;
   const c = state.coverage;
-  const statusClass = c.status === 'covered' ? 'good' : c.status === 'tight' ? '' : 'bad';
+  const catMax = Math.max(...p.categories.map((x) => x.monthlyAverage), 1);
 
   return `
-    <h2>Where the money goes</h2>
-    <p class="muted">Based on ${p.monthsAnalyzed} complete months.</p>
+    ${segmented(SPENDING_TABS)}
 
-    <div class="headline">
-      <div class="headline-label">Surplus on a slow stretch</div>
-      <div class="headline-value ${statusClass}">${money(c.fullSurplus)}</div>
-      <div class="headline-note">${c.message}</div>
-    </div>
-
-    <div class="breakdown">
-      <div class="breakdown-row"><span class="breakdown-label">Committed</span><span>${moneyExact(p.monthly.committed)}</span></div>
-      <div class="breakdown-row"><span class="breakdown-label">Necessary</span><span>${moneyExact(p.monthly.necessary)}</span></div>
-      <div class="breakdown-row"><span class="breakdown-label">Discretionary</span><span>${moneyExact(p.monthly.discretionary)}</span></div>
-      <div class="breakdown-row">
-        <span class="breakdown-label">Irregular (spread)</span>
-        <span>${moneyExact(p.monthly.irregular)}</span>
+    <div class="hero">
+      <div class="hero-label">Surplus on a slow stretch</div>
+      <div class="hero-value ${c.status === 'covered' ? '' : c.status === 'tight' ? '' : 'bad'}">
+        ${money(c.fullSurplus)}
       </div>
-      <div class="breakdown-row emphasis">
-        <span class="breakdown-label">True monthly cost</span><span>${moneyExact(p.trueMonthlyCost)}</span>
+      <div class="hero-note">${c.message}</div>
+      <div class="hero-foot">
+        <span><b>${money(p.trueMonthlyCost)}</b> true monthly cost</span>
+        <span><b>${money(p.survivalMonthlyCost)}</b> survival cost</span>
       </div>
     </div>
 
-    <div class="note-box">
-      <strong>Survival cost is ${moneyExact(p.survivalMonthlyCost)}.</strong>
-      That's what an emergency fund should cover — necessities only. Dining out and
-      shopping stop in a real emergency, so sizing on total spending inflates the
-      target and makes it feel unreachable.
-    </div>
+    ${section('What the money is doing', `
+      <div class="kv">
+        <div class="kv-row"><span class="kv-label">Committed</span><span>${moneyExact(p.monthly.committed)}</span></div>
+        <div class="kv-row"><span class="kv-label">Necessary</span><span>${moneyExact(p.monthly.necessary)}</span></div>
+        <div class="kv-row"><span class="kv-label">Discretionary</span><span>${moneyExact(p.monthly.discretionary)}</span></div>
+        <div class="kv-row"><span class="kv-label">Irregular (spread)</span><span>${moneyExact(p.monthly.irregular)}</span></div>
+        <div class="kv-row total">
+          <span class="kv-label">True monthly cost</span><span>${moneyExact(p.trueMonthlyCost)}</span>
+        </div>
+      </div>
 
-    <h3>By category</h3>
-    <div class="cat-list">
-      ${(() => {
-        const catMax = Math.max(...p.categories.map((c) => c.monthlyAverage), 1);
-        return p.categories.map((c) => `
-          <div class="cat-row">
-            <div class="cat-head">
-              <span class="cat-name">
-                ${c.category}
-                <span class="pill">${c.bucket}</span>
-                ${c.reclassified ? '<span class="pill">reclassified</span>' : ''}
+      <div class="note" style="margin-top:10px;">
+        <strong>Survival cost is ${moneyExact(p.survivalMonthlyCost)}.</strong>
+        That's what an emergency fund should cover — necessities only. Dining out and
+        shopping stop in a real emergency, so sizing on total spending inflates the
+        target and makes it feel unreachable.
+      </div>
+    `, { sub: `Based on ${p.monthsAnalyzed} complete months` })}
+
+    ${section('By category', `
+      <div class="list tight">
+        ${p.categories.map((cat) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">
+                ${cat.category}
+                <span class="chip">${cat.bucket}</span>
+                ${cat.reclassified ? '<span class="chip chip-outline">reclassified</span>' : ''}
               </span>
-              <span class="cat-amount">${moneyExact(c.monthlyAverage)}</span>
+              <span class="row-amount">${moneyExact(cat.monthlyAverage)}</span>
             </div>
-            <div class="bar"><div class="bar-fill" style="width:${(c.monthlyAverage / catMax) * 100}%"></div></div>
-          </div>`).join('');
-      })()}
-    </div>
-    <p class="muted" style="margin-top:10px">
-      "Reclassified" means the spending pattern overrode the category label — an
-      annually-paid premium is spread across the year rather than treated as a
-      fixed monthly cost.
-    </p>
+            <div class="meter">
+              <div class="meter-fill" style="width:${Math.min(100, (cat.monthlyAverage / catMax) * 100)}%"></div>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:10px;">
+        "Reclassified" means the spending pattern overrode the category label — an
+        annually-paid premium is spread across the year rather than treated as a
+        fixed monthly cost.
+      </div>
+    `, { sub: 'Monthly average, not this month alone' })}
   `;
 }
 
@@ -1374,55 +1705,73 @@ function renderSubscriptions() {
   const s = state.subs;
 
   return `
-    <h2>Subscriptions</h2>
+    ${segmented(SPENDING_TABS)}
 
-    <div class="headline">
-      <div class="headline-label">Annual cost</div>
-      <div class="headline-value">${money(s.totalAnnual)}</div>
-      <div class="headline-note">
+    <div class="hero">
+      <div class="hero-label">Subscriptions, per year</div>
+      <div class="hero-value">${money(s.totalAnnual)}</div>
+      <div class="hero-note">
         ${moneyExact(s.totalMonthly)}/mo across ${s.subscriptions.length} services.
         Shown yearly because that's the number that prompts a decision.
       </div>
     </div>
 
     ${s.priceIncreases.length ? `
-      <div class="banner banner-warn">
-        <strong>${s.priceIncreases.length} price increase${s.priceIncreases.length > 1 ? 's' : ''}.</strong>
-        ${s.priceIncreases.map((p) =>
-          `${p.payee} ${moneyExact(p.priceChange.from)} → ${moneyExact(p.priceChange.to)}
-           (+${p.priceChange.changePercent}%, ${money(p.annualImpactOfIncrease)}/yr)`).join(' · ')}
+      <div class="banner banner-warn" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>${s.priceIncreases.length} price increase${s.priceIncreases.length > 1 ? 's' : ''}.</strong>
+          ${s.priceIncreases.map((p) =>
+            `${p.payee} ${moneyExact(p.priceChange.from)} → ${moneyExact(p.priceChange.to)}
+             (+${p.priceChange.changePercent}%, ${money(p.annualImpactOfIncrease)}/yr)`).join(' · ')}
+        </div>
       </div>` : ''}
 
-    <div class="sub-grid">
-      ${s.subscriptions.map((sub, i) => `
-        <div class="sub-tile">
-          <div class="sub-avatar sub-avatar-${i % 5}">${sub.payee.trim().charAt(0).toUpperCase()}</div>
-          <div class="sub-name">${sub.payee}${sub.confidence === 'low' ? ' <span class="pill">new</span>' : ''}</div>
-          <div class="sub-price">${moneyExact(sub.last_amount)}<span class="sub-cadence">/mo</span></div>
-          <div class="sub-annual">${money(sub.annualCost)}/yr</div>
-        </div>`).join('')}
-    </div>
+    ${section('Subscriptions', s.subscriptions.length ? `
+      <div class="list">
+        ${s.subscriptions.map((sub) => row({
+          avatar: sub.payee,
+          title: sub.payee,
+          chips: sub.confidence === 'low' ? '<span class="chip">new</span>' : '',
+          sub: `${sub.cadence} · last charged ${sub.last_seen}`,
+          amount: `${moneyExact(sub.last_amount)}`,
+          amountSub: `${money(sub.annualCost)}/yr`,
+        })).join('')}
+      </div>
 
-    ${s.duplicates.map((d) => `
-      <div class="note-box"><strong>${d.question}</strong>
-        ${d.services.map((x) => x.payee).join(', ')} — ${money(d.combinedAnnual)}/yr combined.
-      </div>`).join('')}
-
-    <h3>Recurring bills</h3>
-    <p class="muted">Obligations, not subscriptions. Listed so the forecast can use them.</p>
-    <div class="breakdown">
-      ${s.bills.map((b) => `
-        <div class="breakdown-row">
-          <span class="breakdown-label">${b.payee}</span>
-          <span>${moneyExact(b.last_amount)} ${b.cadence}</span>
+      ${s.duplicates.map((d) => `
+        <div class="note" style="margin-top:10px;">
+          <strong>${d.question}</strong>
+          ${d.services.map((x) => x.payee).join(', ')} — ${money(d.combinedAnnual)}/yr combined.
         </div>`).join('')}
-    </div>
+    ` : emptyState({
+      iconName: 'repeat',
+      title: 'No subscriptions detected',
+      body: 'Nothing in your transactions repeats on a subscription-shaped rhythm yet.',
+    }), { sub: 'Things you could cancel' })}
+
+    ${s.bills.length ? section('Recurring obligations', `
+      <div class="list">
+        ${s.bills.map((b) => row({
+          avatar: b.payee,
+          title: b.payee,
+          sub: `${b.cadence} · next ${b.next_expected}`,
+          amount: moneyExact(b.last_amount),
+        })).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:10px;">
+        Not candidates for cancelling — listed so the forecast can use them.
+        Track any of these as a bill from the Bills tab.
+      </div>
+    `, {
+      sub: 'Not subscriptions — things you owe',
+      action: '<button class="section-action" data-view="bills">Bills</button>',
+    }) : ''}
 
     ${s.frequentMerchants.length ? `
-      <p class="muted" style="margin-top:14px">
+      <div class="prose-sm" style="margin-top:18px;">
         ${s.frequentMerchants.map((m) => m.payee).join(', ')} recur too, but they're places
         you shop rather than things you can cancel — kept out of both lists.
-      </p>` : ''}
+      </div>` : ''}
   `;
 }
 
@@ -1437,55 +1786,50 @@ function renderSubscriptions() {
  * below so the advisor reads as a running relationship, not a one-off tool.
  */
 function renderAdvisor() {
-  if (!state.session) {
-    return `
-      <div class="note-box">
-        <strong>Sign in to use the advisor.</strong>
-        Check-ins are saved to the household, so they live in the database —
-        open the Connect tab to sign in.
-      </div>`;
-  }
+  if (!state.session) return signInPrompt('use the advisor');
 
   return `
-    <h2>Advisor</h2>
-    <p class="muted">
-      A short, specific note on your actual numbers — never a number it made up,
-      only ones this app already computed correctly.
-    </p>
+    ${section('Advisor', `
+      ${state.advisorError ? `<div class="banner banner-warn"><div class="banner-body">${state.advisorError}</div></div>` : ''}
 
-    ${state.advisorError ? `<div class="banner banner-warn">${state.advisorError}</div>` : ''}
+      <form id="advisor-ask-form" class="field-inline" style="margin-bottom:10px;">
+        <input class="input" type="text" name="question" placeholder="Ask about your numbers…"
+          autocomplete="off" ${state.advisorBusy ? 'disabled' : ''} />
+        <button type="submit" class="btn btn-primary" ${state.advisorBusy ? 'disabled' : ''}>
+          ${state.advisorBusy ? '…' : 'Ask'}
+        </button>
+      </form>
 
-    <form id="advisor-ask-form" style="display:flex;gap:8px;margin-bottom:10px;">
-      <input type="text" name="question" placeholder="Ask about your numbers…" autocomplete="off"
-        style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;"
-        ${state.advisorBusy ? 'disabled' : ''} />
-      <button type="submit" class="link"
-        style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;white-space:nowrap;"
+      <button data-action="get-advisor-note" class="btn btn-secondary btn-block"
         ${state.advisorBusy ? 'disabled' : ''}>
-        ${state.advisorBusy ? '…' : 'Ask'}
+        ${icon('sparkle', 16)} ${state.advisorBusy ? 'Thinking…' : 'Get a check-in'}
       </button>
-    </form>
+    `, {
+      sub: 'Only numbers this app already computed — never one it made up',
+    })}
 
-    <button data-action="get-advisor-note" class="link"
-      style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;"
-      ${state.advisorBusy ? 'disabled' : ''}>
-      ${state.advisorBusy ? 'Thinking…' : '+ Get a check-in'}
-    </button>
-
-    <div class="stream-list" style="margin-top:14px;">
-      ${state.advisorNotes.length === 0 ? `
-        <p class="step-why">No check-ins yet — the first one starts the history.</p>
-      ` : state.advisorNotes.map((n) => `
-        <div class="stream">
-          <div class="stream-meta" style="margin-bottom:4px;">
-            ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-            ${n.source === 'daily' ? '· daily check-in' : ''}
+    ${state.advisorNotes.length === 0 ? `
+      <div style="margin-top:14px;">
+        ${emptyState({
+          iconName: 'sparkle',
+          title: 'No check-ins yet',
+          body: 'The first one starts the history.',
+        })}
+      </div>
+    ` : section('History', `
+      <div class="list">
+        ${state.advisorNotes.map((n) => `
+          <div class="row" style="display:block;">
+            <div class="row-sub" style="margin-bottom:6px;">
+              ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              ${n.source === 'daily' ? '<span class="chip">daily</span>' : ''}
+            </div>
+            ${n.question ? `<div class="row-title" style="margin-bottom:6px;">You asked: “${escapeHtml(n.question)}”</div>` : ''}
+            <div class="prose">${n.note}</div>
           </div>
-          ${n.question ? `<div style="font-size:14px;font-weight:600;margin-bottom:4px;">You asked: “${escapeHtml(n.question)}”</div>` : ''}
-          <div style="font-size:14px;line-height:1.5;">${n.note}</div>
-        </div>
-      `).join('')}
-    </div>
+        `).join('')}
+      </div>
+    `)}
   `;
 }
 
@@ -1501,179 +1845,144 @@ function renderAdvisor() {
 function renderConnect() {
   if (!state.session) {
     return `
-      <div class="note-box">
-        <strong>Sign in to connect a real bank account.</strong>
-        Everything else on this page runs on synthetic demo data until you do.
-      </div>
-      <form id="auth-form" class="step">
-        <div class="step-head"><span class="step-title">Sign in or create an account</span></div>
-        <p class="step-why">
-          <input type="email" name="email" placeholder="Email" required
-            style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
-          <input type="password" name="password" placeholder="Password" minlength="6" required
-            style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
-        </p>
-        ${state.authNotice ? `<div class="banner banner-good">${state.authNotice}</div>` : ''}
-        ${state.authError ? `<div class="banner banner-warn">${state.authError}</div>` : ''}
-        <div class="step-meta" style="display:flex;gap:8px;margin-top:10px;">
-          <button type="submit" data-auth="signin" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;">Sign in</button>
-          <button type="submit" data-auth="signup" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;border:1px solid var(--border);">Create account</button>
-        </div>
-      </form>
+      ${section('Sign in', `
+        <form id="auth-form" class="form">
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input class="input" type="email" name="email" placeholder="you@example.com" required />
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input class="input" type="password" name="password" placeholder="At least 6 characters" minlength="6" required />
+          </label>
+          ${state.authNotice ? `<div class="banner banner-good" style="margin:0;"><div class="banner-body">${state.authNotice}</div></div>` : ''}
+          ${state.authError ? `<div class="banner banner-warn" style="margin:0;"><div class="banner-body">${state.authError}</div></div>` : ''}
+          <div class="btn-row">
+            <button type="submit" data-auth="signin" class="btn btn-primary">Sign in</button>
+            <button type="submit" data-auth="signup" class="btn btn-outline">Create account</button>
+          </div>
+        </form>
+      `, { sub: 'Everything runs on demo numbers until you do' })}
     `;
   }
 
   const items = state.connectedItems;
+  const gmailConnections = state.providerConnections.filter(
+    (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
+  );
+  const gmailStatusLabel = { connected: 'connected', needs_reauth: 'needs reconnect', error: 'error' };
+
   return `
-    <div class="banner banner-good">
-      Signed in as ${state.session.user.email}.
-      <button class="link" data-action="sign-out">Sign out</button>
-    </div>
+    ${state.connectError ? `<div class="banner banner-warn"><div class="banner-body">${state.connectError}</div></div>` : ''}
 
-    ${state.connectError ? `<div class="banner banner-warn">${state.connectError}</div>` : ''}
-
-    <div class="step">
-      <div class="step-head">
-        <span class="step-title">Bank accounts</span>
-        <button data-action="connect-bank" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;" ${state.connectBusy ? 'disabled' : ''}>
-          ${state.connectBusy ? 'Connecting…' : '+ Connect a bank'}
-        </button>
-      </div>
-      ${items.length === 0 ? `<p class="step-why">No accounts connected yet. Plaid Link opens in its own secure window — your bank credentials never touch this app.</p>` : `
-        <div class="bank-grid" style="margin-top:10px;">
-          ${items.map((item) => `
-            <div class="bank-tile">
-              <div class="bank-tile-head">
-                <span class="bank-name">${item.institution_name}</span>
-                <span class="pill ${item.status === 'good' ? 'stable' : 'variable'}">${item.status}</span>
-              </div>
-              ${(item.accounts?.length ? item.accounts : [null]).map((a) => a ? `
-                <div class="bank-account">
-                  <span>${a.nickname}</span>
-                  <span class="bank-mask">····${a.mask ?? ''}</span>
-                </div>` : `<div class="bank-account muted">No accounts yet</div>`).join('')}
-            </div>
-          `).join('')}
+    ${section('Bank accounts', `
+      ${items.length === 0 ? emptyState({
+        iconName: 'bank',
+        title: 'No bank connected',
+        body: 'Plaid Link opens in its own secure window — your bank credentials never touch this app.',
+        action: `<button data-action="connect-bank" class="btn btn-primary" ${state.connectBusy ? 'disabled' : ''}>
+          ${state.connectBusy ? 'Connecting…' : 'Connect a bank'}
+        </button>`,
+      }) : `
+        <div class="list">
+          ${items.map((item) => row({
+            iconName: 'bank',
+            title: item.institution_name,
+            chips: `<span class="chip ${item.status === 'good' ? 'chip-ok' : 'chip-warn'}">${item.status}</span>`,
+            sub: (item.accounts?.length
+              ? item.accounts.map((a) => `${a.nickname} ····${a.mask ?? ''}`).join(' · ')
+              : 'No accounts yet'),
+          })).join('')}
         </div>
+        <button data-action="connect-bank" class="btn btn-secondary btn-block" style="margin-top:8px;" ${state.connectBusy ? 'disabled' : ''}>
+          ${icon('plus', 16)} ${state.connectBusy ? 'Connecting…' : 'Connect another bank'}
+        </button>
       `}
-    </div>
+    `)}
 
-    <div class="step">
-      <div class="step-head">
-        <span class="step-title">Email (bills)</span>
-      </div>
-      ${state.gmailNotice ? `<div class="banner banner-good">${state.gmailNotice}</div>` : ''}
-      ${state.gmailError ? `<div class="banner banner-warn">${state.gmailError}</div>` : ''}
-      <p class="step-why">
-        Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
-        else — read-only access, no email is ever sent or modified. Google's own consent
-        screen is where you approve this, not this app. Connect more than one inbox if bills
-        land in different household members' email.
-      </p>
-      ${(() => {
-        const gmailConnections = state.providerConnections.filter(
-          (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
-        );
-        if (!gmailConnections.length) return '';
-        const statusLabel = {
-          connected: 'connected', needs_reauth: 'needs reconnect', error: 'error',
-        };
-        return `
-          <div class="stream-list" style="margin-top:10px;">
-            ${gmailConnections.map((gmail) => `
-              <div class="stream">
-                <div class="stream-head">
-                  <span class="stream-payee">${gmail.display_name}</span>
-                  <span class="pill ${gmail.status === 'connected' ? 'stable' : 'variable'}">${statusLabel[gmail.status] ?? gmail.status}</span>
-                </div>
-                <div class="stream-meta">
-                  ${gmail.last_synced_at ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}` : 'Not scanned yet — runs on the next daily sync'}
-                  ${gmail.status_detail ? ` · ${gmail.status_detail}` : ''}
-                </div>
-                <div style="margin-top:8px;display:flex;gap:8px;">
-                  <button data-action="disconnect-gmail" data-id="${gmail.id}" class="link" ${state.gmailBusy ? 'disabled' : ''}>
-                    ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
-                  </button>
-                  ${gmail.status === 'needs_reauth' ? `
-                    <button data-action="connect-gmail" class="link" ${state.gmailBusy ? 'disabled' : ''}>
-                      Reconnect
-                    </button>` : ''}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        `;
-      })()}
-      <button data-action="connect-gmail" class="link" style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-top:10px;" ${state.gmailBusy ? 'disabled' : ''}>
-        ${state.gmailBusy ? 'Connecting…' : (state.providerConnections.some((c) => c.provider_key === 'gmail' && c.status !== 'disconnected') ? '+ Connect another Gmail' : '+ Connect Gmail')}
+    ${section('Email for bills', `
+      ${state.gmailNotice ? `<div class="banner banner-good"><div class="banner-body">${state.gmailNotice}</div></div>` : ''}
+      ${state.gmailError ? `<div class="banner banner-warn"><div class="banner-body">${state.gmailError}</div></div>` : ''}
+
+      ${gmailConnections.length ? `
+        <div class="list">
+          ${gmailConnections.map((gmail) => row({
+            iconName: 'mail',
+            title: gmail.display_name,
+            chips: `<span class="chip ${gmail.status === 'connected' ? 'chip-ok' : 'chip-warn'}">${gmailStatusLabel[gmail.status] ?? gmail.status}</span>`,
+            sub: (gmail.last_synced_at
+              ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}`
+              : 'Not scanned yet — runs on the next daily sync')
+              + (gmail.status_detail ? ` · ${gmail.status_detail}` : ''),
+            actions: `
+              <button data-action="disconnect-gmail" data-id="${gmail.id}" class="btn btn-sm btn-outline" ${state.gmailBusy ? 'disabled' : ''}>
+                ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+              ${gmail.status === 'needs_reauth'
+                ? `<button data-action="connect-gmail" class="btn btn-sm btn-secondary" ${state.gmailBusy ? 'disabled' : ''}>Reconnect</button>`
+                : ''}
+            `,
+          })).join('')}
+        </div>
+      ` : ''}
+
+      <button data-action="connect-gmail" class="btn btn-secondary btn-block" style="margin-top:8px;" ${state.gmailBusy ? 'disabled' : ''}>
+        ${icon('plus', 16)}
+        ${state.gmailBusy ? 'Connecting…' : gmailConnections.length ? 'Connect another Gmail' : 'Connect Gmail'}
       </button>
-    </div>
 
-    <div class="step">
-      <div class="step-head"><span class="step-title">Who's in this household</span></div>
-      <div class="stream-list" style="margin-top:10px;">
-        ${state.members.map((m) => `
-          <div class="stream">
-            <div class="stream-head">
-              <span class="stream-payee">${m.display_name}</span>
-              ${m.user_id === state.session.user.id ? '<span class="pill stable">you</span>' : ''}
-            </div>
-          </div>
-        `).join('')}
+      <div class="prose-sm" style="margin-top:10px;">
+        Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
+        else — read-only, no email is ever sent or modified. Google's own consent screen is
+        where you approve this, not this app.
+      </div>
+    `)}
+
+    ${section("Who's in this household", `
+      <div class="list">
+        ${state.members.map((m) => row({
+          avatar: m.display_name,
+          title: m.display_name,
+          chips: m.user_id === state.session.user.id ? '<span class="chip chip-ok">you</span>' : '',
+        })).join('')}
       </div>
 
-      <p class="step-why" style="margin-top:14px;">
-        Signup is invite-only. Anyone who finds this page can open it, but they cannot
-        create an account unless someone here invites their email address first.
-      </p>
-
-      <form id="invite-form">
-        <input type="email" name="email" placeholder="Their email address" required
-          style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;" />
-        ${state.inviteNotice ? `<div class="banner banner-good" style="margin-top:8px;">${state.inviteNotice}</div>` : ''}
-        ${state.inviteError ? `<div class="banner banner-warn" style="margin-top:8px;">${state.inviteError}</div>` : ''}
-        <button type="submit" class="link" ${state.inviteBusy ? 'disabled' : ''}
-          style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-top:10px;display:inline-block;">
+      <form id="invite-form" class="form" style="margin-top:12px;">
+        <label class="field">
+          <span class="field-label">Invite someone</span>
+          <input class="input" type="email" name="email" placeholder="Their email address" required />
+          <span class="field-hint">
+            Signup is invite-only — nobody can create an account unless their address is
+            invited here first.
+          </span>
+        </label>
+        ${state.inviteNotice ? `<div class="banner banner-good" style="margin:0;"><div class="banner-body">${state.inviteNotice}</div></div>` : ''}
+        ${state.inviteError ? `<div class="banner banner-warn" style="margin:0;"><div class="banner-body">${state.inviteError}</div></div>` : ''}
+        <button type="submit" class="btn btn-secondary" ${state.inviteBusy ? 'disabled' : ''}>
           ${state.inviteBusy ? 'Inviting…' : 'Send invite'}
         </button>
       </form>
 
-      ${state.invites.length === 0 ? '' : `
-        <div class="stream-list" style="margin-top:14px;">
-          ${state.invites.map((inv) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${inv.email}</span>
-                <button class="link" data-action="revoke-invite" data-id="${inv.id}">Revoke</button>
-              </div>
-              <div class="stream-meta">
-                Invited — can create an account until ${new Date(inv.expires_at).toLocaleDateString()}
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `}
-    </div>
-
-    <div class="disclaimer">
-      Connecting a bank replaces nothing shown elsewhere in this app yet — the rest of the
-      dashboard still runs on demo data until live sync is wired into the other views.
-    </div>
+      ${state.invites.length ? `
+        <div class="list" style="margin-top:12px;">
+          ${state.invites.map((inv) => row({
+            iconName: 'mail',
+            title: inv.email,
+            sub: `Can create an account until ${new Date(inv.expires_at).toLocaleDateString()}`,
+            actions: `<button class="btn btn-sm btn-danger" data-action="revoke-invite" data-id="${inv.id}">Revoke</button>`,
+          })).join('')}
+        </div>` : ''}
+    `)}
   `;
 }
 
-const FIELD_STYLE =
-  'width:100%;margin-top:6px;padding:10px;border-radius:8px;border:1px solid var(--border);' +
-  'background:var(--bg);color:var(--text);font:inherit;';
-const BUTTON_STYLE =
-  'text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent-soft);' +
-  'color:var(--accent);font-weight:600;margin-top:10px;display:inline-block;';
-
-function field(label, name, type, value, extra = '') {
+/** One labelled input, used by every form in the app. */
+function field(label, name, type, value, extra = '', hint = '') {
   return `
-    <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
-      ${label}
-      <input type="${type}" name="${name}" value="${value ?? ''}" style="${FIELD_STYLE}" ${extra} />
+    <label class="field">
+      <span class="field-label">${label}</span>
+      <input class="input" type="${type}" name="${name}" value="${value ?? ''}" ${extra} />
+      ${hint ? `<span class="field-hint">${hint}</span>` : ''}
     </label>`;
 }
 
@@ -1685,98 +1994,72 @@ function field(label, name, type, value, extra = '') {
  * knowing the check in advance is the whole point.
  */
 function renderShifts() {
-  if (!state.session) {
-    return `
-      <div class="note-box">
-        <strong>Sign in to log shifts.</strong>
-        Shifts are shared across the household, so they live in the database
-        rather than on one phone — open the Connect tab to sign in.
-      </div>`;
-  }
+  if (!state.session) return `${segmented(INCOME_TABS)}${signInPrompt('log shifts')}`;
 
   if (state.shiftsError) {
-    return `<div class="banner banner-warn">${state.shiftsError}</div>`;
+    return `${segmented(INCOME_TABS)}<div class="banner banner-warn"><div class="banner-body">${state.shiftsError}</div></div>`;
   }
 
   const p = state.payProfile;
 
   if (!p || state.editingProfile) {
     return `
-      <div class="note-box">
-        <strong>How you get paid.</strong>
-        Two defaults here are deliberately not the usual ones, because the usual
-        ones are wrong for call work — see the notes under each.
-      </div>
-      <form id="pay-profile-form" class="step">
-        <div class="step-head"><span class="step-title">${p ? 'Edit pay setup' : 'Set up your pay'}</span></div>
-        ${field('Label', 'label', 'text', p?.label ?? 'Primary', 'required')}
-        ${field('Employer (optional)', 'employerName', 'text', p?.employerName ?? '')}
-        ${field('Base hourly rate', 'baseHourlyRate', 'number', p?.baseHourlyRate ?? '', 'step="0.01" min="0.01" required')}
+      ${segmented(INCOME_TABS)}
+      ${section(p ? 'Edit pay setup' : 'Set up your pay', `
+        <form id="pay-profile-form" class="form">
+          ${field('Label', 'label', 'text', p?.label ?? 'Primary', 'required')}
+          ${field('Employer (optional)', 'employerName', 'text', p?.employerName ?? '')}
+          ${field('Base hourly rate', 'baseHourlyRate', 'number', p?.baseHourlyRate ?? '', 'step="0.01" min="0.01" required')}
 
-        <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
-          Pay frequency
-          <select name="payFrequency" style="${FIELD_STYLE}">
-            ${['weekly', 'biweekly', 'semimonthly', 'monthly'].map((f) => `
-              <option value="${f}" ${(p?.payFrequency ?? 'biweekly') === f ? 'selected' : ''}>${f}</option>
-            `).join('')}
-          </select>
-        </label>
+          <label class="field">
+            <span class="field-label">Pay frequency</span>
+            <select class="select" name="payFrequency">
+              ${['weekly', 'biweekly', 'semimonthly', 'monthly'].map((f) => `
+                <option value="${f}" ${(p?.payFrequency ?? 'biweekly') === f ? 'selected' : ''}>${f}</option>
+              `).join('')}
+            </select>
+          </label>
 
-        ${field('A pay period you know: start', 'payPeriodStart', 'date', p?.payPeriodStart ?? '', 'required')}
-        ${field('…and its end', 'payPeriodEnd', 'date', p?.payPeriodEnd ?? '', 'required')}
-        ${field('…and the payday for it', 'payday', 'date', p?.payday ?? '', 'required')}
-        <p class="step-why">
-          Periods are walked forward from this anchor rather than computed from
-          today, so they stay aligned to your employer's actual calendar.
-        </p>
+          ${field('A pay period you know: start', 'payPeriodStart', 'date', p?.payPeriodStart ?? '', 'required')}
+          ${field('…and its end', 'payPeriodEnd', 'date', p?.payPeriodEnd ?? '', 'required')}
+          ${field('…and the payday for it', 'payday', 'date', p?.payday ?? '', 'required',
+            'Periods are walked forward from this anchor rather than computed from today, so they stay aligned to your employer\'s actual calendar.')}
 
-        <details style="margin-top:14px;">
-          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">
-            Overtime, call shifts &amp; standby — sensible defaults already set below
-          </summary>
-          <div style="margin-top:8px;">
-            ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+          <details class="fold">
+            <summary>Overtime, call shifts &amp; standby — sensible defaults already set</summary>
+            <div class="fold-body form">
+              ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
 
-            ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required')}
-            <p class="step-why">
-              <strong>0 disables it</strong>, which is the right default for a compressed
-              schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of
-              overtime that you were never paid — roughly 8 phantom hours a week.
-            </p>
+              ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required',
+                '<strong>0 disables it</strong>, which is the right default for a compressed schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of overtime you were never paid — roughly 8 phantom hours a week.')}
 
-            ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
+              ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
 
-            ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required')}
-            <p class="step-why">
-              Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a
-              2-hour minimum pay 4 hours, not 1.
-            </p>
+              ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required',
+                'Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a 2-hour minimum pay 4 hours, not 1.')}
 
-            ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
-            ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required')}
-            <p class="step-why">
-              Standby is time on call. It pays its own rate and never counts toward an
-              overtime threshold.
-            </p>
+              ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+              ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required',
+                'Standby is time on call. It pays its own rate and never counts toward an overtime threshold.')}
 
-            ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
-              p?.taxAssumptions?.federalRate != null
-                ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
-                : 18, 'step="1" min="0" max="60" required')}
-            <p class="step-why">
-              A starting guess for federal + state. Social Security and Medicare are
-              added automatically. Once you enter a real paystub the app learns your
-              actual effective rate — that is usually the biggest source of error in a
-              take-home estimate.
-            </p>
+              ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
+                p?.taxAssumptions?.federalRate != null
+                  ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
+                  : 18, 'step="1" min="0" max="60" required',
+                'A starting guess for federal + state. Social Security and Medicare are added automatically. Once you enter a real paystub the app learns your actual effective rate — usually the biggest source of error in a take-home estimate.')}
+            </div>
+          </details>
+
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary" ${state.shiftsBusy ? 'disabled' : ''}>
+              ${state.shiftsBusy ? 'Saving…' : 'Save pay setup'}
+            </button>
+            ${p ? '<button type="button" data-action="cancel-profile" class="btn btn-outline">Cancel</button>' : ''}
           </div>
-        </details>
-
-        <button type="submit" class="link" style="${BUTTON_STYLE}margin-top:14px;" ${state.shiftsBusy ? 'disabled' : ''}>
-          ${state.shiftsBusy ? 'Saving…' : 'Save pay setup'}
-        </button>
-        ${p ? `<button type="button" data-action="cancel-profile" class="link" style="margin-left:10px;">Cancel</button>` : ''}
-      </form>`;
+        </form>
+      `, {
+        sub: 'Two defaults here are deliberately not the usual ones — the usual ones are wrong for call work',
+      })}`;
   }
 
   const period = state.payPeriod;
@@ -1790,76 +2073,70 @@ function renderShifts() {
     : null;
 
   return `
+    ${segmented(INCOME_TABS)}
+
     ${forecast ? `
-      <div class="step">
-        <div class="step-head">
-          <span class="step-title">Next check — ${new Date(`${forecast.payDate}T00:00:00`).toLocaleDateString()}</span>
-          <span class="pill ${forecast.confidence === 'high' ? 'stable' : 'variable'}">${forecast.confidence} confidence</span>
-        </div>
-        <div class="big-number">${moneyExact(forecast.estimatedNet)}</div>
-        <div class="stream-meta">
+      <div class="hero">
+        <div class="hero-label">Next check · ${new Date(`${forecast.payDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div>
+        <div class="hero-value">${moneyExact(forecast.estimatedNet)}</div>
+        <div class="hero-note">
           Estimated take-home for ${forecast.period.start} → ${forecast.period.end}.
           ${forecast.daysCovered} of ${forecast.daysInPeriod} days logged.
         </div>
-        <div class="stream-list" style="margin-top:12px;">
-          <div class="stream"><div class="stream-head">
-            <span class="stream-payee">Gross</span><span>${moneyExact(forecast.breakdown.totalGross)}</span></div></div>
-          <div class="stream"><div class="stream-head">
-            <span class="stream-payee">Taxes</span><span>−${moneyExact(forecast.breakdown.totalTaxes)}</span></div></div>
-          <div class="stream"><div class="stream-head">
-            <span class="stream-payee">Deductions</span><span>−${moneyExact(forecast.breakdown.totalDeductions)}</span></div></div>
+        <div class="hero-foot">
+          <span><b>${money(forecast.breakdown.totalGross)}</b> gross</span>
+          <span><b>−${money(forecast.breakdown.totalTaxes)}</b> taxes</span>
+          <span><b>−${money(forecast.breakdown.totalDeductions)}</b> deductions</span>
+          <span class="chip ${forecast.confidence === 'high' ? 'chip-ok' : 'chip-warn'}">${forecast.confidence} confidence</span>
         </div>
-        ${forecast.confidenceReasons.length ? `
-          <p class="step-why" style="margin-top:10px;">
-            ${forecast.confidenceReasons.join(' · ')}
-          </p>` : ''}
-      </div>` : `
+      </div>
+      ${forecast.confidenceReasons.length
+        ? `<div class="prose-sm" style="margin-top:8px;">${forecast.confidenceReasons.join(' · ')}</div>`
+        : ''}
+    ` : `
       <div class="banner banner-warn">
-        No upcoming pay period — check the anchor dates in your pay setup.
+        <div class="banner-body">No upcoming pay period — check the anchor dates in your pay setup.</div>
       </div>`}
 
-    <div class="step">
-      <div class="step-head">
-        <span class="step-title">Log a shift</span>
-        <button data-action="edit-profile" class="link">Pay setup</button>
-      </div>
-      <form id="shift-form">
+    ${section('Log a shift', `
+      <form id="shift-form" class="form">
         ${field('Date', 'date', 'date', new Date().toISOString().slice(0, 10), 'required')}
         ${field('Hours worked', 'regularHours', 'number', '', 'step="0.25" min="0" required')}
-        ${field('Callback hours', 'callbackHours', 'number', '', 'step="0.25" min="0"')}
-        ${field('Number of callouts', 'callbackEvents', 'number', '', 'step="1" min="0"')}
-        ${field('Standby hours (on call)', 'standbyHours', 'number', '', 'step="0.25" min="0"')}
-        ${field('Holiday hours', 'holidayHours', 'number', '', 'step="0.25" min="0"')}
-        ${field('PTO hours', 'ptoHours', 'number', '', 'step="0.25" min="0"')}
-        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.shiftsBusy ? 'disabled' : ''}>
+        <details class="fold">
+          <summary>Callouts, standby, holiday &amp; PTO</summary>
+          <div class="fold-body form">
+            ${field('Callback hours', 'callbackHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('Number of callouts', 'callbackEvents', 'number', '', 'step="1" min="0"')}
+            ${field('Standby hours (on call)', 'standbyHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('Holiday hours', 'holidayHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('PTO hours', 'ptoHours', 'number', '', 'step="0.25" min="0"')}
+          </div>
+        </details>
+        <button type="submit" class="btn btn-primary btn-block" ${state.shiftsBusy ? 'disabled' : ''}>
           ${state.shiftsBusy ? 'Saving…' : 'Add shift'}
         </button>
       </form>
-    </div>
+    `, {
+      action: '<button data-action="edit-profile" class="section-action">Pay setup</button>',
+    })}
 
-    <div class="step">
-      <div class="step-head"><span class="step-title">This period</span></div>
-      ${state.timeEntries.length === 0 ? `
-        <p class="step-why">No shifts logged for this period yet.</p>` : `
-        <div class="stream-list" style="margin-top:10px;">
-          ${state.timeEntries.map((e) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${new Date(`${e.date}T00:00:00`).toLocaleDateString()}</span>
-                <button class="link" data-action="delete-shift" data-id="${e.id}">Remove</button>
-              </div>
-              <div class="stream-meta">
-                ${[
-                  e.regularHours ? `${e.regularHours}h worked` : '',
-                  e.callbackEvents ? `${e.callbackEvents} callout${e.callbackEvents > 1 ? 's' : ''} (${e.callbackHours}h)` : '',
-                  e.standbyHours ? `${e.standbyHours}h standby` : '',
-                  e.holidayHours ? `${e.holidayHours}h holiday` : '',
-                  e.ptoHours ? `${e.ptoHours}h PTO` : '',
-                ].filter(Boolean).join(' · ')}
-              </div>
-            </div>`).join('')}
-        </div>`}
-    </div>
+    ${section('This period', state.timeEntries.length === 0
+      ? emptyState({ iconName: 'clock', title: 'No shifts logged yet', body: 'Add one above and the forecast sharpens immediately.' })
+      : `
+        <div class="list">
+          ${state.timeEntries.map((e) => row({
+            iconName: 'clock',
+            title: new Date(`${e.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+            sub: [
+              e.regularHours ? `${e.regularHours}h worked` : '',
+              e.callbackEvents ? `${e.callbackEvents} callout${e.callbackEvents > 1 ? 's' : ''} (${e.callbackHours}h)` : '',
+              e.standbyHours ? `${e.standbyHours}h standby` : '',
+              e.holidayHours ? `${e.holidayHours}h holiday` : '',
+              e.ptoHours ? `${e.ptoHours}h PTO` : '',
+            ].filter(Boolean).join(' · '),
+            actions: `<button class="btn btn-sm btn-outline" data-action="delete-shift" data-id="${e.id}">Remove</button>`,
+          })).join('')}
+        </div>`)}
 
     <div class="disclaimer">
       An estimate from the hours logged here, not a promise from your employer.
@@ -1868,16 +2145,30 @@ function renderShifts() {
     </div>`;
 }
 
-function renderBillRow(b, urgency) {
-  return `
-    <div class="stream">
-      <div class="stream-head">
-        <span class="stream-payee">${b.providerName}</span>
-        <span class="pill ${urgency(b.dueDate)}">${moneyExact(b.amountDue)}</span>
-      </div>
-      <div class="stream-meta">Due ${b.dueDate} · ${b.category} · ${b.status}</div>
-    </div>
-  `;
+/** Where a bill came from, as the small badge docs/ui/README.md asks for. */
+const BILL_SOURCE_LABEL = {
+  email: 'Email', bank: 'Bank', manual: 'Manual',
+  pdf: 'PDF', provider_api: 'Provider', provider_portal: 'Portal',
+};
+
+function renderBillRow(b) {
+  const days = daysUntilDue({ dueDate: b.dueDate });
+  const due = new Date(`${b.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const when = days < 0 ? `${Math.abs(days)}d overdue`
+    : days === 0 ? 'Due today'
+    : days === 1 ? 'Due tomorrow'
+    : `Due ${due}`;
+
+  return row({
+    avatar: b.providerName,
+    title: b.providerName,
+    chips: `<span class="chip ${BILL_SOURCE_LABEL[b.source] ? 'chip-outline' : ''}">${BILL_SOURCE_LABEL[b.source] ?? b.source}</span>`,
+    sub: `${when} · ${b.category}`,
+    amount: moneyExact(b.amountDue),
+    amountSub: days >= 0 && days <= 7 ? `in ${days}d` : '',
+    tone: days < 0 ? 'warn' : '',
+  });
 }
 
 /**
@@ -1888,50 +2179,96 @@ function renderBillRow(b, urgency) {
  * not a pay profile/timecard is set up — Shifts sharpens the paycheck
  * *amount* forecast, not whether this grouping exists at all.
  */
-function renderBillsByPaycheck(bills, urgency) {
+function renderBillsByPaycheck(bills) {
   const plan = planPaycheckCoverage(bills, state.streams);
   const coveredGroups = plan.groups.filter((g) => g.bills.length);
   const noPaydaysKnown = plan.groups.length === 0;
 
-  return `
-    <div class="step">
-      <div class="step-head"><span class="step-title">Save for these bills</span></div>
-      <p class="step-why">
-        Each group is the specific paycheck that needs to cover it by the due date —
-        not just what's due this calendar month.
-      </p>
-
-      ${plan.dueNow.bills.length ? `
-        <div class="stream-list" style="margin-top:10px;">
-          <div class="stream-meta" style="margin-bottom:4px;">
-            <strong>${noPaydaysKnown ? 'No income pattern detected yet' : 'Due before your next check'}</strong>
-            — ${moneyExact(plan.dueNow.total)}
-          </div>
-          ${plan.dueNow.bills.map((b) => renderBillRow(b, urgency)).join('')}
-        </div>
-      ` : ''}
-
-      ${coveredGroups.map((g) => `
-        <div class="stream-list" style="margin-top:14px;">
-          <div class="stream-meta" style="margin-bottom:4px;">
-            <strong>Save from your ${g.paycheckDate} check</strong> — ${moneyExact(g.total)}
-          </div>
-          ${g.bills.map((b) => renderBillRow(b, urgency)).join('')}
-        </div>
-      `).join('')}
-
-      ${plan.later.bills.length ? `
-        <details style="margin-top:14px;">
-          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">
-            ${plan.later.bills.length} further out — ${moneyExact(plan.later.total)}
-          </summary>
-          <div class="stream-list" style="margin-top:8px;">
-            ${plan.later.bills.map((b) => renderBillRow(b, urgency)).join('')}
-          </div>
-        </details>
-      ` : ''}
+  const group = (label, total, list) => `
+    <div style="margin-top:14px;">
+      <div class="section-head" style="margin-bottom:8px;">
+        <div class="section-sub" style="margin:0;"><strong style="color:var(--text);">${label}</strong></div>
+        <div class="row-amount">${moneyExact(total)}</div>
+      </div>
+      <div class="list">${list.map((b) => renderBillRow(b)).join('')}</div>
     </div>
   `;
+
+  return section('Which check covers what', `
+    ${plan.dueNow.bills.length
+      ? group(
+        noPaydaysKnown ? 'No income pattern detected yet' : 'Due before your next check',
+        plan.dueNow.total, plan.dueNow.bills,
+      )
+      : ''}
+
+    ${coveredGroups.map((g) => group(
+      `Save from your ${new Date(`${g.paycheckDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} check`,
+      g.total, g.bills,
+    )).join('')}
+
+    ${plan.later.bills.length ? `
+      <details class="fold">
+        <summary>${plan.later.bills.length} further out — ${moneyExact(plan.later.total)}</summary>
+        <div class="fold-body list">${plan.later.bills.map((b) => renderBillRow(b)).join('')}</div>
+      </details>
+    ` : ''}
+  `, {
+    sub: 'The specific paycheck that has to cover it by its due date',
+  });
+}
+
+/**
+ * Bills the household already pays, spotted in their own transactions.
+ *
+ * The whole point of this section is that it needs nothing from anybody — no
+ * inbox to connect, no form to fill in. Everything shown here is a charge that
+ * has already cleared this account on a rhythm, so accepting one is a
+ * confirmation, not data entry.
+ */
+function renderBillSuggestions() {
+  const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+  const suggestions = suggestBillsFromTransactions({
+    streams: recurring,
+    bills: [...state.bills, ...state.billsNeedingReview],
+  }).filter((s) => !state.dismissedSuggestions.has(s.key));
+
+  if (!suggestions.length) return '';
+
+  const shown = suggestions.slice(0, 6);
+
+  return section('Found in your transactions', `
+    <div class="list">
+      ${shown.map((s) => {
+        const busy = state.trackingBill === s.key;
+        const due = new Date(`${s.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return row({
+          avatar: s.providerName,
+          title: s.providerName,
+          chips: [
+            s.amountVaries ? '<span class="chip chip-warn">varies</span>' : '',
+            s.stale ? '<span class="chip">may have stopped</span>' : '',
+          ].join(''),
+          sub: `${s.reason} · next expected ${due}`,
+          amount: moneyExact(s.amountDue),
+          amountSub: s.category,
+          actions: `
+            <button class="btn btn-sm btn-primary" data-action="track-bill" data-key="${s.key}" ${busy ? 'disabled' : ''}>
+              ${busy ? 'Adding…' : 'Track as bill'}
+            </button>
+            <button class="btn btn-sm btn-outline" data-action="dismiss-suggestion" data-key="${s.key}" ${busy ? 'disabled' : ''}>
+              Not a bill
+            </button>
+          `,
+        });
+      }).join('')}
+    </div>
+    ${suggestions.length > shown.length
+      ? `<div class="prose-sm" style="margin-top:10px;">${suggestions.length - shown.length} more will appear as you clear these.</div>`
+      : ''}
+  `, {
+    sub: `${suggestions.length} recurring charge${suggestions.length === 1 ? '' : 's'} you're already paying`,
+  });
 }
 
 /**
@@ -1940,77 +2277,64 @@ function renderBillsByPaycheck(bills, urgency) {
  * the entire reason this exists rather than waiting for the bank feed.
  */
 function renderBills() {
-  if (!state.session) {
-    return `
-      <div class="note-box">
-        <strong>Sign in to see bills.</strong>
-        Bills are shared across the household, so they live in the database —
-        open the Connect tab to sign in.
-      </div>`;
-  }
+  if (!state.session) return signInPrompt('see bills');
 
   if (state.billsError) {
-    return `<div class="banner banner-warn">${state.billsError}</div>`;
+    return `<div class="banner banner-warn"><div class="banner-body">${state.billsError}</div></div>`;
   }
-
-  const gmailConnections = state.providerConnections.filter(
-    (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
-  );
-  if (!gmailConnections.length) {
-    return `
-      ${renderAddBillForm()}
-      <div class="note-box">
-        <strong>No email connected.</strong>
-        Connect Gmail from the Connect tab to find bills automatically, or add
-        one yourself above.
-      </div>`;
-  }
-  // Only used below for "has anything ever synced" messaging — bills from
-  // every connected inbox land in the same household-wide bills table, so
-  // there's nothing per-connection left to show once you're past this point.
-  const anySynced = gmailConnections.some((c) => c.last_synced_at);
 
   const review = state.billsNeedingReview;
   const bills = state.bills;
-  const urgency = (dueDate) => (daysUntilDue({ dueDate }) <= 7 ? 'variable' : 'stable');
+  const dueThisMonth = bills.filter((b) => monthKey(b.dueDate) === monthKey(new Date().toISOString()));
+  const monthTotal = dueThisMonth.reduce((s, b) => s + b.amountDue, 0);
+  const gmailConnected = state.providerConnections.some(
+    (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
+  );
 
   return `
-    ${renderAddBillForm()}
-
-    ${review.length ? `
-      <div class="step">
-        <div class="step-head"><span class="step-title">Needs review (${review.length})</span></div>
-        <p class="step-why">
-          Parsed with low confidence — confirm before it counts toward what's due, or
-          dismiss if this isn't actually a bill (a payment receipt, a promo email that
-          used billing language).
-        </p>
-        <div class="stream-list" style="margin-top:10px;">
-          ${review.map((b) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${b.providerName}</span>
-                <span class="pill variable">${moneyExact(b.amountDue)}</span>
-              </div>
-              <div class="stream-meta">Due ${b.dueDate} · confidence ${Math.round(b.confidence * 100)}%</div>
-              <div style="margin-top:8px;display:flex;gap:8px;">
-                <button class="link" data-action="confirm-bill" data-id="${b.id}">Confirm</button>
-                <button class="link" data-action="dismiss-bill" data-id="${b.id}">Dismiss</button>
-              </div>
-            </div>
-          `).join('')}
+    ${bills.length ? `
+      <div class="hero">
+        <div class="hero-label">Due this month</div>
+        <div class="hero-value">${moneyExact(monthTotal)}</div>
+        <div class="hero-note">
+          Across ${dueThisMonth.length} bill${dueThisMonth.length === 1 ? '' : 's'}${bills.length > dueThisMonth.length
+            ? `, plus ${bills.length - dueThisMonth.length} further out` : ''}.
         </div>
       </div>
     ` : ''}
 
-    ${bills.length === 0 ? `
-      <div class="step">
-        <div class="step-head"><span class="step-title">Upcoming bills</span></div>
-        <p class="step-why">
-          No bills detected yet. ${anySynced ? 'The last scan found nothing due — check back after the next daily sync.' : 'The first scan runs on the next daily sync.'}
-        </p>
+    ${review.length ? section(`Needs review`, `
+      <div class="list">
+        ${review.map((b) => row({
+          avatar: b.providerName,
+          title: b.providerName,
+          chips: `<span class="chip chip-warn">${Math.round(b.confidence * 100)}% sure</span>`,
+          sub: `Due ${b.dueDate} · ${BILL_SOURCE_LABEL[b.source] ?? b.source}`,
+          amount: moneyExact(b.amountDue),
+          actions: `
+            <button class="btn btn-sm btn-primary" data-action="confirm-bill" data-id="${b.id}">Confirm</button>
+            <button class="btn btn-sm btn-outline" data-action="dismiss-bill" data-id="${b.id}">Not a bill</button>
+          `,
+        })).join('')}
       </div>
-    ` : renderBillsByPaycheck(bills, urgency)}
+    `, {
+      sub: 'Parsed with low confidence — confirm before it counts toward what\'s due',
+    }) : ''}
+
+    ${bills.length ? renderBillsByPaycheck(bills) : ''}
+
+    ${renderBillSuggestions()}
+
+    ${bills.length === 0 ? section('Upcoming bills', emptyState({
+      iconName: 'bills',
+      title: 'No bills tracked yet',
+      body: gmailConnected
+        ? 'Nothing found in your email yet — the next daily scan may pick some up. You can also add one by hand.'
+        : 'Connect Gmail to find them automatically, accept one of the recurring charges above, or add one by hand.',
+      action: gmailConnected ? '' : '<button class="btn btn-secondary" data-view="connect">Connect Gmail</button>',
+    })) : ''}
+
+    ${renderAddBillForm()}
   `;
 }
 
@@ -2025,52 +2349,64 @@ const BILL_CATEGORIES = SEED_CATEGORIES.filter(([, , kind]) => kind !== 'income'
  */
 function renderAddBillForm() {
   const d = state.billDraft;
-  const fieldStyle = 'width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--border);'
-    + 'background:var(--surface);color:var(--text);font-size:14px;';
+  const busy = state.billFormBusy ? 'disabled' : '';
 
-  return `
-    <div class="step">
-      <div class="step-head">
-        <span class="step-title">Add a bill</span>
-        <button class="link" data-action="toggle-bill-form">${state.billFormOpen ? 'Cancel' : '+ Add'}</button>
-      </div>
-      ${state.billFormOpen ? `
-        ${state.billFormError ? `<div class="banner banner-warn">${state.billFormError}</div>` : ''}
-        <p class="step-why">
-          Paste a bill email, portal page, or screenshot text below and let AI fill in the
-          fields — or skip straight to typing them in yourself.
-        </p>
-        <textarea id="bill-parse-text" rows="3" placeholder="Paste bill text here (optional)…"
-          style="${fieldStyle}margin-bottom:8px;" ${state.billFormBusy ? 'disabled' : ''}
-        >${escapeHtml(state.billParseText)}</textarea>
-        <button data-action="parse-bill-text" class="link"
-          style="text-decoration:none;padding:8px 12px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;margin-bottom:14px;"
-          ${state.billFormBusy ? 'disabled' : ''}>
-          ${state.billFormBusy ? 'Reading…' : 'Fill in with AI'}
+  if (!state.billFormOpen) {
+    return `
+      <div style="margin-top:20px;">
+        <button class="btn btn-outline btn-block" data-action="toggle-bill-form">
+          ${icon('plus', 16)} Add a bill by hand
         </button>
+      </div>
+    `;
+  }
 
-        <form id="bill-form" style="display:grid;gap:8px;">
-          <input name="providerName" placeholder="Provider (e.g. Netflix)" value="${escapeHtml(d.providerName)}"
-            required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
-          <input name="amountDue" type="number" step="0.01" min="0" placeholder="Amount due"
-            value="${d.amountDue}" required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
-          <input name="dueDate" type="date" value="${d.dueDate}"
-            required style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''} />
-          <select name="category" style="${fieldStyle}" ${state.billFormBusy ? 'disabled' : ''}>
-            <option value="">Category…</option>
-            ${BILL_CATEGORIES.map(([, name]) => `
-              <option value="${name}" ${d.category === name ? 'selected' : ''}>${name}</option>
-            `).join('')}
-          </select>
-          <button type="submit" class="link"
-            style="text-decoration:none;padding:9px 14px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;"
-            ${state.billFormBusy ? 'disabled' : ''}>
-            ${state.billFormBusy ? 'Saving…' : 'Save bill'}
-          </button>
-        </form>
-      ` : ''}
+  return section('Add a bill', `
+    ${state.billFormError ? `<div class="banner banner-warn"><div class="banner-body">${state.billFormError}</div></div>` : ''}
+
+    <div class="card">
+      <label class="field">
+        <span class="field-label">Paste bill text (optional)</span>
+        <textarea class="textarea" id="bill-parse-text" rows="3"
+          placeholder="A bill email, a portal page, a screenshot transcript…" ${busy}>${escapeHtml(state.billParseText)}</textarea>
+      </label>
+      <button data-action="parse-bill-text" class="btn btn-secondary btn-block" style="margin-top:10px;" ${busy}>
+        ${icon('sparkle', 16)} ${state.billFormBusy ? 'Reading…' : 'Fill in with AI'}
+      </button>
     </div>
-  `;
+
+    <form id="bill-form" class="form" style="margin-top:12px;">
+      <label class="field">
+        <span class="field-label">Provider</span>
+        <input class="input" name="providerName" placeholder="e.g. Netflix"
+          value="${escapeHtml(d.providerName)}" required ${busy} />
+      </label>
+      <label class="field">
+        <span class="field-label">Amount due</span>
+        <input class="input" name="amountDue" type="number" step="0.01" min="0"
+          placeholder="0.00" value="${d.amountDue}" required ${busy} />
+      </label>
+      <label class="field">
+        <span class="field-label">Due date</span>
+        <input class="input" name="dueDate" type="date" value="${d.dueDate}" required ${busy} />
+      </label>
+      <label class="field">
+        <span class="field-label">Category</span>
+        <select class="select" name="category" ${busy}>
+          <option value="">Choose one…</option>
+          ${BILL_CATEGORIES.map(([, name]) => `
+            <option value="${name}" ${d.category === name ? 'selected' : ''}>${name}</option>
+          `).join('')}
+        </select>
+      </label>
+      <div class="btn-row">
+        <button type="submit" class="btn btn-primary" ${busy}>
+          ${state.billFormBusy ? 'Saving…' : 'Save bill'}
+        </button>
+        <button type="button" class="btn btn-outline" data-action="toggle-bill-form" ${busy}>Cancel</button>
+      </div>
+    </form>
+  `, { sub: 'For anything the bank feed and your email both miss' });
 }
 
 /**
@@ -2079,92 +2415,83 @@ function renderAddBillForm() {
  * tax rate instead of the one guessed once during pay setup.
  */
 function renderPaystubs() {
-  if (!state.session) {
-    return `
-      <div class="note-box">
-        <strong>Sign in to reconcile paystubs.</strong>
-        Open the Connect tab to sign in.
-      </div>`;
-  }
+  if (!state.session) return `${segmented(INCOME_TABS)}${signInPrompt('reconcile paystubs')}`;
+
   if (!state.payProfile) {
     return `
-      <div class="note-box">
-        <strong>Set up pay first.</strong>
-        Reconciliation compares a real stub against a forecast, and the forecast
-        needs a pay profile — set one up on the Shifts tab first.
-      </div>`;
+      ${segmented(INCOME_TABS)}
+      ${emptyState({
+        iconName: 'calendar',
+        title: 'Set up pay first',
+        body: 'Reconciliation compares a real stub against a forecast, and the forecast needs a pay profile.',
+        action: '<button class="btn btn-primary" data-view="shifts">Go to pay setup</button>',
+      })}`;
   }
+
   if (state.paystubsError) {
-    return `<div class="banner banner-warn">${state.paystubsError}</div>`;
+    return `${segmented(INCOME_TABS)}<div class="banner banner-warn"><div class="banner-body">${state.paystubsError}</div></div>`;
   }
 
   const learned = state.learnedAdjustments;
 
   return `
-    <div class="step">
-      <div class="step-head"><span class="step-title">Enter a paystub</span></div>
-      <p class="step-why">
-        Matched against the forecast for the same pay period. Three or more
-        stubs is enough to start suggesting adjustments to the tax assumptions
-        in pay setup.
-      </p>
-      <form id="paystub-form" class="step">
+    ${segmented(INCOME_TABS)}
+
+    ${learned ? section('What the stubs say', `
+      <div class="card">
+        <div class="prose">${learned.ready ? learned.summary : learned.reason}</div>
+        ${learned.ready && (learned.suggestedTaxRate != null || learned.suggestedDeductions?.length) ? `
+          ${state.adjustmentsNotice ? `<div class="banner banner-good" style="margin:10px 0 0;"><div class="banner-body">${state.adjustmentsNotice}</div></div>` : ''}
+          <button data-action="apply-adjustments" class="btn btn-secondary btn-block" style="margin-top:10px;">
+            Apply these adjustments to pay setup
+          </button>
+        ` : ''}
+      </div>
+    `) : ''}
+
+    ${section('Enter a paystub', `
+      <form id="paystub-form" class="form">
         ${field('Pay date', 'payDate', 'date', '', 'required')}
         ${field('Period start', 'periodStart', 'date', '', 'required')}
         ${field('Period end', 'periodEnd', 'date', '', 'required')}
         ${field('Gross pay', 'grossPay', 'number', '', 'step="0.01" min="0" required')}
         ${field('Net pay', 'netPay', 'number', '', 'step="0.01" min="0" required')}
         ${field('Total taxes withheld', 'totalTaxes', 'number', '', 'step="0.01" min="0" required')}
-        ${field('Regular hours (optional)', 'regularHours', 'number', '', 'step="0.01" min="0"')}
-        ${field('Overtime hours (optional)', 'overtimeHours', 'number', '', 'step="0.01" min="0"')}
-        <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
-          Other deductions (optional) — one per line, "Label: Amount"
-          <textarea name="deductions" rows="3" placeholder="401k: 128.00&#10;Health insurance: 84.50"
-            style="${FIELD_STYLE}"></textarea>
-        </label>
-        ${state.paystubFormError ? `<div class="banner banner-warn" style="margin-top:8px;">${state.paystubFormError}</div>` : ''}
-        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.paystubBusy ? 'disabled' : ''}>
+        <details class="fold">
+          <summary>Hours and other deductions</summary>
+          <div class="fold-body form">
+            ${field('Regular hours', 'regularHours', 'number', '', 'step="0.01" min="0"')}
+            ${field('Overtime hours', 'overtimeHours', 'number', '', 'step="0.01" min="0"')}
+            <label class="field">
+              <span class="field-label">Other deductions — one per line, "Label: Amount"</span>
+              <textarea class="textarea" name="deductions" rows="3"
+                placeholder="401k: 128.00&#10;Health insurance: 84.50"></textarea>
+            </label>
+          </div>
+        </details>
+        ${state.paystubFormError ? `<div class="banner banner-warn" style="margin:0;"><div class="banner-body">${state.paystubFormError}</div></div>` : ''}
+        <button type="submit" class="btn btn-primary btn-block" ${state.paystubBusy ? 'disabled' : ''}>
           ${state.paystubBusy ? 'Saving…' : 'Save and reconcile'}
         </button>
       </form>
-    </div>
+    `, {
+      sub: 'Three or more stubs is enough to start correcting the tax assumptions',
+    })}
 
-    ${learned ? `
-      <div class="step">
-        <div class="step-head"><span class="step-title">What the stubs say</span></div>
-        <p class="step-why">${learned.ready ? learned.summary : learned.reason}</p>
-        ${learned.ready && (learned.suggestedTaxRate != null || learned.suggestedDeductions?.length) ? `
-          ${state.adjustmentsNotice ? `<div class="banner banner-good">${state.adjustmentsNotice}</div>` : ''}
-          <button data-action="apply-adjustments" class="link" style="${BUTTON_STYLE}">
-            Apply these adjustments to pay setup
-          </button>
-        ` : ''}
-      </div>
-    ` : ''}
-
-    <div class="step">
-      <div class="step-head"><span class="step-title">History</span></div>
-      ${state.reconciliations.length === 0 ? '<p class="step-why">No paystubs entered yet.</p>' : `
-        <div class="stream-list" style="margin-top:10px;">
-          ${state.reconciliations.map((r) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${r.payDate}</span>
-                <span class="pill ${r.materialVariance ? 'variable' : 'stable'}">${moneyExact(r.net.actual)} net</span>
-              </div>
-              <div class="stream-meta">
-                Forecast ${moneyExact(r.net.expected)} · ${r.net.difference >= 0 ? '+' : ''}${moneyExact(r.net.difference)}${r.net.percentDifference != null ? ` (${r.net.percentDifference}%)` : ''}
-              </div>
-              ${r.findings.length ? `
-                <ul style="margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--muted);">
-                  ${r.findings.map((f) => `<li>${f}</li>`).join('')}
-                </ul>
-              ` : ''}
-            </div>
-          `).join('')}
-        </div>
-      `}
-    </div>
+    ${section('History', state.reconciliations.length === 0
+      ? emptyState({ iconName: 'inbox', title: 'No paystubs entered yet' })
+      : `
+        <div class="list">
+          ${state.reconciliations.map((r) => row({
+            iconName: 'calendar',
+            title: new Date(`${r.payDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+            chips: r.materialVariance ? '<span class="chip chip-warn">off forecast</span>' : '<span class="chip chip-ok">matched</span>',
+            sub: `Forecast ${moneyExact(r.net.expected)} · ${r.net.difference >= 0 ? '+' : ''}${moneyExact(r.net.difference)}${r.net.percentDifference != null ? ` (${r.net.percentDifference}%)` : ''}`
+              + (r.findings.length ? `<br>${r.findings.join(' · ')}` : ''),
+            amount: moneyExact(r.net.actual),
+            amountSub: 'net',
+          })).join('')}
+        </div>`)}
   `;
 }
 
@@ -2181,8 +2508,52 @@ function renderInstallHint() {
       <strong>Add to your home screen.</strong>
       Tap the Share button in Safari, then “Add to Home Screen”. It opens like an app
       and works without a signal.
-      <br /><button data-action="dismiss-install">Dismiss</button>
+      <div style="margin-top:8px;">
+        <button class="linkbtn quiet" data-action="dismiss-install">Dismiss</button>
+      </div>
     </div>`;
+}
+
+/**
+ * Title and one line of context for the current screen.
+ *
+ * Every view used to open with its own `<h2>`, styled slightly differently
+ * and placed slightly differently, so the top of the app moved around as you
+ * navigated. One bar, one place, one shape.
+ */
+const VIEW_HEADERS = {
+  dashboard: () => ['Home', state.session ? 'Your household, right now' : 'Demo numbers — nothing here is real yet'],
+  bills: () => ['Bills', 'What you owe, and when it has to be covered'],
+  spending: () => ['Spending', 'Where the money actually goes'],
+  transactions: () => ['Spending', 'Every transaction, newest first'],
+  subscriptions: () => ['Spending', 'What recurs, and what it costs per year'],
+  trends: () => ['Spending', 'How each category moves month to month'],
+  review: () => ['Spending', 'Transactions the categorizer wasn\'t sure about'],
+  income: () => ['Income', 'What lands, and when'],
+  paycheck: () => ['Income', 'How to split the next check'],
+  shifts: () => ['Income', 'Hours logged, and what they forecast'],
+  paystubs: () => ['Income', 'Real stubs against the forecast'],
+  plan: () => ['Plan', 'The order to do things in'],
+  advisor: () => ['Advisor', 'A read on your own numbers'],
+  connect: () => ['Accounts', 'Banks, email, and who else is here'],
+  more: () => ['Settings', ''],
+};
+
+function renderAppBar() {
+  const [title, sub] = (VIEW_HEADERS[state.view] ?? (() => ['Family Budget', '']))();
+  const showBack = state.view === 'review' || state.view === 'plan';
+
+  return `
+    <header class="app-bar">
+      <div class="app-bar-text">
+        <div class="app-bar-title">${title}</div>
+        ${sub ? `<div class="app-bar-sub">${sub}</div>` : ''}
+      </div>
+      ${showBack
+        ? `<button class="icon-btn" data-view="${state.view === 'review' ? 'transactions' : 'more'}" aria-label="Back">${icon('back', 17)}</button>`
+        : `<button class="icon-btn" data-view="more" aria-label="Settings">${icon('settings', 17)}</button>`}
+    </header>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -2221,14 +2592,8 @@ function render() {
 
   if (state.bootLoading) {
     app.innerHTML = `
-      <header class="header">
-        <h1>Family Budget</h1>
-      </header>
-      <main class="content">
-        <div class="loading-shell" style="padding-top:80px;text-align:center;color:var(--muted);">
-          Loading your numbers…
-        </div>
-      </main>
+      <header class="app-bar"><div class="app-bar-text"><div class="app-bar-title">Family Budget</div></div></header>
+      <div class="loading">Loading your numbers…</div>
     `;
     return;
   }
@@ -2237,7 +2602,7 @@ function render() {
     dashboard: renderDashboard,
     paycheck: renderPaycheck,
     plan: renderPlan,
-    expenses: renderExpenses,
+    spending: renderSpending,
     subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
@@ -2252,11 +2617,9 @@ function render() {
   }[state.view]();
 
   app.innerHTML = `
-    <header class="header">
-      <h1>Family Budget</h1>
-    </header>
+    ${renderAppBar()}
     ${renderSyncBanner()}
-    <main class="content">${body}</main>
+    <main>${body}</main>
     ${renderInstallHint()}
     ${renderBottomNav()}
   `;
@@ -2353,8 +2716,8 @@ function render() {
   if (search) {
     search.addEventListener('input', () => {
       const q = search.value.toLowerCase();
-      document.querySelectorAll('#txn-list .txn').forEach((row) => {
-        row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+      document.querySelectorAll('#txn-list .row').forEach((node) => {
+        node.style.display = node.dataset.search.includes(q) ? '' : 'none';
       });
     });
   }
@@ -2755,9 +3118,8 @@ function render() {
     });
   });
 
-  const toggleBillFormBtn = app.querySelector('[data-action="toggle-bill-form"]');
-  if (toggleBillFormBtn) {
-    toggleBillFormBtn.addEventListener('click', () => {
+  app.querySelectorAll('[data-action="toggle-bill-form"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
       state.billFormOpen = !state.billFormOpen;
       state.billFormError = null;
       if (state.billFormOpen) {
@@ -2766,7 +3128,54 @@ function render() {
       }
       render();
     });
-  }
+  });
+
+  /**
+   * Accept a recurring charge as a bill.
+   *
+   * Saved as source 'bank' with full confidence: the household has just
+   * confirmed something the bank feed already proved they pay, which is
+   * stronger evidence than any parse. createBill still runs it through the
+   * same duplicate check as every other route, so accepting one the household
+   * also has in email updates that row rather than adding a second.
+   */
+  app.querySelectorAll('[data-action="track-bill"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.key;
+      const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+      const suggestion = suggestBillsFromTransactions({
+        streams: recurring,
+        bills: [...state.bills, ...state.billsNeedingReview],
+      }).find((s) => s.key === key);
+      if (!suggestion) return;
+
+      state.trackingBill = key;
+      state.billsError = null;
+      render();
+      try {
+        const bills = await loadBills();
+        await bills.createBill({
+          providerName: suggestion.providerName,
+          amountDue: suggestion.amountDue,
+          dueDate: suggestion.dueDate,
+          category: suggestion.category,
+          source: 'bank',
+        });
+        await refreshBills();
+      } catch (e) {
+        state.billsError = e.message;
+      }
+      state.trackingBill = null;
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-action="dismiss-suggestion"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dismissSuggestion(btn.dataset.key);
+      render();
+    });
+  });
 
   const parseBillBtn = app.querySelector('[data-action="parse-bill-text"]');
   if (parseBillBtn) {

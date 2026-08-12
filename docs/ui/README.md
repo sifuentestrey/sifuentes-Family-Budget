@@ -24,6 +24,35 @@ Mobile bottom navigation:
 
 Desktop uses the same five sections in a compact left rail.
 
+A tab that owns more than one screen carries a **segmented control** at the
+top — Spending is Overview / Transactions / Recurring / Trends, Income is
+Overview / Paycheck / Shifts / Paystubs. Siblings are one tap apart and
+visibly part of the same place.
+
+"More" is settings and the genuinely peripheral, not an overflow list. An
+earlier build put ten destinations there as ten identical rows, which is how
+Trends, Paystubs and Connect all ended up equally buried.
+
+## Components
+
+There is one of each, and views compose them rather than inventing their own —
+this is what keeps the app from reading as several apps stapled together:
+
+- `.hero` — the one number a screen exists to answer
+- `.card` — a titled container
+- `.row` — the single list row: avatar, title + chips, sub, amount, chevron,
+  optional actions. Used for bills, transactions, subscriptions, income
+  streams, shifts, paystubs, members and bank accounts alike.
+- `.kv` — a labelled breakdown (calculation steps, totals)
+- `.chip` — status and provenance badges
+- `.btn` — one button scale: primary, secondary, outline, danger
+- `.field` — one labelled input
+- `.empty` — one empty state, with an action wherever there is one to offer
+
+Icons are inline SVG at 1.6px stroke in `currentColor`, never emoji or unicode
+glyphs — those render differently per platform and visibly are not from the
+same family as each other.
+
 ## Home screen hierarchy
 
 1. Greeting + current period
@@ -63,14 +92,20 @@ Top summary:
 
 `$2,184 due this month`
 
-Then a simple chronological list:
+Then the bills grouped by which paycheck has to cover each one, and below
+that **Found in your transactions** — recurring charges the household is
+already paying that are not tracked as bills yet, each with one-tap
+`Track as bill` / `Not a bill`.
 
-- Mortgage — Aug 15 — $1,900
-- Electricity — Aug 18 — estimated $146
-- Water — Aug 20 — $78
-- Car — Aug 24 — $612
+That section is the practical form of "never make the user manually enter a
+bill that can be discovered automatically". The strongest evidence a bill
+exists is that this account has already paid it, on a rhythm, for months — no
+inbox to connect and no form to fill in. It only proposes, though: a recurring
+charge is not automatically an obligation (a grocery run recurs too), and a
+bill nobody confirmed would land in safe-to-spend as a commitment nobody
+agreed to. See `src/engine/bill-suggestions.js` for what qualifies.
 
-Each item can show a tiny source badge such as `Email`, `Bank`, or `Connected`.
+Each item shows a tiny source badge — `Email`, `Bank`, `Manual`.
 
 ## Spending screen
 

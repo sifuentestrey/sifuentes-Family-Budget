@@ -16,11 +16,17 @@
  * gap.
  */
 
-/** @typedef {'email'|'pdf'|'provider_api'|'provider_portal'|'manual'} BillSourceType */
+/** @typedef {'email'|'pdf'|'provider_api'|'provider_portal'|'manual'|'bank'} BillSourceType */
 /** @typedef {'detected'|'confirmed'|'scheduled'|'paid'|'overdue'|'disputed'|'ignored'} BillStatus */
 
+/**
+ * `bank` is a bill the household started tracking from a recurring charge
+ * already visible in their own transactions — evidence they have paid this
+ * before, not a parse of a document. Kept distinct from `manual` so the UI
+ * can say where an amount came from.
+ */
 export const BILL_SOURCE_TYPES = /** @type {BillSourceType[]} */ ([
-  'email', 'pdf', 'provider_api', 'provider_portal', 'manual',
+  'email', 'pdf', 'provider_api', 'provider_portal', 'manual', 'bank',
 ]);
 
 export const BILL_STATUSES = /** @type {BillStatus[]} */ ([

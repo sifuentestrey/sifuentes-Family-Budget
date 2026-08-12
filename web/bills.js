@@ -60,10 +60,11 @@ export async function parseBillText(text) {
 }
 
 /**
- * Save a bill entered by hand (with or without AI-assisted parsing first).
- * Always source='manual', confirmed, full confidence — a household typing or
- * confirming a number themselves needs no review queue, unlike a low-
- * confidence automated parse.
+ * Save a bill the household entered or accepted themselves — typed by hand,
+ * AI-assisted from pasted text, or accepted from a recurring charge this app
+ * spotted in their transactions (`source: 'bank'`). Always confirmed, always
+ * full confidence: a household confirming a number themselves needs no review
+ * queue, unlike a low-confidence automated parse.
  *
  * Checked against every existing bill for the household — any source, not
  * just other manual entries — before inserting. The same bill Gmail already
@@ -74,7 +75,7 @@ export async function parseBillText(text) {
  * existing bill is already paid, in which case nothing is touched and the
  * caller is told why rather than silently doing nothing.
  */
-export async function createBill({ providerName, amountDue, dueDate, category }) {
+export async function createBill({ providerName, amountDue, dueDate, category, source = 'manual' }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -95,7 +96,7 @@ export async function createBill({ providerName, amountDue, dueDate, category })
     amountDue,
     dueDate,
     status: 'confirmed',
-    source: 'manual',
+    source,
     confidence: 1,
     needsReview: false,
     detectedAt: new Date().toISOString(),
