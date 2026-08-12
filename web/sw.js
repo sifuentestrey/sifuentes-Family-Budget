@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v19';
+const CACHE_VERSION = 'v20';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -69,6 +69,8 @@ const SHELL_ASSETS = [
   // Imported statically by app.js (avatars fall back to the payee stem to
   // find a logo), so a miss here 404s and takes the whole app down offline.
   '../src/engine/similar-payee.js',
+  // Merchant logos: imported statically by app.js, same rule as above.
+  '../src/engine/merchant-domain.js',
   '../src/domain/provider-match.js',
 ];
 

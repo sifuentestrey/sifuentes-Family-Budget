@@ -27,6 +27,7 @@ import { daysUntilDue } from '../src/domain/bill.js';
 import { planPaycheckCoverage } from '../src/engine/bill-paycheck-plan.js';
 import { suggestBillsFromTransactions } from '../src/engine/bill-suggestions.js';
 import { payeeStem } from '../src/engine/similar-payee.js';
+import { domainForPayee, faviconUrl } from '../src/engine/merchant-domain.js';
 import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -79,6 +80,46 @@ async function refreshBills() {
   // show numbers neither person set.
   await refreshBudgetTargets();
   refreshAlerts();
+}
+
+/**
+ * Name whatever the deterministic layers couldn't, without being asked.
+ *
+ * The household's position was simply "I don't want to review a hundred
+ * things", and a button that has to be found and pressed is still a review
+ * queue with extra steps. So this runs on load, once per session, quietly:
+ * no spinner over the dashboard, no banner if it found nothing, a re-render
+ * only if it actually changed something.
+ *
+ * The safety properties are the same ones the nightly sweep relies on and
+ * they live server-side, not here: only rows still uncategorized are touched,
+ * a human's decision is never overwritten, and anything the model isn't
+ * confident about is left alone rather than force-fitted to a guess.
+ *
+ * Failure is deliberately silent. This is a background improvement to a
+ * screen that already works — an error toast for something nobody asked for
+ * is noise, and the manual button on the review screen reports properly for
+ * anyone who does ask.
+ */
+let autoCategorizeAttempted = false;
+async function autoCategorizeUnknowns() {
+  if (autoCategorizeAttempted) return;
+  if (!state.session || !state.householdId) return;
+  if (!uncategorizedCount()) return;
+  autoCategorizeAttempted = true;
+
+  try {
+    const connect = await loadConnect();
+    const { categorized } = await connect.categorizeUnknowns();
+    if (!categorized) return;
+
+    state.transactions = await connect.listTransactions();
+    buildPlan();
+    state.autoCategorizeResult = `${categorized} categorized automatically.`;
+    render();
+  } catch {
+    /* Silent on purpose — see above. */
+  }
 }
 
 let budgetTargetsModule = null;
@@ -367,6 +408,12 @@ const state = {
   // Set when arriving at Transactions from a category, so the list opens on
   // that category instead of the whole month.
   transactionFilter: null,
+  // Merchant logos are fetched from a public favicon service, which means a
+  // request per merchant domain leaving this browser. On by default because
+  // that is what makes the lists readable, off with one tap in More — a
+  // display preference for this device, so localStorage is the right home for
+  // it (unlike budget targets, which are a shared agreement).
+  showLogos: localStorage.getItem('showLogos') !== '0',
   autoCategorizing: false,
   autoCategorizeResult: null,
   autoCategorizeError: null,
@@ -928,16 +975,19 @@ function avatarFor(name, logoUrl = null) {
   const label = (name || '?').trim();
   let hash = 0;
   for (let i = 0; i < label.length; i += 1) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
-  const initial = `<div class="row-avatar av-${hash % 6}">${escapeHtml(label.charAt(0).toUpperCase() || '?')}</div>`;
+  const letter = escapeHtml(label.charAt(0).toUpperCase() || '?');
+  if (!logoUrl) return `<div class="row-avatar av-${hash % 6}">${letter}</div>`;
 
-  // A real logo when the bank gave us one. onerror swaps the initial back in:
-  // a broken-image icon in a list of charges looks like the app is broken,
-  // and these URLs are somebody else's CDN.
-  if (!logoUrl) return initial;
-  return `<img class="row-avatar row-logo" src="${escapeHtml(logoUrl)}" alt=""
-    loading="lazy" referrerpolicy="no-referrer"
-    onerror="this.outerHTML=this.dataset.fallback"
-    data-fallback="${escapeHtml(initial)}" />`;
+  // The initial is the base layer and the logo paints on top of it, rather
+  // than the logo being swapped out for the initial when it fails. These URLs
+  // are somebody else's CDN: they can 404, they can be blocked by a network,
+  // and they can simply hang. Only the first of those fires an error event, so
+  // anything built on onerror leaves an empty plate in the other two cases —
+  // which looks more broken than no logo at all. This way the row is complete
+  // and readable before the image resolves, and stays that way if it never does.
+  return `<span class="row-avatar av-${hash % 6} has-logo">${letter}<img
+    src="${escapeHtml(logoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"
+    onload="this.classList.add('loaded')" onerror="this.remove()" /></span>`;
 }
 
 /**
@@ -952,24 +1002,36 @@ function logoIndex() {
   if (logoIndexCache.source === state.transactions) return logoIndexCache.map;
   const map = new Map();
   for (const t of state.transactions) {
-    if (t.logo_url && !map.has(t.payee)) map.set(t.payee, t.logo_url);
+    const logo = t.logo_url ?? faviconUrl(domainForPayee(t.payee, t.merchant_website));
+    if (logo && !map.has(t.payee)) map.set(t.payee, logo);
   }
   logoIndexCache = { source: state.transactions, map };
   return map;
 }
 
+/**
+ * A logo for anything that knows a payee name — transactions, bills,
+ * subscriptions, income.
+ *
+ * Bills have no logo of their own but are nearly always paid to a merchant the
+ * transaction feed has already seen, so they look there first and fall back to
+ * deriving a domain from the provider name directly.
+ */
 function logoForPayee(payee) {
-  if (!payee) return null;
+  if (!payee || !state.showLogos) return null;
+
   const index = logoIndex();
   if (index.has(payee)) return index.get(payee);
+
   // Bill providers and payees rarely match character for character
-  // ("PG&E" vs "PGANDE WEB ONLINE"), so fall back to the leading word.
+  // ("PG&E" vs "PGANDE WEB ONLINE"), so try the leading word.
   const stem = payeeStem(payee);
-  if (!stem) return null;
-  for (const [name, url] of index) {
-    if (payeeStem(name) === stem) return url;
+  if (stem) {
+    for (const [name, url] of index) {
+      if (payeeStem(name) === stem) return url;
+    }
   }
-  return null;
+  return faviconUrl(domainForPayee(payee));
 }
 
 /**
@@ -1151,6 +1213,21 @@ function renderMore() {
           iconName, title: label, sub, chevron: true,
           tag: 'button', attrs: `data-view="${id}"`,
         })).join('')}
+      </div>
+    `)}
+
+    ${section('Display', `
+      <div class="list">
+        ${row({
+          iconName: 'bank',
+          title: 'Show merchant logos',
+          sub: state.showLogos
+            ? 'On — logos are fetched from Google\'s public favicon service, which means it sees the merchant domains this device looks up (not your amounts, transactions, or who you are).'
+            : 'Off — coloured initials only, and nothing leaves this device.',
+          actions: `<button class="btn btn-sm btn-outline" data-action="toggle-logos">
+            ${state.showLogos ? 'Turn off' : 'Turn on'}
+          </button>`,
+        })}
       </div>
     `)}
 
@@ -1552,7 +1629,7 @@ function renderTransactionRow(t) {
   return `
     <div class="row" data-id="${t.plaid_transaction_id}"
       data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
-      ${avatarFor(t.payee, t.logo_url ?? logoForPayee(t.payee))}
+      ${avatarFor(t.payee, logoForPayee(t.payee))}
       <div class="row-body">
         <div class="row-title">${t.payee}</div>
         <div class="row-sub">${date}${chips ? ` ${chips}` : ''}</div>
@@ -1609,17 +1686,19 @@ function renderReview() {
 
       <div class="card" style="margin-bottom:12px;">
         <div class="card-head">
-          <span class="card-title">Don't sort these by hand</span>
+          <span class="card-title">These already had a go</span>
         </div>
         <div class="prose-sm" style="margin:6px 0 10px;">
-          These are the payees nothing recognised — an unusual merchant, a Venmo
-          to a person, a description with no name in it. Have them looked up
-          instead: anything that comes back confident is filled in, anything
-          that doesn't stays here.
+          Categories are found automatically — when the app opens, and again
+          overnight. What's left is what nothing could name with any confidence:
+          an unusual merchant, a Venmo to a person, a description with no name
+          in it. Guessing at these would quietly bend your totals, so they wait
+          for you instead. Set one and that payee is remembered for good, along
+          with anything that looks like it.
         </div>
-        <button class="btn btn-primary" data-action="auto-categorize"
+        <button class="btn btn-secondary" data-action="auto-categorize"
           ${state.autoCategorizing || !state.session ? 'disabled' : ''}>
-          ${state.autoCategorizing ? 'Looking these up…' : `Find categories for these ${queue.length}`}
+          ${state.autoCategorizing ? 'Trying again…' : 'Try these again'}
         </button>
         ${!state.session ? '<div class="field-hint">Sign in to use this — it runs against your household\'s own data.</div>' : ''}
       </div>
@@ -3152,6 +3231,19 @@ function render() {
   // "Where it went" rows are <details>. Remember which are open so the next
   // render — triggered by categorizing something inside one, for instance —
   // leaves them open.
+  const logoToggle = app.querySelector('[data-action="toggle-logos"]');
+  if (logoToggle) {
+    logoToggle.addEventListener('click', () => {
+      state.showLogos = !state.showLogos;
+      try {
+        localStorage.setItem('showLogos', state.showLogos ? '1' : '0');
+      } catch {
+        /* A blocked localStorage must not stop the toggle working this session. */
+      }
+      render();
+    });
+  }
+
   const autoCat = app.querySelector('[data-action="auto-categorize"]');
   if (autoCat) {
     autoCat.addEventListener('click', async () => {
@@ -3286,6 +3378,7 @@ function render() {
         // populated Budget tab rather than one that looks empty until reload.
         state.billsAttempted = true;
         await refreshBills();
+        autoCategorizeUnknowns(); // not awaited: signing in must not wait on it
       } catch (e) {
         state.authError = e.message;
       }
@@ -3867,4 +3960,9 @@ load().then(render).catch((e) => {
   clearTimeout(bootTimeout);
   state.bootLoading = false;
   render();
+
+  // Not awaited: naming the leftovers is a server round-trip through a model,
+  // and the app must never sit on a loading screen waiting for it. It runs
+  // behind the rendered dashboard and re-renders if it changed anything.
+  autoCategorizeUnknowns();
 })();
