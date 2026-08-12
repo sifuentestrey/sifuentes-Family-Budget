@@ -26,6 +26,7 @@ import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validat
 import { daysUntilDue } from '../src/domain/bill.js';
 import { planPaycheckCoverage } from '../src/engine/bill-paycheck-plan.js';
 import { suggestBillsFromTransactions } from '../src/engine/bill-suggestions.js';
+import { payeeStem } from '../src/engine/similar-payee.js';
 import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -359,8 +360,16 @@ const state = {
   budgetTargetsError: null,
   savingTarget: null,
   editingTarget: null,
-  // The category whose transactions the "Where it went" drilldown is showing.
-  category: null,
+  // Categories expanded in "Where it went". Kept in state because every
+  // interaction inside one (setting a category, say) re-renders the whole
+  // view, and a drilldown that slammed shut on every tap would be unusable.
+  openCategories: new Set(),
+  // Set when arriving at Transactions from a category, so the list opens on
+  // that category instead of the whole month.
+  transactionFilter: null,
+  autoCategorizing: false,
+  autoCategorizeResult: null,
+  autoCategorizeError: null,
 };
 
 /**
@@ -594,15 +603,62 @@ function consumeGmailOAuthReturn() {
 }
 
 /**
+ * What's actually in the accounts, right now.
+ *
+ * Cash is checking and savings. Card balances are money already owed, not
+ * money held, so they are reported separately rather than netted off — a
+ * single blended figure hides which half is which, and the two numbers get
+ * used for different decisions.
+ *
+ * The demo fixtures carry balances too, so the shape of this screen is the
+ * same before a bank is connected as after.
+ */
+function cashOnHand() {
+  const accounts = [...state.accounts.values()];
+  let checking = 0;
+  let savings = 0;
+  let owed = 0;
+  let accountCount = 0;
+
+  // Two vocabularies land here: our own `account_type` enum from the database
+  // ('checking' | 'savings' | 'credit' | …) and Plaid's shape in the demo
+  // fixtures ('depository' plus a subtype). Both are read rather than
+  // translated at the boundary, because a silent mismatch would show a
+  // balance of $0 and look like an empty bank account.
+  for (const a of accounts) {
+    const type = a.type ?? '';
+    const subtype = a.subtype ?? '';
+    const balance = Number(a.current_balance ?? 0);
+    if (!Number.isFinite(balance)) continue;
+
+    if (type === 'credit') {
+      owed += Math.abs(balance);
+      continue;
+    }
+    if (type === 'savings' || subtype === 'savings') {
+      savings += balance;
+      accountCount += 1;
+    } else if (type === 'checking' || type === 'depository') {
+      checking += balance;
+      accountCount += 1;
+    }
+  }
+
+  // Savings is money the household has, but not money to spend this week —
+  // so it counts toward "what we have" and never toward what's free to
+  // spend. Blending the two is how an emergency fund gets spent on groceries
+  // without anyone deciding to.
+  return { checking, savings, owed, total: checking + savings, accountCount };
+}
+
+/**
  * Gather inputs for the Safe-to-Spend calculation from current state.
  * Returns null if critical inputs are missing (no variable income stream, no bills).
  */
 function gatherSafeToSpendInputs() {
   if (!state.variableStream) return null;
 
-  // Current balance: sum checking/savings accounts minus credit card balances.
-  // For demo fixtures, assume $5,000 in checking as the spendable balance.
-  const currentBalance = 5000;
+  const currentBalance = cashOnHand().checking;
 
   // Pending outflows: recently authorized but not posted transactions.
   const pendingTxns = state.transactions.filter((t) => t.pending && t.amount > 0);
@@ -868,11 +924,52 @@ function icon(name, size = 18) {
  * one" long before they read the label, and a color that shuffled between
  * renders would make the list feel unstable.
  */
-function avatarFor(name) {
+function avatarFor(name, logoUrl = null) {
   const label = (name || '?').trim();
   let hash = 0;
   for (let i = 0; i < label.length; i += 1) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
-  return `<div class="row-avatar av-${hash % 6}">${escapeHtml(label.charAt(0).toUpperCase() || '?')}</div>`;
+  const initial = `<div class="row-avatar av-${hash % 6}">${escapeHtml(label.charAt(0).toUpperCase() || '?')}</div>`;
+
+  // A real logo when the bank gave us one. onerror swaps the initial back in:
+  // a broken-image icon in a list of charges looks like the app is broken,
+  // and these URLs are somebody else's CDN.
+  if (!logoUrl) return initial;
+  return `<img class="row-avatar row-logo" src="${escapeHtml(logoUrl)}" alt=""
+    loading="lazy" referrerpolicy="no-referrer"
+    onerror="this.outerHTML=this.dataset.fallback"
+    data-fallback="${escapeHtml(initial)}" />`;
+}
+
+/**
+ * Logos by payee, so anything that knows a payee name can show its logo —
+ * bills included, which have no logo of their own but are nearly always paid
+ * to a merchant the transaction feed has already seen.
+ */
+let logoIndexCache = { source: null, map: new Map() };
+function logoIndex() {
+  // Rebuilt only when the transaction list itself changes — this is called
+  // once per row, and a fresh scan per row is a scan per row too many.
+  if (logoIndexCache.source === state.transactions) return logoIndexCache.map;
+  const map = new Map();
+  for (const t of state.transactions) {
+    if (t.logo_url && !map.has(t.payee)) map.set(t.payee, t.logo_url);
+  }
+  logoIndexCache = { source: state.transactions, map };
+  return map;
+}
+
+function logoForPayee(payee) {
+  if (!payee) return null;
+  const index = logoIndex();
+  if (index.has(payee)) return index.get(payee);
+  // Bill providers and payees rarely match character for character
+  // ("PG&E" vs "PGANDE WEB ONLINE"), so fall back to the leading word.
+  const stem = payeeStem(payee);
+  if (!stem) return null;
+  for (const [name, url] of index) {
+    if (payeeStem(name) === stem) return url;
+  }
+  return null;
 }
 
 /**
@@ -880,11 +977,11 @@ function avatarFor(name) {
  *   avatar | title (+ chips) | sub | amount | amountSub | chevron | actions
  */
 function row({
-  avatar, iconName, title, sub, amount, amountSub, amountClass = '',
+  avatar, logo = null, iconName, title, sub, amount, amountSub, amountClass = '',
   chips = '', chevron = false, actions = '', tone = '', attrs = '', tag = 'div',
 }) {
   const lead = avatar
-    ? avatarFor(avatar)
+    ? avatarFor(avatar, logo)
     : iconName ? `<div class="row-avatar ghost">${icon(iconName, 17)}</div>` : '';
 
   const inner = `
@@ -976,7 +1073,7 @@ function signInPrompt(what) {
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'bills'] },
-  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'category'] },
+  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review'] },
   { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
   { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan', 'subscriptions', 'trends'] },
 ];
@@ -1164,84 +1261,44 @@ function renderAlerts() {
 const CATEGORY_LIST_LIMIT = 5;
 
 function renderCategoryRows(categories, max) {
-  const counts = new Map();
-  for (const t of spendingIn(state.month)) {
-    const key = t.category || 'Uncategorized';
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
+  const txns = spendingIn(state.month);
 
   return categories.map(([name, amount]) => {
     const avg = trailingAverage(name);
     const delta = avg ? ((amount - avg) / avg) * 100 : 0;
     const showDelta = avg !== null && Math.abs(delta) > 15;
-    const n = counts.get(name) || 0;
-    // A button, not a div: "Groceries $612" is the start of a question, and
-    // the only answer is the transactions behind it.
+    const rows = txns
+      .filter((t) => (t.category || 'Uncategorized') === name)
+      .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
+
+    // A <details>, not a link to another screen: "Groceries $612" is the
+    // start of a question and the answer is right there underneath it.
+    // Opening one keeps the rest of the month on screen, and closing it puts
+    // you back exactly where you were — which a separate page never does.
     return `
-      <button class="row" data-category="${escapeHtml(name)}" style="display:block;width:100%;text-align:left;">
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
-          <span class="row-title">${name} <span class="row-chev">${icon('chevron', 14)}</span></span>
-          <span class="row-amount">${moneyExact(amount)}</span>
+      <details class="row cat-row" ${state.openCategories.has(name) ? 'open' : ''} data-category="${escapeHtml(name)}">
+        <summary>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+            <span class="row-title">${name}</span>
+            <span class="row-amount">${moneyExact(amount)}</span>
+          </div>
+          <div class="row-sub" style="margin-top:2px;">
+            ${rows.length} transaction${rows.length === 1 ? '' : 's'}
+          </div>
+          <div class="meter">
+            <div class="meter-fill ${name === 'Uncategorized' ? 'quiet' : ''}" style="width:${Math.min(100, (amount / max) * 100)}%"></div>
+          </div>
+          ${showDelta ? `
+            <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--accent)'};">
+              ${delta > 0 ? '↑' : '↓'} ${Math.abs(Math.round(delta))}% vs recent average
+            </div>` : ''}
+        </summary>
+        <div class="cat-body">
+          ${rows.map(renderTransactionRow).join('')}
         </div>
-        <div class="row-sub" style="margin-top:2px;">${n} transaction${n === 1 ? '' : 's'}</div>
-        <div class="meter">
-          <div class="meter-fill ${name === 'Uncategorized' ? 'quiet' : ''}" style="width:${Math.min(100, (amount / max) * 100)}%"></div>
-        </div>
-        ${showDelta ? `
-          <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--accent)'};">
-            ${delta > 0 ? '↑' : '↓'} ${Math.abs(Math.round(delta))}% vs recent average
-          </div>` : ''}
-      </button>
+      </details>
     `;
   }).join('');
-}
-
-/**
- * The transactions behind one category, for one month.
- *
- * "Where it went" was a wall of totals with nothing underneath it: seeing
- * $612 of Groceries and being unable to ask which charges those were is the
- * point at which people stop believing the number. Reached by tapping a
- * category anywhere it appears, and it goes back where it came from.
- */
-function renderCategoryDetail() {
-  const name = state.category;
-  const txns = spendingIn(state.month)
-    .filter((t) => (t.category || 'Uncategorized') === name)
-    .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
-
-  const total = txns.reduce((s, t) => s + t.amount, 0);
-  const avg = trailingAverage(name);
-
-  // Repeat payees, so "why is this so high" has an answer without arithmetic.
-  const byPayee = new Map();
-  for (const t of txns) byPayee.set(t.payee, (byPayee.get(t.payee) || 0) + t.amount);
-  const topPayees = [...byPayee.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-
-  return `
-    ${renderMonthPicker()}
-
-    <div class="hero hero-sm">
-      <div class="hero-label">${escapeHtml(name)}</div>
-      <div class="hero-value">${moneyExact(total)}</div>
-      <div class="hero-note">
-        ${txns.length} transaction${txns.length === 1 ? '' : 's'} in ${monthLabel(state.month)}${avg !== null
-          ? ` · ${money(avg)} in a typical recent month` : ''}
-      </div>
-      ${topPayees.length > 1 ? `
-        <div class="hero-foot">
-          ${topPayees.map(([payee, amt]) => `<span><b>${money(amt)}</b> ${escapeHtml(payee)}</span>`).join('')}
-        </div>` : ''}
-    </div>
-
-    ${txns.length ? `
-      <div class="list tight" style="margin-top:14px;">${txns.map(renderTransactionRow).join('')}</div>
-    ` : emptyState({
-      iconName: 'list',
-      title: 'Nothing in this category',
-      body: `No ${name} spending posted in ${monthLabel(state.month)}.`,
-    })}
-  `;
 }
 
 function renderDashboard() {
@@ -1259,7 +1316,12 @@ function renderDashboard() {
 
   const max = categories.length ? categories[0][1] : 1;
 
-  // Safe-to-Spend calculation for the current period.
+  const cash = cashOnHand();
+
+  // The same until-payday arithmetic as before, now shown as a supporting
+  // line under the balance rather than as the headline. "Safe to spend" was
+  // the app's own coinage and meant nothing to the people using it; the
+  // number is still useful, the name was not.
   const sts = gatherSafeToSpendInputs();
   const safeToSpendResult = sts ? calculateSafeToSpend(sts) : null;
 
@@ -1274,17 +1336,34 @@ function renderDashboard() {
       <button class="chev-btn" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>${icon('chevron', 16)}</button>
     </div>
 
-    ${safeToSpendResult ? `
-      <div class="hero">
-        <div class="hero-label">Safe to spend</div>
-        <div class="hero-value ${safeToSpendResult.status === 'negative' ? 'bad' : ''}">
-          ${moneyExact(safeToSpendResult.safeToSpend)}
-        </div>
-        <div class="hero-note">${safeToSpendResult.headline}</div>
+    <div class="hero">
+      <div class="hero-label">Money in the bank</div>
+      <div class="hero-value">${moneyExact(cash.total)}</div>
+      <div class="hero-note">
+        ${cash.accountCount
+          ? `Across ${cash.accountCount} account${cash.accountCount === 1 ? '' : 's'}, as of the last sync.`
+          : 'No bank connected yet — connect one and your real balance shows here.'}
+      </div>
+      ${cash.accountCount ? `
         <div class="hero-foot">
-          <span><b>${money(safeToSpendResult.startingPoint)}</b> coming in</span>
-          ${safeToSpendResult.deductions.slice(0, 2).map((d) =>
-            `<span><b>${money(d.amount)}</b> ${d.label.toLowerCase()}</span>`).join('')}
+          <span><b>${money(cash.checking)}</b> in checking</span>
+          ${cash.savings > 0 ? `<span><b>${money(cash.savings)}</b> in savings</span>` : ''}
+          ${cash.owed > 0 ? `<span><b>${money(cash.owed)}</b> owed on cards</span>` : ''}
+        </div>` : ''}
+    </div>
+
+    ${safeToSpendResult ? `
+      <div class="card" style="margin-top:12px;">
+        <div class="card-head">
+          <span class="card-title">Free to spend until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
+          <span class="row-amount ${safeToSpendResult.status === 'negative' ? 'negative' : ''}">
+            ${moneyExact(safeToSpendResult.safeToSpend)}
+          </span>
+        </div>
+        <div class="prose-sm" style="margin-top:6px;">
+          What's in checking, plus the pay landing before then, less the bills
+          due and the groceries and gas you'll need in between. Savings is left
+          out of it on purpose.
         </div>
       </div>
 
@@ -1303,7 +1382,7 @@ function renderDashboard() {
               </div>
             `).join('')}
             <div class="kv-row total">
-              <span class="kv-label">Safe to spend</span>
+              <span class="kv-label">Free to spend</span>
               <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
             </div>
           </div>
@@ -1406,8 +1485,10 @@ function renderUpcoming() {
 }
 
 function renderTransactions() {
+  const filter = state.transactionFilter;
   const txns = state.transactions
     .filter((t) => monthKey(t.posted_date) === state.month && !t.pending)
+    .filter((t) => !filter || (t.category || 'Uncategorized') === filter)
     .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
 
   const reviewCount = uncategorizedCount();
@@ -1425,6 +1506,12 @@ function renderTransactions() {
         <button class="linkbtn" data-view="review">Review</button>
       </div>` : ''}
 
+    ${filter ? `
+      <div class="banner">
+        <div class="banner-body">Showing <strong>${escapeHtml(filter)}</strong> only.</div>
+        <button class="linkbtn" data-action="clear-txn-filter">Show all</button>
+      </div>` : ''}
+
     <label class="field" style="margin-bottom:12px;">
       <input class="input" id="search" placeholder="Search transactions…" autocomplete="off" />
     </label>
@@ -1439,6 +1526,19 @@ function renderTransactions() {
   `;
 }
 
+/**
+ * Where a category came from, in words rather than in the layer's internal
+ * name. "PLAID_PFC" on a grocery run told the household nothing except that
+ * the app has internals.
+ */
+const CATEGORY_SOURCE_LABEL = {
+  learned: 'you set this',
+  rule: 'by name',
+  plaid_pfc: 'from your bank',
+  similar: 'same as a lookalike',
+  llm: 'looked up',
+};
+
 function renderTransactionRow(t) {
   const kind = t.is_transfer ? 'transfer' : t.is_income ? 'income' : null;
   const date = new Date(`${t.posted_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -1446,13 +1546,13 @@ function renderTransactionRow(t) {
   const chips = [
     kind ? `<span class="chip ${kind === 'income' ? 'chip-ok' : ''}">${kind}</span>` : '',
     !kind && t.categorized_by !== 'none'
-      ? `<span class="chip chip-outline" title="Decided by: ${t.categorized_by}">${t.categorized_by}</span>` : '',
+      ? `<span class="chip chip-outline">${CATEGORY_SOURCE_LABEL[t.categorized_by] ?? t.categorized_by}</span>` : '',
   ].join('');
 
   return `
     <div class="row" data-id="${t.plaid_transaction_id}"
       data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
-      ${avatarFor(t.payee)}
+      ${avatarFor(t.payee, t.logo_url ?? logoForPayee(t.payee))}
       <div class="row-body">
         <div class="row-title">${t.payee}</div>
         <div class="row-sub">${date}${chips ? ` ${chips}` : ''}</div>
@@ -1489,7 +1589,7 @@ function renderReview() {
       ${emptyState({
         iconName: 'check',
         title: 'Nothing to review',
-        body: `${stats.coverage}% of transactions were categorized automatically.`,
+        body: `${stats.coverage}% of your transactions were categorized for you.`,
         action: '<button class="btn btn-secondary" data-view="transactions">Back to transactions</button>',
       })}
     `;
@@ -1497,16 +1597,44 @@ function renderReview() {
 
   return `
     ${segmented(SPENDING_TABS)}
-    ${section('Needs a category', `
+    ${section('Still unknown', `
+      ${state.autoCategorizeResult ? `
+        <div class="banner banner-good">
+          <div class="banner-body">${escapeHtml(state.autoCategorizeResult)}</div>
+        </div>` : ''}
+      ${state.autoCategorizeError ? `
+        <div class="banner banner-warn">
+          <div class="banner-body">${escapeHtml(state.autoCategorizeError)}</div>
+        </div>` : ''}
+
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-head">
+          <span class="card-title">Don't sort these by hand</span>
+        </div>
+        <div class="prose-sm" style="margin:6px 0 10px;">
+          These are the payees nothing recognised — an unusual merchant, a Venmo
+          to a person, a description with no name in it. Have them looked up
+          instead: anything that comes back confident is filled in, anything
+          that doesn't stays here.
+        </div>
+        <button class="btn btn-primary" data-action="auto-categorize"
+          ${state.autoCategorizing || !state.session ? 'disabled' : ''}>
+          ${state.autoCategorizing ? 'Looking these up…' : `Find categories for these ${queue.length}`}
+        </button>
+        ${!state.session ? '<div class="field-hint">Sign in to use this — it runs against your household\'s own data.</div>' : ''}
+      </div>
+
       <div class="list tight">${queue.map(renderTransactionRow).join('')}</div>
+
       <div class="note" style="margin-top:12px;">
-        <strong>${stats.coverage}% categorized automatically.</strong>
-        By layer: ${Object.entries(stats.counts).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(', ')}.
-        Unknowns are shown rather than guessed at — a wrong category silently
-        corrupts your trends, an empty one just asks a question.
+        <strong>${stats.coverage}% got a category without you.</strong>
+        Most charges are decided by the merchant name, by a payee you've
+        corrected once before, or by one that looks like it. What's left is
+        shown rather than guessed at — a wrong category quietly bends your
+        totals, an empty one just asks a question.
       </div>
     `, {
-      sub: `${queue.length} the categorizer wasn't confident about`,
+      sub: `${queue.length} nothing could name`,
     })}
   `;
 }
@@ -1589,6 +1717,7 @@ function renderIncome() {
       <div class="list">
         ${state.streams.map((s) => row({
           avatar: s.payee,
+          logo: logoForPayee(s.payee),
           title: s.payee,
           sub: `${s.cadence} · next ${s.next_expected}`,
           chips: s.distribution?.stability && s.distribution.stability !== 'stable'
@@ -1899,6 +2028,7 @@ function renderBudget() {
       <div class="list">
         ${budget.bills.map((b) => row({
           avatar: b.name,
+          logo: logoForPayee(b.name),
           title: escapeHtml(b.name),
           chips: b.paid ? '<span class="chip chip-ok">paid</span>' : '',
           sub: `Due ${new Date(`${b.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${b.category ?? 'Uncategorized'}`,
@@ -2040,6 +2170,7 @@ function renderSubscriptions() {
       <div class="list">
         ${s.subscriptions.map((sub) => row({
           avatar: sub.payee,
+          logo: logoForPayee(sub.payee),
           title: sub.payee,
           chips: sub.confidence === 'low' ? '<span class="chip">new</span>' : '',
           sub: `${sub.cadence} · last charged ${sub.last_seen}`,
@@ -2063,6 +2194,7 @@ function renderSubscriptions() {
       <div class="list">
         ${s.bills.map((b) => row({
           avatar: b.payee,
+          logo: logoForPayee(b.payee),
           title: b.payee,
           sub: `${b.cadence} · next ${b.next_expected}`,
           amount: moneyExact(b.last_amount),
@@ -2472,6 +2604,7 @@ function renderBillRow(b) {
 
   return row({
     avatar: b.providerName,
+    logo: logoForPayee(b.providerName),
     title: b.providerName,
     chips: `<span class="chip ${BILL_SOURCE_LABEL[b.source] ? 'chip-outline' : ''}">${BILL_SOURCE_LABEL[b.source] ?? b.source}</span>`,
     sub: `${when} · ${b.category}`,
@@ -2554,6 +2687,7 @@ function renderBillSuggestions() {
         const due = new Date(`${s.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return row({
           avatar: s.providerName,
+          logo: logoForPayee(s.providerName),
           title: s.providerName,
           chips: [
             s.amountVaries ? '<span class="chip chip-warn">varies</span>' : '',
@@ -2619,6 +2753,7 @@ function renderBills() {
       <div class="list">
         ${review.map((b) => row({
           avatar: b.providerName,
+          logo: logoForPayee(b.providerName),
           title: b.providerName,
           chips: `<span class="chip chip-warn">${Math.round(b.confidence * 100)}% sure</span>`,
           sub: `Due ${b.dueDate} · ${BILL_SOURCE_LABEL[b.source] ?? b.source}`,
@@ -2839,7 +2974,6 @@ const VIEW_HEADERS = {
   bills: () => ['Budget', 'What you owe, and when it has to be covered'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
-  category: () => ['Spending', state.category ? `Every ${state.category} transaction` : ''],
   subscriptions: () => ['Recurring', 'What renews, and what it costs per year'],
   trends: () => ['Trends', 'How each category moves month to month'],
   review: () => ['Spending', 'Transactions the categorizer wasn\'t sure about'],
@@ -2855,8 +2989,8 @@ const VIEW_HEADERS = {
 
 function renderAppBar() {
   const [title, sub] = (VIEW_HEADERS[state.view] ?? (() => ['Family Budget', '']))();
-  const showBack = state.view === 'review' || state.view === 'plan' || state.view === 'category';
-  const backTo = { review: 'transactions', category: state.categoryFrom ?? 'spending' }[state.view] ?? 'more';
+  const showBack = state.view === 'review' || state.view === 'plan';
+  const backTo = state.view === 'review' ? 'transactions' : 'more';
 
   return `
     <header class="app-bar">
@@ -2919,7 +3053,6 @@ function render() {
     plan: renderPlan,
     budget: renderBudget,
     spending: renderSpending,
-    category: renderCategoryDetail,
     subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
@@ -2952,6 +3085,7 @@ function render() {
   app.querySelectorAll('[data-view]').forEach((btn) =>
     btn.addEventListener('click', () => {
       state.view = btn.dataset.view;
+      if (state.view !== 'transactions') state.transactionFilter = null;
       // First visit to Connect is what triggers loading the Supabase SDK —
       // every other view stays entirely offline-capable.
       if (state.view === 'connect' && !state.connectAttempted) {
@@ -3015,15 +3149,55 @@ function render() {
     }),
   );
 
-  // Tapping a category anywhere — the dashboard's "Where it went", the
-  // Spending overview, a Budget line — opens the transactions behind it, and
-  // remembers where it was tapped so Back goes there rather than to a fixed
-  // screen the user may never have been on.
-  app.querySelectorAll('[data-category]:not([data-action])').forEach((btn) =>
+  // "Where it went" rows are <details>. Remember which are open so the next
+  // render — triggered by categorizing something inside one, for instance —
+  // leaves them open.
+  const autoCat = app.querySelector('[data-action="auto-categorize"]');
+  if (autoCat) {
+    autoCat.addEventListener('click', async () => {
+      state.autoCategorizing = true;
+      state.autoCategorizeResult = null;
+      state.autoCategorizeError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        const { categorized, skipped } = await connect.categorizeUnknowns();
+        state.autoCategorizeResult = categorized
+          ? `${categorized} sorted${skipped ? `, ${skipped} still unclear` : ''}.`
+          : 'Nothing could be named with confidence — these need you.';
+        // Re-read rather than patching in place: the write happened server-side,
+        // and re-reading is the only way to be sure the screen matches it.
+        state.transactions = await connect.listTransactions();
+        buildPlan();
+      } catch (e) {
+        state.autoCategorizeError = `Couldn't look those up: ${e.message}`;
+      } finally {
+        state.autoCategorizing = false;
+        render();
+      }
+    });
+  }
+
+  const clearFilter = app.querySelector('[data-action="clear-txn-filter"]');
+  if (clearFilter) {
+    clearFilter.addEventListener('click', () => {
+      state.transactionFilter = null;
+      render();
+    });
+  }
+
+  app.querySelectorAll('details.cat-row').forEach((node) =>
+    node.addEventListener('toggle', () => {
+      if (node.open) state.openCategories.add(node.dataset.category);
+      else state.openCategories.delete(node.dataset.category);
+    }),
+  );
+
+  // Budget's "Transactions" buttons still jump to the full list, filtered.
+  app.querySelectorAll('button[data-category]:not([data-action])').forEach((btn) =>
     btn.addEventListener('click', () => {
-      state.categoryFrom = state.view;
-      state.category = btn.dataset.category;
-      state.view = 'category';
+      state.transactionFilter = btn.dataset.category;
+      state.view = 'transactions';
       render();
     }),
   );

@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v18';
+const CACHE_VERSION = 'v19';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -66,6 +66,9 @@ const SHELL_ASSETS = [
   // reaches into domain/provider-match.js, so both have to be here or the
   // Bills tab 404s offline.
   '../src/engine/bill-suggestions.js',
+  // Imported statically by app.js (avatars fall back to the payee stem to
+  // find a logo), so a miss here 404s and takes the whole app down offline.
+  '../src/engine/similar-payee.js',
   '../src/domain/provider-match.js',
 ];
 

@@ -32,6 +32,13 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const BATCH_SIZE = 60;
 
+// The browser calls this too — see the signed-in path in Deno.serve below.
+const cors = {
+  'Access-Control-Allow-Origin': Deno.env.get('APP_ORIGIN') ?? '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
 function secretsMatch(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -128,7 +135,7 @@ async function askGemini(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
@@ -163,32 +170,73 @@ async function askGemini(
   return parsed;
 }
 
+/**
+ * Households this request is allowed to touch.
+ *
+ * Two callers, deliberately different in scope:
+ *
+ *   - pg_cron, presenting the Vault-held sync secret: every household, which
+ *     is the nightly sweep this function was written for.
+ *   - a signed-in person, presenting their own JWT: only the households they
+ *     are actually a member of. Their token is used to read that membership,
+ *     so RLS decides it rather than this function trusting a claim.
+ *
+ * Anything else gets nothing. Returning [] rather than throwing keeps the
+ * unauthorized path indistinguishable from the no-work path to a caller
+ * probing it.
+ */
+async function authorizedHouseholds(
+  req: Request,
+  admin: SupabaseClient,
+): Promise<{ households: string[]; ok: boolean }> {
+  const presented = req.headers.get('Authorization') ?? '';
+
+  const expected = await expectedSecret(admin);
+  if (expected && secretsMatch(presented, `Bearer ${expected}`)) {
+    const { data } = await admin.from('households').select('id');
+    return { households: (data ?? []).map((h: any) => h.id), ok: true };
+  }
+
+  if (!presented.startsWith('Bearer ')) return { households: [], ok: false };
+
+  const userClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: presented } } },
+  );
+  const { data: { user }, error } = await userClient.auth.getUser();
+  if (error || !user) return { households: [], ok: false };
+
+  // Read through the user's own client: RLS on household_members is what
+  // limits this to their households, not a filter written here.
+  const { data: memberships } = await userClient
+    .from('household_members')
+    .select('household_id');
+  return { households: (memberships ?? []).map((m: any) => m.household_id), ok: true };
+}
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  const expected = await expectedSecret(admin);
-  const presented = req.headers.get('Authorization') ?? '';
-  if (!expected || !secretsMatch(presented, `Bearer ${expected}`)) {
-    return new Response('unauthorized', { status: 401 });
-  }
+  const { households, ok } = await authorizedHouseholds(req, admin);
+  if (!ok) return new Response('unauthorized', { status: 401, headers: cors });
 
   const apiKey = Deno.env.get('GEMINI_API_KEY')?.trim();
   if (!apiKey) {
     return json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set.' }, 503);
   }
 
-  const { data: households, error } = await admin.from('households').select('id');
-  if (error) return json({ error: error.message }, 500);
-
   const results = [];
-  for (const h of households ?? []) {
+  for (const householdId of households) {
     try {
-      results.push({ household_id: h.id, ...(await categorizeHousehold(admin, apiKey, h.id)) });
+      results.push({ household_id: householdId, ...(await categorizeHousehold(admin, apiKey, householdId)) });
     } catch (e: any) {
-      results.push({ household_id: h.id, error: e.message });
+      results.push({ household_id: householdId, error: e.message });
     }
   }
 
@@ -198,6 +246,6 @@ Deno.serve(async (req) => {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...cors, 'Content-Type': 'application/json' },
   });
 }

@@ -15,11 +15,13 @@
  * Run: node fixtures/generate.mjs > fixtures/sample-plaid.json
  */
 
+// Balances included: Home leads with what's in the bank, so the demo has to
+// have some. Invented, like everything else here.
 const ACCOUNTS = [
-  { account_id: 'acc_checking_joint', name: 'Joint Checking', type: 'depository', subtype: 'checking', mask: '4021' },
-  { account_id: 'acc_savings_joint', name: 'Joint Savings', type: 'depository', subtype: 'savings', mask: '7788' },
-  { account_id: 'acc_card_visa', name: 'Visa Everyday', type: 'credit', subtype: 'credit card', mask: '1043' },
-  { account_id: 'acc_card_amex', name: 'Amex Blue', type: 'credit', subtype: 'credit card', mask: '2005' },
+  { account_id: 'acc_checking_joint', name: 'Joint Checking', type: 'depository', subtype: 'checking', mask: '4021', current_balance: 4182.44, available_balance: 4032.44 },
+  { account_id: 'acc_savings_joint', name: 'Joint Savings', type: 'depository', subtype: 'savings', mask: '7788', current_balance: 6250.00, available_balance: 6250.00 },
+  { account_id: 'acc_card_visa', name: 'Visa Everyday', type: 'credit', subtype: 'credit card', mask: '1043', current_balance: 1140.19 },
+  { account_id: 'acc_card_amex', name: 'Amex Blue', type: 'credit', subtype: 'credit card', mask: '2005', current_balance: 612.88 },
 ];
 
 let seq = 0;
