@@ -1289,11 +1289,11 @@ function renderDashboard() {
       </div>
 
       <details class="fold">
-        <summary>See how this is calculated</summary>
+        <summary>Where this number comes from</summary>
         <div class="fold-body">
           <div class="kv">
             <div class="kv-row">
-              <span class="kv-label">Starting: balance + expected income</span>
+              <span class="kv-label">What you have, plus the pay coming</span>
               <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
             </div>
             ${safeToSpendResult.deductions.map((d) => `
@@ -1344,7 +1344,7 @@ function renderDashboard() {
             ${income.detail.find((d) => d.paychecks === 3).payee} pays every two weeks, so
             there's an extra check — about
             ${money(state.streams.find((s) => s.cadence === 'biweekly')?.typical_amount || 0)}
-            more than a normal month. Good month to fund a sinking fund.
+            more than a normal month. Good month to put some aside for the once-a-year bills.
           </div>
         </div>` : ''}
     `)}
@@ -1585,7 +1585,7 @@ function renderIncome() {
         </div>
       </div>` : ''}
 
-    ${section('Your income streams', `
+    ${section('Who pays you', `
       <div class="list">
         ${state.streams.map((s) => row({
           avatar: s.payee,
@@ -1599,9 +1599,9 @@ function renderIncome() {
           amountSub: 'typical',
         })).join('')}
       </div>
-    `, { sub: 'Detected from recurring deposits — net amounts, what actually lands' })}
+    `, { sub: 'Spotted from your deposits — take-home amounts, what actually lands' })}
 
-    ${section(`${monthLabel(state.month)} projection`, `
+    ${section(`What lands in ${monthLabel(state.month)}`, `
       <div class="kv">
         ${projection.detail.map((d) => `
           <div class="kv-row">
@@ -1635,8 +1635,8 @@ function renderPaycheck() {
       ${segmented(INCOME_TABS)}
       ${emptyState({
         iconName: 'income',
-        title: 'No variable income detected yet',
-        body: 'This screen splits a check that changes size. Once a few paychecks have landed, it fills in.',
+        title: 'Not enough paychecks yet',
+        body: 'This screen tells you what to do with a check when the amount changes every time. It fills in once a few have landed.',
       })}
     `;
   }
@@ -1648,31 +1648,31 @@ function renderPaycheck() {
     ${segmented(INCOME_TABS)}
 
     <div class="hero">
-      <div class="hero-label">${isShort ? 'Shortfall' : 'Put away from this check'}</div>
+      <div class="hero-label">${isShort ? 'Short this check' : 'Save from this check'}</div>
       <div class="hero-value ${isShort ? 'bad' : ''}">
         ${moneyExact(isShort ? latest.shortfall : latest.surplus)}
       </div>
       <div class="hero-note">${latest.message}</div>
     </div>
 
-    ${section('How this check splits', `
+    ${section('What to do with this check', `
       <div class="kv">
         <div class="kv-row">
           <span class="kv-label">Check on ${latest.paycheckDate}</span>
           <span>${moneyExact(latest.paycheckAmount)}</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">Hold for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
+          <span class="kv-label">Leave in the account for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">Sinking funds</span><span>−${moneyExact(latest.moveToSinking)}</span>
+          <span class="kv-label">Save for once-a-year bills</span><span>−${moneyExact(latest.moveToSinking)}</span>
         </div>
         <div class="kv-row">
           <span class="kv-label">Groceries &amp; gas (${latest.daysCovered} days)</span>
           <span>−${moneyExact(latest.keepForNecessary)}</span>
         </div>
         <div class="kv-row total">
-          <span class="kv-label">${isShort ? 'Short by' : 'Put away'}</span>
+          <span class="kv-label">${isShort ? 'Short by' : 'Left to save'}</span>
           <span>${moneyExact(isShort ? latest.shortfall : latest.surplus)}</span>
         </div>
       </div>
@@ -1698,7 +1698,7 @@ function renderPaycheck() {
             </span>
           </div>`).join('')}
         <div class="kv-row total">
-          <span class="kv-label">Net saved</span>
+          <span class="kv-label">Saved in total</span>
           <span>${moneyExact(state.allocation.netSaved)}</span>
         </div>
       </div>
@@ -1706,11 +1706,12 @@ function renderPaycheck() {
       ${state.allocation.checksNeedingBuffer > 0 ? `
         <div class="note" style="margin-top:10px;">
           ${state.allocation.checksNeedingBuffer} of ${state.allocation.allocations.length} checks
-          needed the buffer. That is the buffer doing its job — but if it happens often,
-          the floor is set too high rather than anything being wrong.
+          came up short and were topped up from your cushion savings. That's what the cushion is
+          for. If it keeps happening, the monthly plan is aimed higher than the small checks can
+          reach — nothing is broken, the targets just need to come down.
         </div>` : ''}
     `, {
-      sub: 'Bill funding is levelled across checks, not tied to due dates',
+      sub: 'Every check saves a share of the bills, so no one check gets hit with all of them',
     })}
   `;
 }
@@ -1738,7 +1739,7 @@ function renderPlan() {
             </span>
             ${step.amount ? `<span class="row-amount">${money(step.amount)}</span>` : ''}
           </div>
-          ${step.monthsToGoal ? `<div class="row-sub">~${step.monthsToGoal} months at current surplus</div>` : ''}
+          ${step.monthsToGoal ? `<div class="row-sub">~${step.monthsToGoal} months at what you're saving now</div>` : ''}
           <div class="prose-sm" style="margin-top:8px;">${step.why}</div>
           ${step.comparison ? renderDebtComparison(step.comparison) : ''}
         </div>`).join('')}
@@ -1747,21 +1748,21 @@ function renderPlan() {
     ${section('The child, ~2 years out', `
       <div class="stat-row two">
         <div class="stat">
-          <div class="stat-label">Spare now</div>
+          <div class="stat-label">Spare each month now</div>
           <div class="stat-value positive">${money(child.surplus.now)}</div>
           <div class="stat-note">per month</div>
         </div>
         <div class="stat">
           <div class="stat-label">After childcare</div>
           <div class="stat-value ${child.surplus.after < 0 ? 'negative' : ''}">${money(child.surplus.after)}</div>
-          <div class="stat-note">${child.surplus.reductionPercent}% absorbed</div>
+          <div class="stat-note">${child.surplus.reductionPercent}% of it gone</div>
         </div>
       </div>
 
       <div class="kv" style="margin-top:8px;">
         <div class="kv-row"><span class="kv-label">Childcare</span><span>${moneyExact(child.childcare.monthly)}/mo</span></div>
-        <div class="kv-row"><span class="kv-label">Birth (deductible + OOP max)</span><span>${moneyExact(child.birth.cost)}</span></div>
-        ${child.leave ? `<div class="kv-row"><span class="kv-label">Leave income gap</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
+        <div class="kv-row"><span class="kv-label">Birth (your share after insurance)</span><span>${moneyExact(child.birth.cost)}</span></div>
+        ${child.leave ? `<div class="kv-row"><span class="kv-label">Pay missed while on leave</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
         <div class="kv-row total">
           <span class="kv-label">Set aside monthly</span>
           <span>${moneyExact(child.monthlySetAside)}</span>
@@ -1792,11 +1793,11 @@ function renderDebtComparison(c) {
   return `
     <div class="kv" style="margin-top:10px;">
       <div class="kv-row">
-        <span class="kv-label">Avalanche · ${c.avalanche.months} mo</span>
+        <span class="kv-label">Highest interest rate first · ${c.avalanche.months} mo</span>
         <span>${moneyExact(c.avalanche.interestPaid)} interest</span>
       </div>
       <div class="kv-row">
-        <span class="kv-label">Snowball · ${c.snowball.months} mo</span>
+        <span class="kv-label">Smallest balance first · ${c.snowball.months} mo</span>
         <span>${moneyExact(c.snowball.interestPaid)} interest</span>
       </div>
     </div>

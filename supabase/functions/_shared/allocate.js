@@ -166,27 +166,27 @@ function buildMessage(a) {
 
   if (a.status === 'surplus') {
     return (
-      `This check is ${money(a.paycheckAmount)}. Hold ${money(a.holdForBills)} for bills ` +
-      `through ${a.nextPayday}. Move ${money(a.moveToSinking)} to sinking funds. ` +
-      `Keep ${money(a.keepForNecessary)} for groceries and gas. ` +
-      `Put away ${money(a.surplus)}.`
+      `This check is ${money(a.paycheckAmount)}. Leave ${money(a.holdForBills)} in the account ` +
+      `for bills due before ${a.nextPayday}. Move ${money(a.moveToSinking)} to savings for the ` +
+      `once-a-year bills. Keep ${money(a.keepForNecessary)} for groceries and gas. ` +
+      `The last ${money(a.surplus)} is yours to save.`
     );
   }
 
   if (a.status === 'buffer_covers') {
     return (
-      `This check is ${money(a.paycheckAmount)} — ${money(a.shortfall)} short of what's ` +
-      `committed before ${a.nextPayday}. Draw ${money(a.bufferDraw)} from the buffer. ` +
-      `This is exactly what it's for; a slow stretch covered by the buffer is the plan ` +
+      `This check is ${money(a.paycheckAmount)} — ${money(a.shortfall)} less than you owe ` +
+      `before ${a.nextPayday}. Take ${money(a.bufferDraw)} from your cushion savings. ` +
+      `That's exactly what it's for; a slow stretch covered by the cushion is the plan ` +
       `working, not a setback.`
     );
   }
 
   return (
-    `This check is ${money(a.paycheckAmount)} and falls ${money(a.shortfall)} short of ` +
-    `committed costs before ${a.nextPayday}. The buffer covers ${money(a.bufferDraw)} of ` +
-    `it, leaving ${money(a.shortfall - a.bufferDraw)} to find. Look at what can move: ` +
-    `a bill's due date, or discretionary spending before the next check.`
+    `This check is ${money(a.paycheckAmount)} and falls ${money(a.shortfall)} short of what ` +
+    `you owe before ${a.nextPayday}. Your cushion savings cover ${money(a.bufferDraw)} of it, ` +
+    `leaving ${money(a.shortfall - a.bufferDraw)} to find. Two things can move: ask a company ` +
+    `to shift a due date, or cut back on the optional spending until the next check.`
   );
 }
 
