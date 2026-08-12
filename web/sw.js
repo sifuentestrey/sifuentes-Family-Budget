@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v17';
+const CACHE_VERSION = 'v18';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -59,6 +59,7 @@ const SHELL_ASSETS = [
   // this the module 404s offline and app.js fails to parse — taking the whole
   // app down, not just the safe-to-spend headline.
   '../src/engine/budget/safe-to-spend.js',
+  '../src/engine/budget/monthly-budget.js',
   // Bills-by-paycheck: same reason as the modules above — imported statically.
   '../src/engine/bill-paycheck-plan.js',
   // Bill suggestions from recurring charges: imported statically by app.js and

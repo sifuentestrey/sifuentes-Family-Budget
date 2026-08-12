@@ -19,6 +19,7 @@ import { modelChildTransition } from '../src/engine/child-transition.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildAlerts } from '../src/engine/alerts.js';
 import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
+import { buildMonthlyBudget } from '../src/engine/budget/monthly-budget.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -72,7 +73,63 @@ async function refreshBills() {
   } catch (e) {
     state.billsError = e.message;
   }
+  // Both halves of the Budget tab, fetched together: a screen that had bills
+  // but not the household's targets would quietly fall back to averages and
+  // show numbers neither person set.
+  await refreshBudgetTargets();
   refreshAlerts();
+}
+
+let budgetTargetsModule = null;
+async function loadBudgetTargetsModule() {
+  if (!budgetTargetsModule) budgetTargetsModule = await import('./budget-targets.js');
+  return budgetTargetsModule;
+}
+
+/**
+ * Budget targets live in the database because a budget is an agreement
+ * between the two people in the household — a number only one phone can see
+ * is not an agreement. Fetched with bills, since both feed the Budget tab.
+ */
+async function refreshBudgetTargets() {
+  state.budgetTargetsError = null;
+  if (!state.session || !state.householdId) return;
+
+  try {
+    const mod = await loadBudgetTargetsModule();
+    await migrateLocalBudgetTargets(mod);
+    state.budgetTargets = await mod.listBudgetTargets();
+  } catch (e) {
+    state.budgetTargetsError = e.message;
+  }
+}
+
+/**
+ * Targets set before they were shared were kept in localStorage. Push them
+ * up once on the first signed-in load and drop the local copy, so nobody
+ * loses the numbers they already entered and the two sources can't drift.
+ * Existing household targets win — the shared value is the agreed one.
+ */
+async function migrateLocalBudgetTargets(mod) {
+  let local;
+  try {
+    local = JSON.parse(localStorage.getItem('budgetTargets') ?? 'null');
+  } catch {
+    local = null;
+  }
+  if (!local || !Object.keys(local).length) return;
+
+  const existing = await mod.listBudgetTargets();
+  for (const [category, amount] of Object.entries(local)) {
+    if (existing[category] !== undefined) continue;
+    if (!Number.isFinite(Number(amount))) continue;
+    await mod.saveBudgetTarget(state.householdId, category, Number(amount));
+  }
+  try {
+    localStorage.removeItem('budgetTargets');
+  } catch {
+    /* Nothing to do — the rows are saved either way. */
+  }
 }
 
 /** Loads only the note history — generating a new one is a deliberate,
@@ -294,6 +351,16 @@ const state = {
   // row shows a pending state rather than the whole list going dead.
   trackingBill: null,
   dismissedSuggestions: loadDismissedSuggestions(),
+  // Budget targets the household set by hand, category -> monthly amount.
+  // Everything else on the Budget tab is derived, so this is the only thing
+  // that has to be remembered — and it's remembered for the household, not
+  // for this browser (see refreshBudgetTargets).
+  budgetTargets: {},
+  budgetTargetsError: null,
+  savingTarget: null,
+  editingTarget: null,
+  // The category whose transactions the "Where it went" drilldown is showing.
+  category: null,
 };
 
 /**
@@ -320,6 +387,40 @@ function dismissSuggestion(key) {
     );
   } catch {
     /* A full or blocked localStorage must not break dismissing. */
+  }
+}
+
+/**
+ * Set or clear one target, for the whole household.
+ *
+ * Applied to the local state first and rendered immediately, then written —
+ * typing a number and waiting on a round-trip to see it feels broken. If the
+ * write fails the number is rolled back rather than left on screen as a
+ * change the other phone will never see.
+ */
+async function setBudgetTarget(category, amount) {
+  const previous = state.budgetTargets[category];
+  if (amount === null) delete state.budgetTargets[category];
+  else state.budgetTargets[category] = amount;
+
+  state.budgetTargetsError = null;
+  if (!state.session || !state.householdId) {
+    // Demo numbers, nobody to share with. Kept for this session only, the
+    // same way nothing else on the demo dashboard is written anywhere.
+    return;
+  }
+
+  state.savingTarget = category;
+  try {
+    const mod = await loadBudgetTargetsModule();
+    if (amount === null) await mod.clearBudgetTarget(state.householdId, category);
+    else await mod.saveBudgetTarget(state.householdId, category, amount);
+  } catch (e) {
+    if (previous === undefined) delete state.budgetTargets[category];
+    else state.budgetTargets[category] = previous;
+    state.budgetTargetsError = `Couldn't save that target: ${e.message}`;
+  } finally {
+    state.savingTarget = null;
   }
 }
 
@@ -733,6 +834,7 @@ const ICONS = {
   home: '<path d="M3 9.5 10 4l7 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z"/>',
   bills: '<path d="M4.5 3h11v14l-2.2-1.4L11 17l-2.3-1.4L6.4 17l-1.9-1.2z"/><path d="M7.5 7.5h5M7.5 11h3.5"/>',
   spending: '<path d="M3 15.5 7.5 10l3.2 3 5.3-6.5"/><path d="M12.5 6.5H16V10"/>',
+  budget: '<rect x="2.5" y="5.5" width="15" height="10" rx="2"/><path d="M2.5 9h15"/><path d="M13 12.5h2"/>',
   income: '<path d="M10 3.5v13"/><path d="M13.2 6.2A3 3 0 0 0 10.4 4.5h-.8a2.6 2.6 0 0 0-.4 5.2l1.6.3a2.6 2.6 0 0 1-.4 5.2h-.8a3 3 0 0 1-2.8-1.7"/>',
   more: '<circle cx="5" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1.3" fill="currentColor" stroke="none"/>',
   chevron: '<path d="M7.5 4.5 13 10l-5.5 5.5"/>',
@@ -873,18 +975,31 @@ function signInPrompt(what) {
  */
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
-  { id: 'bills', label: 'Bills', icon: 'bills', views: ['bills'] },
-  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'subscriptions', 'trends', 'review'] },
+  { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'bills'] },
+  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'category'] },
   { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
-  { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan'] },
+  { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan', 'subscriptions', 'trends'] },
 ];
 
-/** Sub-navigation for the two tabs that own more than one view. */
+/**
+ * Sub-navigation for the tabs that own more than one view.
+ *
+ * Spending is deliberately down to two. It carried four — Overview,
+ * Transactions, Recurring, Trends — and the overview itself opened on
+ * "Surplus on a slow stretch" over a committed/necessary/discretionary/
+ * irregular table, which is an accounting model, not a question anybody
+ * asks. What's left answers "what did we spend, and on what", with the two
+ * analytical screens moved to More where an occasional destination belongs.
+ */
 const SPENDING_TABS = [
   ['spending', 'Overview'],
   ['transactions', 'Transactions'],
-  ['subscriptions', 'Recurring'],
-  ['trends', 'Trends'],
+];
+
+/** The plan, and the bills it's mostly made of. */
+const BUDGET_TABS = [
+  ['budget', 'Budget'],
+  ['bills', 'Bills'],
 ];
 const INCOME_TABS = [
   ['income', 'Overview'],
@@ -899,7 +1014,7 @@ function uncategorizedCount() {
 
 function renderBottomNav() {
   const dots = {
-    bills: state.billsNeedingReview.length > 0,
+    budget: state.billsNeedingReview.length > 0,
     spending: uncategorizedCount() > 0,
   };
 
@@ -923,6 +1038,8 @@ function renderBottomNav() {
  */
 function renderMore() {
   const rows = [
+    ['subscriptions', 'Recurring & subscriptions', 'repeat', 'What renews, and what it costs per year'],
+    ['trends', 'Trends', 'trend', 'Category by category, month by month'],
     ['connect', 'Accounts & sync', 'bank', state.connectedItems.length
       ? `${state.connectedItems.length} connected` : 'No bank connected'],
     ['advisor', 'Advisor', 'sparkle', state.advisorNotes.length
@@ -1047,16 +1164,26 @@ function renderAlerts() {
 const CATEGORY_LIST_LIMIT = 5;
 
 function renderCategoryRows(categories, max) {
+  const counts = new Map();
+  for (const t of spendingIn(state.month)) {
+    const key = t.category || 'Uncategorized';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
   return categories.map(([name, amount]) => {
     const avg = trailingAverage(name);
     const delta = avg ? ((amount - avg) / avg) * 100 : 0;
     const showDelta = avg !== null && Math.abs(delta) > 15;
+    const n = counts.get(name) || 0;
+    // A button, not a div: "Groceries $612" is the start of a question, and
+    // the only answer is the transactions behind it.
     return `
-      <div class="row" data-category="${name}" style="display:block;">
+      <button class="row" data-category="${escapeHtml(name)}" style="display:block;width:100%;text-align:left;">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
-          <span class="row-title">${name}</span>
+          <span class="row-title">${name} <span class="row-chev">${icon('chevron', 14)}</span></span>
           <span class="row-amount">${moneyExact(amount)}</span>
         </div>
+        <div class="row-sub" style="margin-top:2px;">${n} transaction${n === 1 ? '' : 's'}</div>
         <div class="meter">
           <div class="meter-fill ${name === 'Uncategorized' ? 'quiet' : ''}" style="width:${Math.min(100, (amount / max) * 100)}%"></div>
         </div>
@@ -1064,9 +1191,57 @@ function renderCategoryRows(categories, max) {
           <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--accent)'};">
             ${delta > 0 ? '↑' : '↓'} ${Math.abs(Math.round(delta))}% vs recent average
           </div>` : ''}
-      </div>
+      </button>
     `;
   }).join('');
+}
+
+/**
+ * The transactions behind one category, for one month.
+ *
+ * "Where it went" was a wall of totals with nothing underneath it: seeing
+ * $612 of Groceries and being unable to ask which charges those were is the
+ * point at which people stop believing the number. Reached by tapping a
+ * category anywhere it appears, and it goes back where it came from.
+ */
+function renderCategoryDetail() {
+  const name = state.category;
+  const txns = spendingIn(state.month)
+    .filter((t) => (t.category || 'Uncategorized') === name)
+    .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
+
+  const total = txns.reduce((s, t) => s + t.amount, 0);
+  const avg = trailingAverage(name);
+
+  // Repeat payees, so "why is this so high" has an answer without arithmetic.
+  const byPayee = new Map();
+  for (const t of txns) byPayee.set(t.payee, (byPayee.get(t.payee) || 0) + t.amount);
+  const topPayees = [...byPayee.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  return `
+    ${renderMonthPicker()}
+
+    <div class="hero hero-sm">
+      <div class="hero-label">${escapeHtml(name)}</div>
+      <div class="hero-value">${moneyExact(total)}</div>
+      <div class="hero-note">
+        ${txns.length} transaction${txns.length === 1 ? '' : 's'} in ${monthLabel(state.month)}${avg !== null
+          ? ` · ${money(avg)} in a typical recent month` : ''}
+      </div>
+      ${topPayees.length > 1 ? `
+        <div class="hero-foot">
+          ${topPayees.map(([payee, amt]) => `<span><b>${money(amt)}</b> ${escapeHtml(payee)}</span>`).join('')}
+        </div>` : ''}
+    </div>
+
+    ${txns.length ? `
+      <div class="list tight" style="margin-top:14px;">${txns.map(renderTransactionRow).join('')}</div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing in this category',
+      body: `No ${name} spending posted in ${monthLabel(state.month)}.`,
+    })}
+  `;
 }
 
 function renderDashboard() {
@@ -1629,71 +1804,205 @@ function renderDebtComparison(c) {
 }
 
 // ---------------------------------------------------------------------------
-// Expenses
+// Budget — the bills and the necessities, in one place
 // ---------------------------------------------------------------------------
 
-function renderSpending() {
-  const p = state.picture;
-  const c = state.coverage;
-  const catMax = Math.max(...p.categories.map((x) => x.monthlyAverage), 1);
+/**
+ * What this month is supposed to cost.
+ *
+ * The two things a household has to cover before anything else: the bills
+ * with due dates, and the necessities without them — groceries, gas,
+ * utilities, pharmacy. Targets default to what was actually spent in prior
+ * months, so the tab is useful before anybody sets a single number, and each
+ * one can be overridden by tapping it.
+ */
+function renderBudget() {
+  const budget = buildMonthlyBudget({
+    transactions: state.transactions,
+    bills: state.bills,
+    month: state.month,
+    targets: state.budgetTargets,
+  });
+
+  const t = budget.totals;
+  const spentOfPlan = t.billsPaid + budget.necessities.reduce((s, l) => s + l.spent, 0);
+
+  const line = (l) => {
+    const editing = state.editingTarget === l.category;
+    const pct = l.planned ? Math.min(100, (l.spent / l.planned) * 100) : 0;
+
+    return `
+      <div class="row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+          <span class="row-title">${escapeHtml(l.category)}</span>
+          <span class="row-amount ${l.over ? 'negative' : ''}">
+            ${moneyExact(l.spent)}${l.planned !== null ? ` <span class="row-amount-sub">of ${money(l.planned)}</span>` : ''}
+          </span>
+        </div>
+        ${l.planned !== null ? `
+          <div class="meter">
+            <div class="meter-fill ${l.over ? 'warn' : ''}" style="width:${pct}%"></div>
+          </div>` : ''}
+        <div class="row-sub" style="margin-top:7px;display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <span>
+            ${l.planned === null
+              ? 'No target yet — not enough history to guess one'
+              : l.over
+                ? `${moneyExact(l.spent - l.planned)} over`
+                : `${moneyExact(l.remaining)} left`}
+            ${l.plannedSource === 'typical' ? ' · target from your own average' : ''}
+          </span>
+          <span style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-outline" data-action="edit-target" data-category="${escapeHtml(l.category)}">
+              ${editing ? 'Cancel' : l.planned === null ? 'Set target' : 'Edit'}
+            </button>
+            <button class="btn btn-sm btn-outline" data-category="${escapeHtml(l.category)}">Transactions</button>
+          </span>
+        </div>
+        ${editing ? `
+          <form class="field-inline" data-target-form="${escapeHtml(l.category)}" style="margin-top:9px;">
+            <input class="input" type="number" step="1" min="0" name="amount"
+              value="${l.planned ?? ''}" placeholder="Monthly target" />
+            <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            ${l.plannedSource === 'set'
+              ? '<button class="btn btn-sm btn-outline" type="button" data-action="clear-target" data-category="' + escapeHtml(l.category) + '">Clear</button>'
+              : ''}
+          </form>` : ''}
+      </div>
+    `;
+  };
 
   return `
-    ${segmented(SPENDING_TABS)}
+    ${segmented(BUDGET_TABS)}
+    ${renderMonthPicker()}
+
+    ${state.budgetTargetsError ? `
+      <div class="banner banner-warn">
+        <div class="banner-body">${escapeHtml(state.budgetTargetsError)}</div>
+      </div>` : ''}
 
     <div class="hero">
-      <div class="hero-label">Surplus on a slow stretch</div>
-      <div class="hero-value ${c.status === 'covered' ? '' : c.status === 'tight' ? '' : 'bad'}">
-        ${money(c.fullSurplus)}
+      <div class="hero-label">The plan for ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(t.planned)}</div>
+      <div class="hero-note">
+        ${moneyExact(t.billsPlanned)} in bills and ${moneyExact(t.necessitiesPlanned)} in necessities.
+        ${t.remaining > 0 ? `${moneyExact(t.remaining)} of it still has to go out.` : 'All of it is covered.'}
       </div>
-      <div class="hero-note">${c.message}</div>
       <div class="hero-foot">
-        <span><b>${money(p.trueMonthlyCost)}</b> true monthly cost</span>
-        <span><b>${money(p.survivalMonthlyCost)}</b> survival cost</span>
+        <span><b>${money(spentOfPlan)}</b> spent on it so far</span>
+        <span><b>${money(t.remaining)}</b> still to go</span>
       </div>
     </div>
 
-    ${section('What the money is doing', `
-      <div class="kv">
-        <div class="kv-row"><span class="kv-label">Committed</span><span>${moneyExact(p.monthly.committed)}</span></div>
-        <div class="kv-row"><span class="kv-label">Necessary</span><span>${moneyExact(p.monthly.necessary)}</span></div>
-        <div class="kv-row"><span class="kv-label">Discretionary</span><span>${moneyExact(p.monthly.discretionary)}</span></div>
-        <div class="kv-row"><span class="kv-label">Irregular (spread)</span><span>${moneyExact(p.monthly.irregular)}</span></div>
+    ${section('Bills', budget.bills.length ? `
+      <div class="list">
+        ${budget.bills.map((b) => row({
+          avatar: b.name,
+          title: escapeHtml(b.name),
+          chips: b.paid ? '<span class="chip chip-ok">paid</span>' : '',
+          sub: `Due ${new Date(`${b.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${b.category ?? 'Uncategorized'}`,
+          amount: moneyExact(b.amount),
+        })).join('')}
+      </div>
+      <div class="kv" style="margin-top:10px;">
         <div class="kv-row total">
-          <span class="kv-label">True monthly cost</span><span>${moneyExact(p.trueMonthlyCost)}</span>
+          <span class="kv-label">Due this month</span><span>${moneyExact(t.billsPlanned)}</span>
         </div>
       </div>
+    ` : emptyState({
+      iconName: 'bills',
+      title: 'No bills due this month',
+      body: state.session
+        ? 'Track one from the Bills tab, or accept one of the recurring charges found in your transactions.'
+        : 'Sign in to track bills.',
+      action: '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
+    }), {
+      sub: 'Known payee, known due date',
+      action: '<button class="section-action" data-view="bills">All bills</button>',
+    })}
 
+    ${section('Necessities', budget.necessities.length ? `
+      <div class="list tight">${budget.necessities.map(line).join('')}</div>
       <div class="note" style="margin-top:10px;">
-        <strong>Survival cost is ${moneyExact(p.survivalMonthlyCost)}.</strong>
-        That's what an emergency fund should cover — necessities only. Dining out and
-        shopping stop in a real emergency, so sizing on total spending inflates the
-        target and makes it feel unreachable.
+        <strong>Targets start from your own spending.</strong>
+        Each one is the average of recent months, rounded — change any of them and
+        it's saved for the whole household, so both of you are planning against the
+        same numbers. Categories a bill already covers aren't repeated here, so
+        nothing is counted twice.
       </div>
-    `, { sub: `Based on ${p.monthsAnalyzed} complete months` })}
+    ` : emptyState({
+      iconName: 'list',
+      title: 'No necessity spending yet',
+      body: 'Groceries, gas, utilities and pharmacy show up here once they post.',
+    }), { sub: 'No due date, but the money goes out anyway' })}
 
-    ${section('By category', `
-      <div class="list tight">
-        ${p.categories.map((cat) => `
-          <div class="row" style="display:block;">
-            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
-              <span class="row-title">
-                ${cat.category}
-                <span class="chip">${cat.bucket}</span>
-                ${cat.reclassified ? '<span class="chip chip-outline">reclassified</span>' : ''}
-              </span>
-              <span class="row-amount">${moneyExact(cat.monthlyAverage)}</span>
-            </div>
-            <div class="meter">
-              <div class="meter-fill" style="width:${Math.min(100, (cat.monthlyAverage / catMax) * 100)}%"></div>
-            </div>
-          </div>`).join('')}
+    ${t.otherSpent > 0 ? `
+      <div class="prose-sm" style="margin-top:4px;">
+        ${moneyExact(t.otherSpent)} more went to everything else this month — dining out,
+        shopping, the discretionary side. That's on the Spending tab, not budgeted here.
+      </div>` : ''}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the money went this month. That's the whole screen.
+ *
+ * It used to lead with a surplus figure and a four-bucket accounting table
+ * built from a multi-month model, which meant the "Spending" tab answered a
+ * question about the emergency fund. The bucket model still exists and still
+ * feeds safe-to-spend and the plan — it just isn't what someone opening
+ * Spending is looking for.
+ */
+function renderSpending() {
+  const txns = spendingIn(state.month);
+  const total = txns.reduce((s, t) => s + t.amount, 0);
+  const categories = byCategory(txns);
+  const max = categories.length ? categories[0][1] : 1;
+  const reviewCount = uncategorizedCount();
+
+  const prior = state.months.filter((m) => m < state.month).slice(-3)
+    .map((m) => spendingIn(m).reduce((s, t) => s + t.amount, 0))
+    .filter((v) => v > 0);
+  const priorAvg = prior.length >= MIN_MONTHS_FOR_AVERAGE
+    ? prior.reduce((a, b) => a + b, 0) / prior.length
+    : null;
+
+  return `
+    ${segmented(SPENDING_TABS)}
+    ${renderMonthPicker()}
+
+    <div class="hero">
+      <div class="hero-label">Spent in ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(total)}</div>
+      <div class="hero-note">
+        Across ${txns.length} transaction${txns.length === 1 ? '' : 's'}${priorAvg !== null
+          ? ` · ${money(priorAvg)} in a typical recent month` : ''}
       </div>
-      <div class="prose-sm" style="margin-top:10px;">
-        "Reclassified" means the spending pattern overrode the category label — an
-        annually-paid premium is spread across the year rather than treated as a
-        fixed monthly cost.
-      </div>
-    `, { sub: 'Monthly average, not this month alone' })}
+    </div>
+
+    ${reviewCount ? `
+      <div class="banner" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
+          Setting one teaches that payee permanently.
+        </div>
+        <button class="linkbtn" data-view="review">Review</button>
+      </div>` : ''}
+
+    ${section('Where it went', categories.length ? `
+      <div class="list tight">${renderCategoryRows(categories, max)}</div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing posted yet',
+      body: 'No spending has cleared for this month.',
+    }), {
+      sub: 'Tap any category to see the transactions in it',
+      action: '<button class="section-action" data-view="transactions">All transactions</button>',
+    })}
   `;
 }
 
@@ -2277,10 +2586,11 @@ function renderBillSuggestions() {
  * the entire reason this exists rather than waiting for the bank feed.
  */
 function renderBills() {
-  if (!state.session) return signInPrompt('see bills');
+  if (!state.session) return `${segmented(BUDGET_TABS)}${signInPrompt('see bills')}`;
 
   if (state.billsError) {
-    return `<div class="banner banner-warn"><div class="banner-body">${state.billsError}</div></div>`;
+    return `${segmented(BUDGET_TABS)}
+      <div class="banner banner-warn"><div class="banner-body">${state.billsError}</div></div>`;
   }
 
   const review = state.billsNeedingReview;
@@ -2292,6 +2602,7 @@ function renderBills() {
   );
 
   return `
+    ${segmented(BUDGET_TABS)}
     ${bills.length ? `
       <div class="hero">
         <div class="hero-label">Due this month</div>
@@ -2523,11 +2834,13 @@ function renderInstallHint() {
  */
 const VIEW_HEADERS = {
   dashboard: () => ['Home', state.session ? 'Your household, right now' : 'Demo numbers — nothing here is real yet'],
-  bills: () => ['Bills', 'What you owe, and when it has to be covered'],
+  budget: () => ['Budget', 'Bills and necessities, and what\'s left of them'],
+  bills: () => ['Budget', 'What you owe, and when it has to be covered'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
-  subscriptions: () => ['Spending', 'What recurs, and what it costs per year'],
-  trends: () => ['Spending', 'How each category moves month to month'],
+  category: () => ['Spending', state.category ? `Every ${state.category} transaction` : ''],
+  subscriptions: () => ['Recurring', 'What renews, and what it costs per year'],
+  trends: () => ['Trends', 'How each category moves month to month'],
   review: () => ['Spending', 'Transactions the categorizer wasn\'t sure about'],
   income: () => ['Income', 'What lands, and when'],
   paycheck: () => ['Income', 'How to split the next check'],
@@ -2541,7 +2854,8 @@ const VIEW_HEADERS = {
 
 function renderAppBar() {
   const [title, sub] = (VIEW_HEADERS[state.view] ?? (() => ['Family Budget', '']))();
-  const showBack = state.view === 'review' || state.view === 'plan';
+  const showBack = state.view === 'review' || state.view === 'plan' || state.view === 'category';
+  const backTo = { review: 'transactions', category: state.categoryFrom ?? 'spending' }[state.view] ?? 'more';
 
   return `
     <header class="app-bar">
@@ -2550,7 +2864,7 @@ function renderAppBar() {
         ${sub ? `<div class="app-bar-sub">${sub}</div>` : ''}
       </div>
       ${showBack
-        ? `<button class="icon-btn" data-view="${state.view === 'review' ? 'transactions' : 'more'}" aria-label="Back">${icon('back', 17)}</button>`
+        ? `<button class="icon-btn" data-view="${backTo}" aria-label="Back">${icon('back', 17)}</button>`
         : `<button class="icon-btn" data-view="more" aria-label="Settings">${icon('settings', 17)}</button>`}
     </header>
   `;
@@ -2602,7 +2916,9 @@ function render() {
     dashboard: renderDashboard,
     paycheck: renderPaycheck,
     plan: renderPlan,
+    budget: renderBudget,
     spending: renderSpending,
+    category: renderCategoryDetail,
     subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
@@ -2661,7 +2977,7 @@ function render() {
       }
       // Same reasoning as Shifts: Bills needs a session and a household, and
       // reaching it directly (already signed in, or a second visit) is normal.
-      if (state.view === 'bills' && !state.billsAttempted) {
+      if ((state.view === 'bills' || state.view === 'budget') && !state.billsAttempted) {
         state.billsAttempted = true;
         const haveSession = state.connectAttempted;
         state.connectAttempted = true;
@@ -2695,6 +3011,54 @@ function render() {
           .then(render);
       }
       render(); // shows the view immediately either way
+    }),
+  );
+
+  // Tapping a category anywhere — the dashboard's "Where it went", the
+  // Spending overview, a Budget line — opens the transactions behind it, and
+  // remembers where it was tapped so Back goes there rather than to a fixed
+  // screen the user may never have been on.
+  app.querySelectorAll('[data-category]:not([data-action])').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      state.categoryFrom = state.view;
+      state.category = btn.dataset.category;
+      state.view = 'category';
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-action="edit-target"]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const cat = btn.dataset.category;
+      state.editingTarget = state.editingTarget === cat ? null : cat;
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-action="clear-target"]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      state.editingTarget = null;
+      const done = setBudgetTarget(btn.dataset.category, null);
+      render();
+      await done;
+      render(); // shows the failure if the write didn't land
+    }),
+  );
+
+  app.querySelectorAll('[data-target-form]').forEach((form) =>
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const amount = Number(form.amount.value);
+      state.editingTarget = null;
+      // An empty or nonsense entry clears the override rather than storing a
+      // NaN target that would make every derived figure on the tab garbage.
+      const done = setBudgetTarget(
+        form.dataset.targetForm,
+        Number.isFinite(amount) && amount > 0 ? amount : null,
+      );
+      render();
+      await done;
+      render();
     }),
   );
 
@@ -2743,6 +3107,10 @@ function render() {
         }
         await refreshConnection();
         await refreshShifts();
+        // Bills and the household's budget targets, so signing in lands on a
+        // populated Budget tab rather than one that looks empty until reload.
+        state.billsAttempted = true;
+        await refreshBills();
       } catch (e) {
         state.authError = e.message;
       }

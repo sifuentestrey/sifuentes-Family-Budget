@@ -17,7 +17,7 @@ The UI should feel like a calm financial control center, not an accounting sprea
 Mobile bottom navigation:
 
 1. Home
-2. Bills
+2. Budget
 3. Spending
 4. Income
 5. More
@@ -25,8 +25,8 @@ Mobile bottom navigation:
 Desktop uses the same five sections in a compact left rail.
 
 A tab that owns more than one screen carries a **segmented control** at the
-top — Spending is Overview / Transactions / Recurring / Trends, Income is
-Overview / Paycheck / Shifts / Paystubs. Siblings are one tap apart and
+top — Budget is Budget / Bills, Spending is Overview / Transactions, Income
+is Overview / Paycheck / Shifts / Paystubs. Siblings are one tap apart and
 visibly part of the same place.
 
 "More" is settings and the genuinely peripheral, not an overflow list. An
@@ -86,6 +86,30 @@ Do not expose the full calculation unless the user taps the card.
 - Rounded corners around 16–20px.
 - Buttons are compact and calm; avoid oversized marketing-style CTAs.
 
+## Budget screen
+
+The plan for the month, in the two parts a household actually reasons about:
+
+- **Bills** — known payee, known due date. Tracked bill records only.
+- **Necessities** — groceries, gas, utilities, pharmacy. No due date, but the
+  money goes out anyway. Each line shows spent against a target, and the
+  target defaults to what this household actually spent in prior months, so
+  the screen is useful before anybody has set a single number. Tap Edit to
+  override one — targets are saved per household in `budget_targets`
+  (migration 0018), behind the same RLS as everything else, so both people
+  plan against the same numbers rather than each phone holding its own.
+
+A category a tracked bill already covers is deliberately not repeated as a
+necessity line — showing rent as both a bill and a category makes the month
+look worse by exactly the rent. Subscriptions, Fitness and Savings are left
+out too: the bucket model calls them committed because they charge the same
+amount monthly, which is a statement about rhythm, not importance.
+
+Discretionary spending is not budgeted here. It gets one line at the bottom
+pointing at Spending.
+
+See `src/engine/budget/monthly-budget.js`.
+
 ## Bills screen
 
 Top summary:
@@ -109,11 +133,19 @@ Each item shows a tiny source badge — `Email`, `Bank`, `Manual`.
 
 ## Spending screen
 
-Show category totals and trend first. Transactions are secondary.
+One question: what did we spend, and on what.
 
 `Spent this month  $3,842`
 
-Then 4–6 category cards. Tap a category to reveal transactions.
+Then the category cards, largest first. **Every category is tappable** and
+opens the transactions behind it — a total nobody can drill into is a total
+nobody believes. The same is true of "Where it went" on Home.
+
+This screen used to open on a surplus figure over a
+committed/necessary/discretionary/irregular table. That model still exists
+and still feeds safe-to-spend, the buffer target and the plan — it just isn't
+what someone opening Spending is asking about. Recurring and Trends moved to
+More for the same reason: real screens, occasional destinations.
 
 ## Income screen
 

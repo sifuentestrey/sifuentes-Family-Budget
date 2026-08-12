@@ -368,3 +368,22 @@ test('edge function JWT settings are pinned in config, not the dashboard', () =>
   assert.match(config, /\[functions\.sync-transactions\][\s\S]*?verify_jwt = false/);
   assert.match(config, /\[functions\.plaid-exchange\][\s\S]*?verify_jwt = true/);
 });
+
+// ---------------------------------------------------------------------------
+// Shared budget targets
+// ---------------------------------------------------------------------------
+
+test('budget targets are household-scoped behind RLS', () => {
+  // These moved out of one person's localStorage so both people in the
+  // household plan against the same numbers. A shared table with the scoping
+  // wrong would share them with every other household instead.
+  const sql = readFileSync(join(ROOT, 'supabase/migrations/0018_budget_targets.sql'), 'utf8');
+
+  assert.match(sql, /household_id\s+uuid not null references households\(id\)/i);
+  assert.match(sql, /alter table budget_targets\s+enable row level security/i);
+  assert.match(sql, /using \(household_id in \(select current_household_ids\(\)\)\)/i);
+  assert.match(sql, /with check \(household_id in \(select current_household_ids\(\)\)\)/i);
+  // One row per household per category: editing a target must replace it,
+  // not accumulate a second row the app would then have to pick between.
+  assert.match(sql, /primary key \(household_id, category\)/i);
+});
