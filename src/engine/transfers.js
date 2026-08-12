@@ -17,6 +17,8 @@
  * window.
  */
 
+import { isSplitParent } from './split.js';
+
 const DEFAULT_WINDOW_DAYS = 4;
 /** Tolerance for amount matching, in dollars. Transfers are exact; this guards float noise. */
 const AMOUNT_EPSILON = 0.005;
@@ -39,7 +41,54 @@ const TRANSFER_HINTS = [
   'to savings', 'from savings', 'to checking', 'from checking',
 ];
 
+/**
+ * Plaid's own verdict, which is better than any keyword list we can write.
+ *
+ * TRANSFER_IN / TRANSFER_OUT covers the case that started this: money moved
+ * to a brokerage or retirement account. That is not spending — it is the
+ * household's own money changing shelves — but with the counterpart account
+ * unlinked there is nothing to pair it with, no keyword in "FIDELITY", and so
+ * it was landing in the spending total. Worse, it then got a category from
+ * whatever layer guessed hardest; the one that prompted this was filed under
+ * Dining Out.
+ *
+ * Credit card payments are classified by Plaid under LOAN_PAYMENTS rather
+ * than TRANSFER_OUT, so that one detail is named explicitly. The rest of
+ * LOAN_PAYMENTS — a car loan, a student loan, a mortgage — genuinely is
+ * money leaving the household, so it must not be swept in here.
+ */
+const PFC_TRANSFER_PRIMARIES = new Set(['TRANSFER_IN', 'TRANSFER_OUT']);
+const PFC_TRANSFER_DETAILED = new Set([
+  'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+  'TRANSFER_OUT_ACCOUNT_TRANSFER',
+  'TRANSFER_IN_ACCOUNT_TRANSFER',
+  'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS',
+  'TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS',
+  'TRANSFER_OUT_SAVINGS',
+  'TRANSFER_IN_SAVINGS',
+]);
+
+export function isPlaidTransfer(txn) {
+  // Nested in memory, two flat columns once read back from the database.
+  const pfc = txn?.plaidCategory
+    ?? (txn?.pfc_primary || txn?.pfc_detailed
+      ? { primary: txn.pfc_primary ?? null, detailed: txn.pfc_detailed ?? null }
+      : null);
+  if (!pfc) return false;
+
+  // Outflows only. A deposit Plaid labels TRANSFER_IN is very often a paycheck
+  // routed through a payroll provider, and marking that a transfer would erase
+  // the household's income — the single worst thing this file could do. The
+  // deposit side of a genuine transfer is already caught by pairing against
+  // its outflow, so nothing is lost by declining to guess here.
+  if (!(txn.amount > 0)) return false;
+
+  if (pfc.detailed && PFC_TRANSFER_DETAILED.has(pfc.detailed)) return true;
+  return Boolean(pfc.primary && PFC_TRANSFER_PRIMARIES.has(pfc.primary));
+}
+
 function looksLikeTransfer(txn) {
+  if (isPlaidTransfer(txn)) return true;
   const text = `${txn.payee} ${txn.raw_description}`.toLowerCase();
   return TRANSFER_HINTS.some((hint) => text.includes(hint));
 }
@@ -133,7 +182,7 @@ export function totalSpending(transactions) {
         !t.is_income &&
         !t.pending &&
         t.amount > 0 &&
-        !parentIds.has(t.plaid_transaction_id ?? t.id),
+        !isSplitParent(t, parentIds),
     )
     .reduce((sum, t) => sum + t.amount, 0);
 }

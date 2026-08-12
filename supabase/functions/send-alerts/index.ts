@@ -24,6 +24,68 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { buildAlerts, composeAlertEmail } from '../_shared/alerts.js';
 import { rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
+import { sendPush } from '../_shared/web-push.ts';
+
+/**
+ * The VAPID public key. Public by design — it ships in the browser too, and
+ * the pair is only useful with the private half, which lives in Vault.
+ */
+const VAPID_PUBLIC_KEY = 'BOvSQ583cM8oj9s4nXj6eEahV8T8Imr9s7ZKww39GIs3wZJwwkC26IsMWiUJwUCML-KCebPpgto0Qk6LOColxww';
+
+/**
+ * Push the urgent alerts to every device the household has registered.
+ *
+ * Only the urgent ones. Email can carry the full digest because it waits to
+ * be read; a notification interrupts, and a household that gets buzzed about
+ * a subscription price rise stops reading the one that says rent is due
+ * tomorrow and the account is short.
+ */
+async function pushToHousehold(admin: SupabaseClient, householdId: string, alerts: any[]) {
+  if (!alerts.length) return { pushed: 0 };
+
+  const { data: privateKey } = await admin.rpc('read_vault_secret', { secret_name: 'vapid_private_key' });
+  if (typeof privateKey !== 'string' || !privateKey) return { pushed: 0, error: 'no VAPID key' };
+
+  const { data: subs } = await admin
+    .from('push_subscriptions')
+    .select('endpoint, p256dh, auth')
+    .eq('household_id', householdId)
+    .is('expired_at', null);
+  if (!subs?.length) return { pushed: 0 };
+
+  // One notification carrying the most urgent item, not one per alert. Three
+  // notifications arriving together is how notifications get turned off.
+  const lead = alerts[0];
+  const payload = {
+    title: lead.title,
+    body: alerts.length > 1 ? `${lead.body} (+${alerts.length - 1} more)` : lead.body,
+    tag: lead.key,
+    url: './index.html',
+  };
+
+  let pushed = 0;
+  for (const sub of subs) {
+    const result = await sendPush(sub, payload, {
+      publicKey: VAPID_PUBLIC_KEY,
+      privateKey,
+      subject: `mailto:${Deno.env.get('ALERT_FROM_EMAIL')?.trim() || 'alerts@familybudget.app'}`,
+    });
+
+    if (result.ok) {
+      pushed += 1;
+      await admin.from('push_subscriptions')
+        .update({ last_sent_at: new Date().toISOString() })
+        .eq('endpoint', sub.endpoint);
+    } else if (result.gone) {
+      // The device is gone. Retrying it nightly forever is how a log fills
+      // with errors nobody reads.
+      await admin.from('push_subscriptions')
+        .update({ expired_at: new Date().toISOString() })
+        .eq('endpoint', sub.endpoint);
+    }
+  }
+  return { pushed };
+}
 
 function secretsMatch(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -74,11 +136,16 @@ Deno.serve(async (req) => {
 
       const bills = (billRows ?? []).map(rowToBill);
       const dismissed = new Set((sentRows ?? []).map((r: any) => r.alert_key));
-      const { toEmail } = buildAlerts({ bills, dismissed });
+      const { toEmail, urgent } = buildAlerts({ bills, dismissed });
+
+      // Push first, and independently of email: a phone in a pocket is the
+      // point of an urgent alert, and it must not be skipped because the
+      // email provider is misconfigured or the digest happens to be empty.
+      const push = await pushToHousehold(admin, household.id, urgent ?? []);
 
       const email = composeAlertEmail(toEmail);
       if (!email) {
-        results.push({ householdId: household.id, sent: 0 });
+        results.push({ householdId: household.id, sent: 0, ...push });
         continue;
       }
 
@@ -113,7 +180,9 @@ Deno.serve(async (req) => {
       );
       if (upsertError) throw new Error(`could not record sent alerts: ${upsertError.message}`);
 
-      results.push({ householdId: household.id, sent: toEmail.length, recipients: recipients.length });
+      results.push({
+        householdId: household.id, sent: toEmail.length, recipients: recipients.length, ...push,
+      });
     } catch (error: any) {
       results.push({ householdId: household.id, error: error.message });
     }

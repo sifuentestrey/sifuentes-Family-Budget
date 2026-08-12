@@ -144,7 +144,7 @@ export async function listTransactions() {
       id, plaid_transaction_id, account_id, posted_date, amount,
       raw_description, payee, categorized_by, is_transfer, transfer_pair_id,
       is_income, manually_categorized, parent_transaction_id, pending,
-      logo_url, merchant_website,
+      logo_url, merchant_website, pfc_primary, pfc_detailed,
       categories(name)
     `)
     .order('posted_date', { ascending: false });
@@ -190,6 +190,121 @@ export async function createInvite(email) {
 
 export async function revokeInvite(id) {
   const { error } = await supabase.from('household_invites').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * The VAPID public key. Shipped to the browser on purpose — it is the half
+ * of the pair that identifies this app to a push service, and it is useless
+ * without the private half, which lives in Supabase Vault.
+ */
+const VAPID_PUBLIC_KEY = 'BOvSQ583cM8oj9s4nXj6eEahV8T8Imr9s7ZKww39GIs3wZJwwkC26IsMWiUJwUCML-KCebPpgto0Qk6LOColxww';
+
+function urlBase64ToUint8Array(value) {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/')
+    .padEnd(value.length + ((4 - (value.length % 4)) % 4), '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/**
+ * Turn on reminders for this device.
+ *
+ * Deliberately explicit rather than asked for on first launch: a permission
+ * prompt someone hasn't asked for is the one they deny, and a denial is
+ * sticky — it cannot be asked again from the app.
+ *
+ * A subscription is per browser, so the phone and the laptop are two rows and
+ * silencing one leaves the other alone.
+ */
+export async function enablePushNotifications(householdId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('This browser cannot show notifications. On iPhone, add the app to your home screen first.');
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error('Notifications are blocked for this app. Turn them back on in your browser settings.');
+  }
+
+  const registration = await navigator.serviceWorker.ready;
+  const existing = await registration.pushManager.getSubscription();
+  const subscription = existing ?? await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+  });
+
+  const raw = subscription.toJSON();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('push_subscriptions').upsert({
+    endpoint: raw.endpoint,
+    household_id: householdId,
+    user_id: user?.id,
+    p256dh: raw.keys.p256dh,
+    auth: raw.keys.auth,
+    user_agent: navigator.userAgent.slice(0, 200),
+    // Re-subscribing after a device was marked dead brings it back.
+    expired_at: null,
+  }, { onConflict: 'endpoint' });
+  if (error) throw error;
+}
+
+/** Turn them off for this device, and forget it server-side. */
+export async function disablePushNotifications() {
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+
+  const { endpoint } = subscription.toJSON();
+  await subscription.unsubscribe();
+  const { error } = await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+  if (error) throw error;
+}
+
+/** Whether this browser is currently subscribed. */
+export async function pushStatus() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { supported: false, enabled: false, blocked: false };
+  }
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  return {
+    supported: true,
+    enabled: Boolean(subscription),
+    blocked: Notification.permission === 'denied',
+  };
+}
+
+/**
+ * Save a split: write the child rows, and let the parent fall out of every
+ * total by virtue of having children.
+ *
+ * The parent row is deliberately left untouched. It is still the real charge
+ * the bank shows, and keeping it means a split can be undone by deleting the
+ * children — no reconstruction, nothing lost.
+ */
+export async function saveSplit(children) {
+  const { data: categories, error: catError } = await supabase
+    .from('categories')
+    .select('id, name');
+  if (catError) throw catError;
+  const idByName = new Map((categories ?? []).map((c) => [c.name, c.id]));
+
+  const rows = children.map(({ category, ...child }) => ({
+    ...child,
+    category_id: category ? idByName.get(category) ?? null : null,
+  }));
+
+  const { error } = await supabase.from('transactions').insert(rows);
+  if (error) throw error;
+}
+
+/** Undo a split: the children go, the original charge stays as it was. */
+export async function unsplit(parentId) {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('parent_transaction_id', parentId);
   if (error) throw error;
 }
 

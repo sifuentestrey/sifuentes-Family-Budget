@@ -74,6 +74,21 @@ export function matchKeywordRules(payee, rules) {
  *
  * @param {{primary?: string, detailed?: string}|null} pfc
  */
+/**
+ * Plaid's category, whichever shape the caller has.
+ *
+ * In memory it is a nested `plaidCategory`; a row read back from the database
+ * carries the two flat columns instead. Both are read here so the same layer
+ * works at insert time and on every later reprocess.
+ */
+export function plaidCategoryOf(txn) {
+  if (txn?.plaidCategory) return txn.plaidCategory;
+  if (txn?.pfc_primary || txn?.pfc_detailed) {
+    return { primary: txn.pfc_primary ?? null, detailed: txn.pfc_detailed ?? null };
+  }
+  return null;
+}
+
 export function matchPlaidCategory(pfc) {
   if (!pfc) return null;
   if (pfc.detailed && PFC_DETAILED_MAP[pfc.detailed]) return PFC_DETAILED_MAP[pfc.detailed];
@@ -109,7 +124,7 @@ export function categorizeOne(txn, ctx) {
   if (seedHit) return { category: seedHit, by: 'rule' };
 
   // 4. Plaid's ML category.
-  const pfcHit = matchPlaidCategory(txn.plaidCategory);
+  const pfcHit = matchPlaidCategory(plaidCategoryOf(txn));
   if (pfcHit) return { category: pfcHit, by: 'plaid_pfc' };
 
   // 5. Give up — for now. categorizeBatch gets one more go at these, from
@@ -166,6 +181,12 @@ export function normalizePlaidTransaction(raw, accountId) {
     raw_description: raw.original_description || raw.name || '',
     payee: cleanPayee(raw.name, raw.merchant_name),
     plaidCategory: raw.personal_finance_category || null,
+    // Also as flat columns, because plaidCategory is not one and the sync
+    // strips it before the upsert. Everything downstream re-reads the row
+    // from the database, so without these Plaid's opinion is lost the moment
+    // it arrives — see migration 0021.
+    pfc_primary: raw.personal_finance_category?.primary ?? null,
+    pfc_detailed: raw.personal_finance_category?.detailed ?? null,
     // Plaid returns a merchant logo and website for most recognisable
     // merchants. Stored as URLs, never copied: a list of charges that shows
     // the actual logos is scannable in a way a column of initials is not,

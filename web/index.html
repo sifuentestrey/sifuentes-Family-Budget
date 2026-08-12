@@ -601,6 +601,37 @@
   .cat-body > * + * { border-top: 1px solid var(--border); }
   .cat-body .row { background: transparent; padding: 8px 13px 8px 11px; }
 
+  /* --- Splitting a charge ----------------------------------------------- */
+
+  /* The parts of an already-split charge, shown under it in the list. */
+  .split-parts {
+    display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 4px;
+    font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .split-parts b { color: var(--text-2); font-weight: 700; }
+
+  /* A row holding an open editor is no longer one line, so stop centring the
+     avatar and the amount against the whole height of it. */
+  .row:has(.split-form) { align-items: flex-start; }
+  .row:has(.split-form) .row-end { padding-top: 2px; }
+
+  .split-form {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-top: 9px; padding: 10px; border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .split-row { display: flex; gap: 7px; align-items: center; }
+  .split-row .input { flex: 0 0 96px; }
+  .split-row .select { flex: 1; min-width: 0; }
+  .split-foot {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  /* The remainder is the whole point of the editor: it has to be obvious
+     whether the parts add up yet, without reading the numbers back. */
+  .split-foot .ok { color: var(--positive); font-weight: 700; }
+  .split-foot .off { color: var(--accent); font-weight: 700; }
+
   /* --- Forms ------------------------------------------------------------ */
 
   .form { display: flex; flex-direction: column; gap: 12px; }

@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v25';
+const CACHE_VERSION = 'v30';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -63,6 +63,11 @@ const SHELL_ASSETS = [
   // The month split into bills and everything after them: imported
   // statically by app.js, and it reaches into domain/bill-payment-match.js.
   '../src/engine/month-in-full.js',
+  // Splitting a charge, and the shared "is this a split parent" rule every
+  // total depends on. Imported statically by app.js.
+  '../src/engine/split.js',
+  // The year view, imported statically by app.js.
+  '../src/engine/year-in-review.js',
   // Bills-by-paycheck: same reason as the modules above — imported statically.
   '../src/engine/bill-paycheck-plan.js',
   // Bill suggestions from recurring charges: imported statically by app.js and

@@ -15,8 +15,10 @@ import {
   categorizeBatch,
   buildLearnedIndex,
   categorizationStats,
+  plaidCategoryOf,
 } from '../src/engine/categorize.js';
 import { detectTransfers, totalSpending } from '../src/engine/transfers.js';
+import { PFC_PRIMARY_MAP, PFC_DETAILED_MAP } from '../src/engine/seed-rules.js';
 import {
   detectIncomeStreams,
   markIncome,
@@ -343,4 +345,102 @@ test('spending total excludes transfers and income together', () => {
   // That is what a tool without transfer detection would over-report — here,
   // more than the household's entire monthly grocery and dining spend combined.
   assert.equal(Number((naive - correct).toFixed(2)), 3992.53);
+});
+
+// ---------------------------------------------------------------------------
+// Transfers Plaid names for us
+// ---------------------------------------------------------------------------
+
+test('money moved to a brokerage is a transfer, not spending', () => {
+  // The case that prompted this: a Fidelity transfer with no linked
+  // counterpart account, no transfer keyword in the payee, and so it landed
+  // in the spending total — and was then given a category by whatever layer
+  // guessed hardest. It showed up filed under Dining Out.
+  const rows = detectTransfers([
+    {
+      plaid_transaction_id: 'inv1', account_id: 'a1', posted_date: '2026-08-03',
+      amount: 500, payee: 'Fidelity', raw_description: 'FIDELITY INVESTMENTS',
+      plaidCategory: { primary: 'TRANSFER_OUT', detailed: 'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS' },
+    },
+  ]);
+  assert.equal(rows[0].is_transfer, true);
+  assert.equal(totalSpending(rows), 0);
+});
+
+test('a credit card payment is a transfer even when Plaid calls it a loan payment', () => {
+  const rows = detectTransfers([
+    {
+      plaid_transaction_id: 'cc1', account_id: 'a1', posted_date: '2026-08-05',
+      amount: 1450, payee: 'Chase', raw_description: 'CHASE CARD PMT',
+      plaidCategory: { primary: 'LOAN_PAYMENTS', detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' },
+    },
+  ]);
+  assert.equal(rows[0].is_transfer, true);
+});
+
+test('a real loan payment is still spending', () => {
+  // A car loan, a student loan and a mortgage are money genuinely leaving the
+  // household. Sweeping all of LOAN_PAYMENTS into transfers would hide them.
+  const rows = detectTransfers([
+    {
+      plaid_transaction_id: 'car1', account_id: 'a1', posted_date: '2026-08-05',
+      amount: 420, payee: 'Toyota Financial', raw_description: 'TOYOTA FINANCIAL AUTO',
+      plaidCategory: { primary: 'LOAN_PAYMENTS', detailed: 'LOAN_PAYMENTS_CAR_PAYMENT' },
+    },
+  ]);
+  assert.equal(rows[0].is_transfer, undefined);
+  assert.equal(totalSpending(rows), 420);
+});
+
+test('a deposit Plaid calls a transfer is left alone, so income survives', () => {
+  // Payroll from some providers arrives tagged TRANSFER_IN. Marking that a
+  // transfer would erase the household's income.
+  const rows = detectTransfers([
+    {
+      plaid_transaction_id: 'dep1', account_id: 'a1', posted_date: '2026-08-05',
+      amount: -2400, payee: 'Northstar Payroll', raw_description: 'DIRECT DEP',
+      plaidCategory: { primary: 'TRANSFER_IN', detailed: 'TRANSFER_IN_ACCOUNT_TRANSFER' },
+    },
+  ]);
+  assert.notEqual(rows[0].is_transfer, true);
+});
+
+test('a loan payment no longer defaults every loan to a car payment', () => {
+  // The primary-level map sent a mortgage, a student loan and a credit card
+  // payment all to 'Car Payment'.
+  assert.equal(PFC_PRIMARY_MAP.LOAN_PAYMENTS, undefined);
+  assert.equal(PFC_DETAILED_MAP.LOAN_PAYMENTS_CAR_PAYMENT, 'Car Payment');
+  assert.equal(PFC_DETAILED_MAP.LOAN_PAYMENTS_MORTGAGE_PAYMENT, 'Rent/Mortgage');
+});
+
+test("Plaid's category survives the round trip through the database", () => {
+  // The bug this guards: plaidCategory is not a column, so the sync strips it
+  // before the upsert — and everything downstream re-reads the row from the
+  // database. Without the flat columns, Plaid's opinion was gone by the time
+  // any layer looked for it, which silently disabled the whole plaid_pfc
+  // categorization layer server-side.
+  const normalized = normalizePlaidTransaction({
+    transaction_id: 't1', date: '2026-08-01', amount: 42, name: 'SOME SHOP',
+    personal_finance_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' },
+  }, 'acct');
+
+  assert.equal(normalized.pfc_primary, 'FOOD_AND_DRINK');
+  assert.equal(normalized.pfc_detailed, 'FOOD_AND_DRINK_GROCERIES');
+
+  // A row as it comes back from the database: flat columns, no plaidCategory.
+  const fromDb = { payee: 'SOME SHOP', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: 'FOOD_AND_DRINK_GROCERIES' };
+  assert.deepEqual(plaidCategoryOf(fromDb), { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' });
+
+  const [decided] = categorizeBatch([{ ...fromDb, manually_categorized: false }], { learned: new Map() });
+  assert.equal(decided.category, 'Groceries');
+  assert.equal(decided.categorized_by, 'plaid_pfc');
+});
+
+test('a stored brokerage transfer is recognised after a reprocess, not just at insert', () => {
+  const fromDb = {
+    plaid_transaction_id: 'inv1', account_id: 'a1', posted_date: '2026-08-03',
+    amount: 500, payee: 'Fidelity', raw_description: 'FIDELITY',
+    pfc_primary: 'TRANSFER_OUT', pfc_detailed: 'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS',
+  };
+  assert.equal(detectTransfers([fromDb])[0].is_transfer, true);
 });

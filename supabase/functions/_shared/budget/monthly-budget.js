@@ -25,6 +25,7 @@
  */
 
 import { bucketFor } from '../expenses.js';
+import { isSplitParent } from '../split.js';
 
 const round = (n) => Math.round(n * 100) / 100;
 
@@ -72,7 +73,7 @@ export function spendingOnly(transactions) {
   );
   return transactions.filter(
     (t) => !t.is_transfer && !t.is_income && !t.pending && t.amount > 0
-      && !parents.has(t.plaid_transaction_id),
+      && !isSplitParent(t, parents),
   );
 }
 

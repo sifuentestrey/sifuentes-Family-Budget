@@ -21,6 +21,8 @@ import { buildAlerts } from '../src/engine/alerts.js';
 import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
 import { buildMonthlyBudget } from '../src/engine/budget/monthly-budget.js';
 import { buildMonthInFull } from '../src/engine/month-in-full.js';
+import { isSplitParent, planSplit } from '../src/engine/split.js';
+import { buildYearInReview } from '../src/engine/year-in-review.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -415,8 +417,21 @@ const state = {
   // display preference for this device, so localStorage is the right home for
   // it (unlike budget targets, which are a shared agreement).
   showLogos: localStorage.getItem('showLogos') !== '0',
+  // Push reminders, per device. Read from the browser rather than stored,
+  // because the browser is the authority: permission can be revoked in
+  // settings without the app ever hearing about it.
+  push: { supported: false, enabled: false, blocked: false },
+  pushBusy: false,
+  pushError: null,
   // The one transaction whose category picker is open, if any.
   editingCategory: null,
+  // The transaction being split, the parts as typed so far, and the state of
+  // saving them. The draft lives here rather than in the DOM because every
+  // keystroke that changes the remainder re-renders the row.
+  splitting: null,
+  splitDraft: [],
+  splitBusy: false,
+  splitError: null,
   autoCategorizing: false,
   autoCategorizeResult: null,
   autoCategorizeError: null,
@@ -862,7 +877,7 @@ function spendingIn(month) {
       !t.is_income &&
       !t.pending &&
       t.amount > 0 &&
-      !parents.has(t.plaid_transaction_id),
+      !isSplitParent(t, parents),
   );
 }
 
@@ -1173,7 +1188,7 @@ function signInPrompt(what) {
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'bills'] },
-  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review'] },
+  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
   { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
   { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan', 'subscriptions', 'trends'] },
 ];
@@ -1189,8 +1204,9 @@ const NAV_GROUPS = [
  * analytical screens moved to More where an occasional destination belongs.
  */
 const SPENDING_TABS = [
-  ['spending', 'Overview'],
+  ['spending', 'Month'],
   ['transactions', 'Transactions'],
+  ['year', 'Year'],
 ];
 
 /** The plan, and the bills it's mostly made of. */
@@ -1251,6 +1267,36 @@ function renderMore() {
           iconName, title: label, sub, chevron: true,
           tag: 'button', attrs: `data-view="${id}"`,
         })).join('')}
+      </div>
+    `)}
+
+    ${section('Reminders', `
+      <div class="list">
+        ${row({
+          iconName: 'mail',
+          title: 'Bill reminders on this device',
+          sub: !state.session
+            ? 'Sign in to turn these on.'
+            : state.push.blocked
+              ? 'Blocked in your browser settings — they have to be turned back on there first.'
+              : !state.push.supported
+                ? 'This browser cannot show them. On iPhone, add the app to your home screen first.'
+                : state.push.enabled
+                  ? 'On — a bill due soon, or one you are short for, buzzes this device.'
+                  : 'Off — reminders only arrive by email at the daily sync.',
+          actions: state.session && state.push.supported && !state.push.blocked
+            ? `<button class="btn btn-sm ${state.push.enabled ? 'btn-outline' : 'btn-primary'}"
+                 data-action="toggle-push" ${state.pushBusy ? 'disabled' : ''}>
+                 ${state.pushBusy ? '…' : state.push.enabled ? 'Turn off' : 'Turn on'}
+               </button>`
+            : '',
+        })}
+      </div>
+      ${state.pushError ? `<div class="field-hint" style="color:var(--negative);margin-top:8px;">${escapeHtml(state.pushError)}</div>` : ''}
+      <div class="prose-sm" style="margin-top:9px;">
+        Each device is separate — turning these on here doesn't turn them on
+        anywhere else, and only the urgent ones are sent: a bill due within
+        days, or one the account can't cover.
       </div>
     `)}
 
@@ -1444,6 +1490,7 @@ function renderDashboard() {
 
   return `
     ${renderAlerts()}
+    ${renderHouseholdPrompt()}
 
     <div class="month-picker">
       <button class="chev-btn" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>${icon('back', 16)}</button>
@@ -1571,6 +1618,37 @@ function renderDashboard() {
 }
 
 /**
+ * "It's just you in here."
+ *
+ * The app is built end to end for two people — one household, shared budget
+ * targets, a plan both can see — and none of that does anything while there
+ * is one member. The invite form has always existed, three taps deep under
+ * Accounts & sync, which is not where anybody looks for it. So the app says
+ * so once, on the screen they actually open, and stops as soon as an invite
+ * is out.
+ */
+function renderHouseholdPrompt() {
+  if (!state.session) return '';
+  if (state.members.length !== 1) return '';
+  if (state.invites.length) return '';
+  if (localStorage.getItem('householdPromptDismissed') === '1') return '';
+
+  return `
+    <div class="banner banner-good">
+      <div class="banner-body">
+        <strong>It's just you in here.</strong>
+        Budget targets, bills and the plan are shared across the household —
+        invite the other half of it and you'll both see the same numbers.
+      </div>
+      <span style="display:flex;gap:12px;flex-shrink:0;">
+        <button class="linkbtn" data-view="connect">Invite</button>
+        <button class="linkbtn quiet" data-action="dismiss-household-prompt">Not now</button>
+      </span>
+    </div>
+  `;
+}
+
+/**
  * What's due before the household's next paycheck.
  *
  * Home's job is the one question the whole app exists for — how much can we
@@ -1670,16 +1748,34 @@ function renderTransactionRow(t) {
         ${t.category ? escapeHtml(t.category) : 'Add category'}
       </button>`;
 
+  const rowId = t.plaid_transaction_id ?? t.id;
+  const parts = splitChildrenOf(t);
+
   return `
-    <div class="row" data-id="${t.plaid_transaction_id}"
+    <div class="row" data-id="${rowId}"
       data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
       ${avatarFor(t.payee, logoForPayee(t.payee))}
       <div class="row-body">
         <div class="row-title">${t.payee}</div>
-        <div class="row-sub">${date} · ${category}</div>
-        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${t.plaid_transaction_id}">
+        <div class="row-sub">
+          ${date} · ${parts.length ? `<span class="chip">split ${parts.length} ways</span>` : category}
+        </div>
+        ${parts.length ? `
+          <div class="split-parts">
+            ${parts.map((c) => `
+              <span><b>${moneyExact(Math.abs(c.amount))}</b> ${escapeHtml(c.category ?? 'Uncategorized')}</span>
+            `).join('')}
+          </div>` : ''}
+        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${rowId}">
           ${categoryOptions(t.category)}
         </select>` : ''}
+        ${kind || !state.session ? '' : `
+          <div class="row-sub" style="margin-top:5px;">
+            <button class="cat-pill" data-split="${rowId}">
+              ${parts.length ? 'Change the split' : 'Split this'}
+            </button>
+          </div>`}
+        ${state.splitting === rowId ? renderSplitForm(t, parts) : ''}
       </div>
       <div class="row-end">
         <div class="row-amount ${t.amount < 0 ? 'income' : ''}">
@@ -1687,6 +1783,80 @@ function renderTransactionRow(t) {
         </div>
       </div>
     </div>
+  `;
+}
+
+/**
+ * What the remainder line says.
+ *
+ * "Adds up" is deliberately withheld while only one part carries an amount:
+ * the sum is right, but saving would be refused, and a green line followed by
+ * a refusal is worse than an amber line that says what's missing.
+ */
+function splitFootState(rows, total) {
+  const filled = rows.filter((r) => (Number(r.amount) || 0) > 0);
+  const assigned = filled.reduce((s, r) => s + Number(r.amount), 0);
+  const left = Math.round((total - assigned) * 100) / 100;
+
+  if (left > 0) return { ok: false, label: `${moneyExact(left)} left to assign` };
+  if (left < 0) return { ok: false, label: `${moneyExact(-left)} too much` };
+  if (filled.length < 2) return { ok: false, label: 'Give a second category some of it' };
+  return { ok: true, label: 'Adds up' };
+}
+
+/** The child rows of a split, if this transaction has been split. */
+function splitChildrenOf(txn) {
+  if (!txn.id) return [];
+  return state.transactions.filter((c) => c.parent_transaction_id === txn.id);
+}
+
+/**
+ * The split editor, inline under the charge it belongs to.
+ *
+ * Opens with the whole amount on one line, because the common move is "most
+ * of this was groceries, and $40 of it wasn't" — starting from the real total
+ * means the household adjusts one number rather than entering two.
+ */
+function renderSplitForm(txn, existing) {
+  const total = Math.abs(txn.amount);
+  const rows = state.splitDraft.length
+    ? state.splitDraft
+    : existing.length
+      ? existing.map((c) => ({ amount: Math.abs(c.amount).toFixed(2), category: c.category ?? '' }))
+      : [{ amount: total.toFixed(2), category: txn.category ?? '' }, { amount: '', category: '' }];
+
+  const state_ = splitFootState(rows, total);
+
+  return `
+    <form class="split-form" data-split-form="${txn.plaid_transaction_id ?? txn.id}"
+      data-total="${total.toFixed(2)}">
+      ${rows.map((r, i) => `
+        <div class="split-row">
+          <input class="input" type="number" step="0.01" min="0" name="amount"
+            value="${escapeHtml(String(r.amount))}" placeholder="0.00" inputmode="decimal" />
+          <select class="select" name="category">${categoryOptions(r.category)}</select>
+          ${rows.length > 2 ? `<button type="button" class="linkbtn quiet" data-split-remove="${i}">Remove</button>` : ''}
+        </div>
+      `).join('')}
+
+      <div class="split-foot">
+        <span class="${state_.ok ? 'ok' : 'off'}">${state_.label}</span>
+        <button type="button" class="linkbtn" data-split-add="1">Add a part</button>
+      </div>
+
+      ${state.splitError ? `<div class="field-hint" style="color:var(--negative);">${escapeHtml(state.splitError)}</div>` : ''}
+
+      <div class="row-actions">
+        <button type="submit" class="btn btn-sm btn-primary" ${state.splitBusy ? 'disabled' : ''}>
+          ${state.splitBusy ? 'Saving…' : 'Save split'}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline" data-split-cancel="1">Cancel</button>
+        ${existing.length ? `
+          <button type="button" class="btn btn-sm btn-danger" data-unsplit="${txn.id}" ${state.splitBusy ? 'disabled' : ''}>
+            Undo split
+          </button>` : ''}
+      </div>
+    </form>
   `;
 }
 
@@ -2161,11 +2331,15 @@ function renderBudget() {
       </div>
     ` : emptyState({
       iconName: 'bills',
-      title: 'No bills due this month',
+      title: 'No bills tracked yet',
       body: state.session
-        ? 'Track one from the Bills tab, or accept one of the recurring charges found in your transactions.'
+        ? billSuggestionCount()
+          ? `${billSuggestionCount()} recurring charges in your own transactions look like bills — rent, childcare, insurance, the utilities. Tracking them is what turns this half of the tab from a guess into your actual bills.`
+          : 'Nothing in your transactions repeats on a bill-shaped rhythm yet.'
         : 'Sign in to track bills.',
-      action: '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
+      action: state.session && billSuggestionCount()
+        ? `<button class="btn btn-primary" data-view="bills">See the ${billSuggestionCount()} found</button>`
+        : '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
     }), {
       sub: 'Known payee, known due date',
       action: '<button class="section-action" data-view="bills">All bills</button>',
@@ -2306,6 +2480,140 @@ function renderSpending() {
       sub: `${moneyExact(m.rest.total)} across ${m.rest.count} transaction${m.rest.count === 1 ? '' : 's'} · tap any to open it`,
       action: '<button class="section-action" data-view="transactions">All transactions</button>',
     })}
+  `;
+}
+
+/**
+ * Twelve months at once.
+ *
+ * Everything else in the app is scoped to a month, which answers "how are we
+ * doing" and cannot answer "what does a year of us look like" — what eating
+ * out actually costs a year, whether groceries are drifting up, which month
+ * wrecked us. The month in progress is included and marked, never averaged.
+ */
+function renderYear() {
+  const year = buildYearInReview({
+    transactions: state.transactions,
+    endMonth: state.month,
+    currentMonth: state.months.at(-1),
+  });
+
+  const t = year.totals;
+
+  // Months before the household's first transaction are noise — a run of
+  // empty rows above the real data, which on a new account is most of the
+  // list. The window still spans twelve months; it just starts where the
+  // history does.
+  const firstWithData = year.months.findIndex((m) => m.spent > 0 || m.earned > 0);
+  const months = firstWithData > 0 ? year.months.slice(firstWithData) : year.months;
+
+  const maxMonth = Math.max(...months.map((m) => m.spent), 1);
+  const maxCat = year.categories.length ? year.categories[0].total : 1;
+  const label = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short' });
+
+  return `
+    ${segmented(SPENDING_TABS)}
+
+    <div class="hero">
+      <div class="hero-label">Out the door · 12 months to ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(t.spent)}</div>
+      <div class="hero-note">
+        ${year.typical.spent !== null
+          ? `About ${money(year.typical.spent)} in a finished month, across ${year.typical.monthsCounted} of them.`
+          : 'Not enough finished months yet to call anything typical.'}
+      </div>
+      ${t.spent > 0 ? `
+        <div class="split">
+          <div class="split-bar">
+            <i class="split-bills" style="width:${t.billsShare}%"></i>
+            <i class="split-rest" style="width:${100 - t.billsShare}%"></i>
+          </div>
+          <div class="split-keys">
+            <span class="split-key"><b class="split-bills"></b>${money(t.bills)} bills</span>
+            <span class="split-key"><b class="split-rest"></b>${money(t.rest)} everything else</span>
+          </div>
+        </div>` : ''}
+    </div>
+
+    ${t.earned > 0 ? `
+      <div class="stat-row" style="margin-top:12px;">
+        <div class="stat">
+          <div class="stat-label">Came in</div>
+          <div class="stat-value positive">${money(t.earned)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Went out</div>
+          <div class="stat-value">${money(t.spent)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Kept</div>
+          <div class="stat-value ${t.net < 0 ? 'negative' : 'positive'}">${money(t.net)}</div>
+        </div>
+      </div>` : ''}
+
+    ${section('Month by month', `
+      <div class="list tight">
+        ${months.map((m) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">
+                ${label(m.month)} ${m.month.slice(0, 4)}
+                ${m.inProgress ? '<span class="chip">so far</span>' : ''}
+              </span>
+              <span class="row-amount">${m.spent ? moneyExact(m.spent) : '—'}</span>
+            </div>
+            ${m.spent > 0 ? `
+              <div class="meter">
+                <div class="meter-fill" style="width:${Math.min(100, (m.spent / maxMonth) * 100)}%"></div>
+              </div>
+              <div class="row-sub" style="margin-top:5px;">
+                ${money(m.bills)} bills · ${money(m.rest)} everything else${m.earned > 0
+                  ? ` · <span style="color:${m.net < 0 ? 'var(--negative)' : 'var(--positive)'};">${m.net < 0 ? '−' : '+'}${money(Math.abs(m.net))}</span>`
+                  : ''}
+              </div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${year.biggest ? `
+        <div class="prose-sm" style="margin-top:9px;">
+          The heaviest finished month was ${monthLabel(year.biggest.month)} at
+          ${moneyExact(year.biggest.spent)}.
+        </div>` : ''}
+    `, {
+      sub: months.length < year.months.length
+        ? `${months.length} month${months.length === 1 ? '' : 's'} of history · the one in progress is counted, never averaged in`
+        : 'The month in progress is counted, but never averaged in',
+    })}
+
+    ${section('Where it went, all year', year.categories.length ? `
+      <div class="list tight">
+        ${year.categories.slice(0, 14).map((c) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">${escapeHtml(c.category)}</span>
+              <span class="row-amount">${moneyExact(c.total)}</span>
+            </div>
+            <div class="meter">
+              <div class="meter-fill ${c.category === 'Uncategorized' ? 'quiet' : ''}"
+                style="width:${Math.min(100, (c.total / maxCat) * 100)}%"></div>
+            </div>
+            <div class="row-sub" style="margin-top:5px;">
+              ${moneyExact(c.perActiveMonth)} in each of the ${c.monthsSeen} month${c.monthsSeen === 1 ? '' : 's'} it happened
+              · ${c.count} transaction${c.count === 1 ? '' : 's'}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:9px;">
+        Averages are per month the category actually happened in, not divided by
+        twelve — a premium paid twice a year is not forty dollars a month, and
+        budgeting against a number like that never works.
+      </div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing to show yet',
+      body: 'No spending has cleared in the last twelve months.',
+    }), { sub: `${year.categories.length} categories` })}
   `;
 }
 
@@ -2841,6 +3149,21 @@ function renderBillsByPaycheck(bills) {
  * has already cleared this account on a rhythm, so accepting one is a
  * confirmation, not data entry.
  */
+/**
+ * How many bills the app could track without being told anything.
+ *
+ * Used by the Budget tab's empty state, which is otherwise a dead end: it
+ * says "no bills" on a screen whose whole job is bills, while the app is
+ * already sitting on a list of them.
+ */
+function billSuggestionCount() {
+  const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+  return suggestBillsFromTransactions({
+    streams: recurring,
+    bills: [...state.bills, ...state.billsNeedingReview],
+  }).filter((s) => !state.dismissedSuggestions.has(s.key)).length;
+}
+
 function renderBillSuggestions() {
   const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
   const suggestions = suggestBillsFromTransactions({
@@ -2852,7 +3175,30 @@ function renderBillSuggestions() {
 
   const shown = suggestions.slice(0, 6);
 
+  // Tracking them one at a time is fine for the odd new subscription, but on
+  // first use the list is the household's entire set of bills — rent,
+  // childcare, insurance, the utilities — and six taps with a confirmation
+  // each is how a setup step gets abandoned half-done.
+  const confident = suggestions.filter((x) => !x.stale);
+
   return section('Found in your transactions', `
+    ${confident.length > 1 ? `
+      <div class="card" style="margin-bottom:10px;">
+        <div class="card-head">
+          <span class="card-title">Track these as bills</span>
+          <button class="btn btn-sm btn-primary" data-action="track-all-bills"
+            ${state.trackingBill ? 'disabled' : ''}>
+            ${state.trackingBill === '*' ? 'Adding…' : `Track all ${confident.length}`}
+          </button>
+        </div>
+        <div class="prose-sm" style="margin-top:6px;">
+          Each of these is a charge that has already cleared this account on a
+          rhythm. Tracking them is what makes the Budget tab show real bills
+          instead of guessing from categories — and you can drop any of them
+          afterwards.
+        </div>
+      </div>` : ''}
+
     <div class="list">
       ${shown.map((s) => {
         const busy = state.trackingBill === s.key;
@@ -2940,16 +3286,19 @@ function renderBills() {
       sub: 'Parsed with low confidence — confirm before it counts toward what\'s due',
     }) : ''}
 
+    ${/* With nothing tracked yet, the suggestions ARE the tab — putting the
+          paycheck grouping first would lead with an empty table above the
+          only actionable thing on screen. */ ''}
     ${bills.length ? renderBillsByPaycheck(bills) : ''}
 
     ${renderBillSuggestions()}
 
-    ${bills.length === 0 ? section('Upcoming bills', emptyState({
+    ${bills.length === 0 && billSuggestionCount() === 0 ? section('Upcoming bills', emptyState({
       iconName: 'bills',
       title: 'No bills tracked yet',
       body: gmailConnected
         ? 'Nothing found in your email yet — the next daily scan may pick some up. You can also add one by hand.'
-        : 'Connect Gmail to find them automatically, accept one of the recurring charges above, or add one by hand.',
+        : 'Connect Gmail to find them automatically, or add one by hand below.',
       action: gmailConnected ? '' : '<button class="btn btn-secondary" data-view="connect">Connect Gmail</button>',
     })) : ''}
 
@@ -3146,6 +3495,7 @@ const VIEW_HEADERS = {
   bills: () => ['Budget', 'What you owe, and when it has to be covered'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
+  year: () => ['Spending', 'Twelve months at a time'],
   subscriptions: () => ['Recurring', 'What renews, and what it costs per year'],
   trends: () => ['Trends', 'How each category moves month to month'],
   review: () => ['Spending', 'Transactions the categorizer wasn\'t sure about'],
@@ -3225,6 +3575,7 @@ function render() {
     plan: renderPlan,
     budget: renderBudget,
     spending: renderSpending,
+    year: renderYear,
     subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
@@ -3309,6 +3660,19 @@ function render() {
       // as the other tabs above — does not generate a note on visit, only
       // loads past ones, since generating one is a real API call the user
       // should trigger deliberately, not something that fires on every tab click.
+      // The browser is the authority on notification permission, and it can
+      // change outside the app, so this is re-read on every visit to More
+      // rather than cached.
+      if (state.view === 'more' && state.session) {
+        loadConnect()
+          .then((connect) => connect.pushStatus())
+          .then((status) => {
+            state.push = status;
+            render();
+          })
+          .catch(() => { /* the row falls back to "cannot show them" */ });
+      }
+
       if (state.view === 'advisor' && !state.advisorAttempted) {
         state.advisorAttempted = true;
         const haveSession = state.connectAttempted;
@@ -3324,6 +3688,190 @@ function render() {
   // "Where it went" rows are <details>. Remember which are open so the next
   // render — triggered by categorizing something inside one, for instance —
   // leaves them open.
+  // --- Splitting a charge ------------------------------------------------
+  app.querySelectorAll('[data-split]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.split;
+      state.splitting = state.splitting === id ? null : id;
+      state.splitDraft = [];
+      state.splitError = null;
+      render();
+    }),
+  );
+
+  // Reading the draft out of the DOM before every re-render is what lets the
+  // remainder update as it is typed without losing what is already entered.
+  const readSplitDraft = (form) => [...form.querySelectorAll('.split-row')].map((row) => ({
+    amount: row.querySelector('[name="amount"]').value,
+    category: row.querySelector('[name="category"]').value,
+  }));
+
+  app.querySelectorAll('[data-split-form]').forEach((form) => {
+    form.addEventListener('input', () => {
+      state.splitDraft = readSplitDraft(form);
+      state.splitError = null;
+      // Re-render only the remainder line, so focus and the caret stay put.
+      const foot = form.querySelector('.split-foot span');
+      if (!foot) return;
+      const next = splitFootState(state.splitDraft, Math.abs(Number(form.dataset.total ?? 0)));
+      foot.className = next.ok ? 'ok' : 'off';
+      foot.textContent = next.label;
+    });
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const txn = state.transactions.find(
+        (t) => (t.plaid_transaction_id ?? t.id) === form.dataset.splitForm,
+      );
+      if (!txn) return;
+
+      const plan = planSplit(txn, readSplitDraft(form));
+      if (!plan.ok) {
+        state.splitDraft = readSplitDraft(form);
+        state.splitError = plan.error;
+        render();
+        return;
+      }
+
+      state.splitBusy = true;
+      state.splitError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        // Replacing an existing split rather than stacking a second one.
+        if (splitChildrenOf(txn).length) await connect.unsplit(txn.id);
+        await connect.saveSplit(plan.children);
+        state.transactions = await connect.listTransactions();
+        buildPlan();
+        state.splitting = null;
+        state.splitDraft = [];
+      } catch (e) {
+        state.splitError = `Couldn't save that split: ${e.message}`;
+      } finally {
+        state.splitBusy = false;
+        render();
+      }
+    });
+  });
+
+  app.querySelectorAll('[data-split-add]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const form = btn.closest('[data-split-form]');
+      state.splitDraft = [...readSplitDraft(form), { amount: '', category: '' }];
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-split-remove]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const form = btn.closest('[data-split-form]');
+      const draft = readSplitDraft(form);
+      draft.splice(Number(btn.dataset.splitRemove), 1);
+      state.splitDraft = draft;
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-split-cancel]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      state.splitting = null;
+      state.splitDraft = [];
+      state.splitError = null;
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-unsplit]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      state.splitBusy = true;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.unsplit(btn.dataset.unsplit);
+        state.transactions = await connect.listTransactions();
+        buildPlan();
+        state.splitting = null;
+        state.splitDraft = [];
+      } catch (e) {
+        state.splitError = `Couldn't undo that split: ${e.message}`;
+      } finally {
+        state.splitBusy = false;
+        render();
+      }
+    }),
+  );
+
+  const pushToggle = app.querySelector('[data-action="toggle-push"]');
+  if (pushToggle) {
+    pushToggle.addEventListener('click', async () => {
+      state.pushBusy = true;
+      state.pushError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        if (state.push.enabled) await connect.disablePushNotifications();
+        else await connect.enablePushNotifications(state.householdId);
+        state.push = await connect.pushStatus();
+      } catch (e) {
+        state.pushError = e.message;
+        // Re-read rather than assume: a denied permission changes what the
+        // row should say, not just whether this attempt worked.
+        try {
+          state.push = await (await loadConnect()).pushStatus();
+        } catch { /* leave the last known state */ }
+      }
+      state.pushBusy = false;
+      render();
+    });
+  }
+
+  const dismissHousehold = app.querySelector('[data-action="dismiss-household-prompt"]');
+  if (dismissHousehold) {
+    dismissHousehold.addEventListener('click', () => {
+      try {
+        localStorage.setItem('householdPromptDismissed', '1');
+      } catch {
+        /* Blocked storage just means it asks again next launch. */
+      }
+      render();
+    });
+  }
+
+  const trackAll = app.querySelector('[data-action="track-all-bills"]');
+  if (trackAll) {
+    trackAll.addEventListener('click', async () => {
+      const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+      const pending = suggestBillsFromTransactions({
+        streams: recurring,
+        bills: [...state.bills, ...state.billsNeedingReview],
+      }).filter((x) => !state.dismissedSuggestions.has(x.key) && !x.stale);
+
+      state.trackingBill = '*';
+      state.billsError = null;
+      render();
+      try {
+        const bills = await loadBills();
+        // Sequentially, not in parallel: each createBill dedupes against the
+        // bills that already exist, and a parallel burst would race that check
+        // and write the same provider twice.
+        for (const suggestion of pending) {
+          await bills.createBill({
+            providerName: suggestion.providerName,
+            amountDue: suggestion.amountDue,
+            dueDate: suggestion.dueDate,
+            category: suggestion.category,
+            source: 'bank',
+          });
+        }
+        await refreshBills();
+      } catch (e) {
+        state.billsError = e.message;
+      }
+      state.trackingBill = null;
+      render();
+    });
+  }
+
   const logoToggle = app.querySelector('[data-action="toggle-logos"]');
   if (logoToggle) {
     logoToggle.addEventListener('click', () => {
