@@ -227,6 +227,12 @@ function loadDismissedAlerts() {
 }
 
 const state = {
+  // True only for the brief window, on a browser that has signed in before,
+  // between the demo fixture loading and the real session/data check
+  // resolving — see hasPersistedSession(). Never shows the demo dashboard to
+  // someone who very likely has real data coming; a plain loading state reads
+  // as "getting your numbers", not as the app being wrong about them.
+  bootLoading: false,
   transactions: [],
   streams: [],
   month: null,
@@ -774,23 +780,68 @@ function renderSyncBanner() {
  * globally above the nav — a notification center belongs at the front door,
  * not repeated on every tab.
  */
+/**
+ * One alert visible by default, the rest behind a fold.
+ *
+ * Two or three full banners stacked at the top of the dashboard, every
+ * time, is exactly the kind of always-on noise a household stops reading —
+ * and once the real one (the sync is stale, a bill needs reconnecting)
+ * blends into that noise, it's as good as invisible. Leading with the single
+ * most relevant item and folding the rest keeps the urgent case legible.
+ */
 function renderAlerts() {
   const items = [...state.alerts.urgent, ...state.alerts.inApp.filter((a) => !a.urgent)];
   if (!items.length) return '';
 
-  return `
-    <div class="stream-list" style="margin-bottom:14px;">
-      ${items.map((a) => `
-        <div class="banner ${a.urgent ? 'banner-warn' : 'banner-info'}" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-          <div>
-            <strong>${a.title}</strong>
-            <div style="margin-top:2px;">${a.body}</div>
-          </div>
-          <button class="link" data-action="dismiss-alert" data-key="${a.key}" style="white-space:nowrap;">Dismiss</button>
-        </div>
-      `).join('')}
+  const renderOne = (a) => `
+    <div class="banner ${a.urgent ? 'banner-warn' : 'banner-info'}" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div>
+        <strong>${a.title}</strong>
+        <div style="margin-top:2px;">${a.body}</div>
+      </div>
+      <button class="link" data-action="dismiss-alert" data-key="${a.key}" style="white-space:nowrap;">Dismiss</button>
     </div>
   `;
+
+  const [first, ...rest] = items;
+
+  return `
+    <div class="stream-list" style="margin-bottom:14px;">
+      ${renderOne(first)}
+      ${rest.length ? `
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">+${rest.length} more ${rest.length === 1 ? 'insight' : 'insights'}</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+            ${rest.map(renderOne).join('')}
+          </div>
+        </details>
+      ` : ''}
+    </div>
+  `;
+}
+
+/** Categories shown before "Where it went" folds the rest behind a tap. */
+const CATEGORY_LIST_LIMIT = 6;
+
+function renderCategoryRows(categories, max) {
+  return categories.map(([name, amount]) => {
+    const avg = trailingAverage(name);
+    const delta = avg ? ((amount - avg) / avg) * 100 : 0;
+    const showDelta = avg !== null && Math.abs(delta) > 15;
+    return `
+      <div class="cat-row" data-category="${name}">
+        <div class="cat-head">
+          <span class="cat-name">${name}</span>
+          <span class="cat-amount">${moneyExact(amount)}</span>
+        </div>
+        <div class="bar"><div class="bar-fill ${name === 'Uncategorized' ? 'muted' : ''}" style="width:${(amount / max) * 100}%"></div></div>
+        ${showDelta ? `
+          <div class="cat-note ${delta > 0 ? 'up' : 'down'}">
+            ${delta > 0 ? '▲' : '▼'} ${Math.abs(Math.round(delta))}% vs recent average
+          </div>` : ''}
+      </div>
+    `;
+  }).join('');
 }
 
 function renderDashboard() {
@@ -829,28 +880,25 @@ function renderDashboard() {
         <div class="headline-note">${safeToSpendResult.headline}</div>
       </div>
 
-      <div class="breakdown">
-        <div class="breakdown-row">
-          <span class="breakdown-label">Starting: balance + expected income</span>
-          <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
-        </div>
-        ${safeToSpendResult.deductions.map((d) => `
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;">See how this is calculated</summary>
+        <div class="breakdown" style="margin-top:8px;">
           <div class="breakdown-row">
-            <span class="breakdown-label">${d.label}</span>
-            <span>−${moneyExact(d.amount)}</span>
+            <span class="breakdown-label">Starting: balance + expected income</span>
+            <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
           </div>
-        `).join('')}
-        <div class="breakdown-row emphasis">
-          <span class="breakdown-label">Safe to spend</span>
-          <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+          ${safeToSpendResult.deductions.map((d) => `
+            <div class="breakdown-row">
+              <span class="breakdown-label">${d.label}</span>
+              <span>−${moneyExact(d.amount)}</span>
+            </div>
+          `).join('')}
+          <div class="breakdown-row emphasis">
+            <span class="breakdown-label">Safe to spend</span>
+            <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+          </div>
         </div>
-        ${safeToSpendResult.daysUntilPayday > 0 ? `
-          <div class="breakdown-row">
-            <span class="breakdown-label">Per day</span>
-            <span>${moneyExact(safeToSpendResult.perDay)}</span>
-          </div>
-        ` : ''}
-      </div>
+      </details>
 
       ${safeToSpendResult.warnings.length ? `
         <div class="note-box">
@@ -891,25 +939,18 @@ function renderDashboard() {
 
     <h3>Where it went</h3>
     <div class="cat-list">
-      ${categories.map(([name, amount]) => {
-        const avg = trailingAverage(name);
-        const delta = avg ? ((amount - avg) / avg) * 100 : 0;
-        const showDelta = avg !== null && Math.abs(delta) > 15;
-        return `
-          <div class="cat-row" data-category="${name}">
-            <div class="cat-head">
-              <span class="cat-name">${name}</span>
-              <span class="cat-amount">${moneyExact(amount)}</span>
-            </div>
-            <div class="bar"><div class="bar-fill ${name === 'Uncategorized' ? 'muted' : ''}" style="width:${(amount / max) * 100}%"></div></div>
-            ${showDelta ? `
-              <div class="cat-note ${delta > 0 ? 'up' : 'down'}">
-                ${delta > 0 ? '▲' : '▼'} ${Math.abs(Math.round(delta))}% vs recent average
-              </div>` : ''}
-          </div>
-        `;
-      }).join('')}
+      ${renderCategoryRows(categories.slice(0, CATEGORY_LIST_LIMIT), max)}
     </div>
+    ${categories.length > CATEGORY_LIST_LIMIT ? `
+      <details>
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;margin-top:6px;">
+          Show all ${categories.length} categories
+        </summary>
+        <div class="cat-list" style="margin-top:8px;">
+          ${renderCategoryRows(categories.slice(CATEGORY_LIST_LIMIT), max)}
+        </div>
+      </details>
+    ` : ''}
 
     ${transferTotal > 0 ? `
       <div class="note-box">
@@ -2113,6 +2154,21 @@ function recategorize(id, category) {
 
 function render() {
   const app = document.getElementById('app');
+
+  if (state.bootLoading) {
+    app.innerHTML = `
+      <header class="header">
+        <h1>Family Budget</h1>
+      </header>
+      <main class="content">
+        <div class="loading-shell" style="padding-top:80px;text-align:center;color:var(--muted);">
+          Loading your numbers…
+        </div>
+      </main>
+    `;
+    return;
+  }
+
   const body = {
     dashboard: renderDashboard,
     paycheck: renderPaycheck,
@@ -2732,7 +2788,34 @@ function render() {
   });
 }
 
+/**
+ * Whether this browser has signed in before, checked with zero network calls
+ * so it can gate the very first render.
+ *
+ * Supabase persists its session to localStorage under a key shaped like
+ * `sb-<project-ref>-auth-token`. A match here doesn't guarantee the session
+ * is still valid — only that this browser very likely has real data coming,
+ * which is enough to decide whether the first paint should be the demo
+ * dashboard or a plain loading state. refreshConnection() below is still
+ * what actually validates the session.
+ */
+function hasPersistedSession() {
+  try {
+    return Object.keys(localStorage).some((k) => /^sb-.*-auth-token$/.test(k));
+  } catch {
+    return false;
+  }
+}
+
 consumeGmailOAuthReturn();
+
+// A browser with no persisted session has no real data coming — paint the
+// demo dashboard immediately, the whole reason fixtures work with zero
+// network dependency. A browser that has signed in before almost certainly
+// does, and flashing synthetic numbers at someone with a real budget for a
+// few seconds reads as the app being wrong, not as it loading — so that case
+// waits behind a plain loading state instead (see the IIFE below).
+if (hasPersistedSession()) state.bootLoading = true;
 
 load().then(render).catch((e) => {
   document.getElementById('app').innerHTML =
@@ -2740,15 +2823,32 @@ load().then(render).catch((e) => {
 });
 
 // A returning signed-in user's session, bills, and alerts load in the
-// background, after the demo dashboard has already painted — never blocking
-// that first render is the whole reason fixtures work with zero network
-// dependency. Runs unconditionally (not just after a Gmail OAuth return) so
-// alerts and bills are current the moment the app opens, without requiring a
-// manual visit to Connect or Bills first.
+// background, after the demo dashboard has already painted (or, for a
+// likely-returning user, behind the loading state bootLoading gates render()
+// on) — never blocking that first attempt is the whole reason fixtures work
+// with zero network dependency. Runs unconditionally (not just after a
+// Gmail OAuth return) so alerts and bills are current the moment the app
+// opens, without requiring a manual visit to Connect or Bills first.
 (async () => {
   state.connectAttempted = true;
+
+  // A likely-returning user waits behind the loading state, but not forever —
+  // an offline PWA (the whole reason this works with zero network dependency)
+  // must not hang on "Loading your numbers…" if the network never answers.
+  // Falls back to the demo dashboard exactly like a never-signed-in browser
+  // would, and still swaps to real data via the render() below whenever
+  // refreshConnection actually does resolve, even long after this fires.
+  const bootTimeout = setTimeout(() => {
+    if (state.bootLoading) {
+      state.bootLoading = false;
+      render();
+    }
+  }, 6000);
+
   await refreshConnection();
   state.billsAttempted = true;
   await refreshBills();
+  clearTimeout(bootTimeout);
+  state.bootLoading = false;
   render();
 })();
