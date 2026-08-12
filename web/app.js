@@ -22,6 +22,7 @@ import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
 import { buildMonthlyBudget } from '../src/engine/budget/monthly-budget.js';
 import { buildMonthInFull } from '../src/engine/month-in-full.js';
 import { isSplitParent, planSplit } from '../src/engine/split.js';
+import { buildYearInReview } from '../src/engine/year-in-review.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -1181,7 +1182,7 @@ function signInPrompt(what) {
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'bills'] },
-  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review'] },
+  { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
   { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
   { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan', 'subscriptions', 'trends'] },
 ];
@@ -1197,8 +1198,9 @@ const NAV_GROUPS = [
  * analytical screens moved to More where an occasional destination belongs.
  */
 const SPENDING_TABS = [
-  ['spending', 'Overview'],
+  ['spending', 'Month'],
   ['transactions', 'Transactions'],
+  ['year', 'Year'],
 ];
 
 /** The plan, and the bills it's mostly made of. */
@@ -2409,6 +2411,140 @@ function renderSpending() {
   `;
 }
 
+/**
+ * Twelve months at once.
+ *
+ * Everything else in the app is scoped to a month, which answers "how are we
+ * doing" and cannot answer "what does a year of us look like" — what eating
+ * out actually costs a year, whether groceries are drifting up, which month
+ * wrecked us. The month in progress is included and marked, never averaged.
+ */
+function renderYear() {
+  const year = buildYearInReview({
+    transactions: state.transactions,
+    endMonth: state.month,
+    currentMonth: state.months.at(-1),
+  });
+
+  const t = year.totals;
+
+  // Months before the household's first transaction are noise — a run of
+  // empty rows above the real data, which on a new account is most of the
+  // list. The window still spans twelve months; it just starts where the
+  // history does.
+  const firstWithData = year.months.findIndex((m) => m.spent > 0 || m.earned > 0);
+  const months = firstWithData > 0 ? year.months.slice(firstWithData) : year.months;
+
+  const maxMonth = Math.max(...months.map((m) => m.spent), 1);
+  const maxCat = year.categories.length ? year.categories[0].total : 1;
+  const label = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short' });
+
+  return `
+    ${segmented(SPENDING_TABS)}
+
+    <div class="hero">
+      <div class="hero-label">Out the door · 12 months to ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(t.spent)}</div>
+      <div class="hero-note">
+        ${year.typical.spent !== null
+          ? `About ${money(year.typical.spent)} in a finished month, across ${year.typical.monthsCounted} of them.`
+          : 'Not enough finished months yet to call anything typical.'}
+      </div>
+      ${t.spent > 0 ? `
+        <div class="split">
+          <div class="split-bar">
+            <i class="split-bills" style="width:${t.billsShare}%"></i>
+            <i class="split-rest" style="width:${100 - t.billsShare}%"></i>
+          </div>
+          <div class="split-keys">
+            <span class="split-key"><b class="split-bills"></b>${money(t.bills)} bills</span>
+            <span class="split-key"><b class="split-rest"></b>${money(t.rest)} everything else</span>
+          </div>
+        </div>` : ''}
+    </div>
+
+    ${t.earned > 0 ? `
+      <div class="stat-row" style="margin-top:12px;">
+        <div class="stat">
+          <div class="stat-label">Came in</div>
+          <div class="stat-value positive">${money(t.earned)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Went out</div>
+          <div class="stat-value">${money(t.spent)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Kept</div>
+          <div class="stat-value ${t.net < 0 ? 'negative' : 'positive'}">${money(t.net)}</div>
+        </div>
+      </div>` : ''}
+
+    ${section('Month by month', `
+      <div class="list tight">
+        ${months.map((m) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">
+                ${label(m.month)} ${m.month.slice(0, 4)}
+                ${m.inProgress ? '<span class="chip">so far</span>' : ''}
+              </span>
+              <span class="row-amount">${m.spent ? moneyExact(m.spent) : '—'}</span>
+            </div>
+            ${m.spent > 0 ? `
+              <div class="meter">
+                <div class="meter-fill" style="width:${Math.min(100, (m.spent / maxMonth) * 100)}%"></div>
+              </div>
+              <div class="row-sub" style="margin-top:5px;">
+                ${money(m.bills)} bills · ${money(m.rest)} everything else${m.earned > 0
+                  ? ` · <span style="color:${m.net < 0 ? 'var(--negative)' : 'var(--positive)'};">${m.net < 0 ? '−' : '+'}${money(Math.abs(m.net))}</span>`
+                  : ''}
+              </div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${year.biggest ? `
+        <div class="prose-sm" style="margin-top:9px;">
+          The heaviest finished month was ${monthLabel(year.biggest.month)} at
+          ${moneyExact(year.biggest.spent)}.
+        </div>` : ''}
+    `, {
+      sub: months.length < year.months.length
+        ? `${months.length} month${months.length === 1 ? '' : 's'} of history · the one in progress is counted, never averaged in`
+        : 'The month in progress is counted, but never averaged in',
+    })}
+
+    ${section('Where it went, all year', year.categories.length ? `
+      <div class="list tight">
+        ${year.categories.slice(0, 14).map((c) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">${escapeHtml(c.category)}</span>
+              <span class="row-amount">${moneyExact(c.total)}</span>
+            </div>
+            <div class="meter">
+              <div class="meter-fill ${c.category === 'Uncategorized' ? 'quiet' : ''}"
+                style="width:${Math.min(100, (c.total / maxCat) * 100)}%"></div>
+            </div>
+            <div class="row-sub" style="margin-top:5px;">
+              ${moneyExact(c.perActiveMonth)} in each of the ${c.monthsSeen} month${c.monthsSeen === 1 ? '' : 's'} it happened
+              · ${c.count} transaction${c.count === 1 ? '' : 's'}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:9px;">
+        Averages are per month the category actually happened in, not divided by
+        twelve — a premium paid twice a year is not forty dollars a month, and
+        budgeting against a number like that never works.
+      </div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing to show yet',
+      body: 'No spending has cleared in the last twelve months.',
+    }), { sub: `${year.categories.length} categories` })}
+  `;
+}
+
 // ---------------------------------------------------------------------------
 // Subscriptions
 // ---------------------------------------------------------------------------
@@ -3246,6 +3382,7 @@ const VIEW_HEADERS = {
   bills: () => ['Budget', 'What you owe, and when it has to be covered'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
+  year: () => ['Spending', 'Twelve months at a time'],
   subscriptions: () => ['Recurring', 'What renews, and what it costs per year'],
   trends: () => ['Trends', 'How each category moves month to month'],
   review: () => ['Spending', 'Transactions the categorizer wasn\'t sure about'],
@@ -3325,6 +3462,7 @@ function render() {
     plan: renderPlan,
     budget: renderBudget,
     spending: renderSpending,
+    year: renderYear,
     subscriptions: renderSubscriptions,
     transactions: renderTransactions,
     review: renderReview,
