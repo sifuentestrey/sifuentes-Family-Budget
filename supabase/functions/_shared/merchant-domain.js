@@ -11,25 +11,25 @@
  * the domain is derived here, from the payee string itself, and the logo is
  * fetched from that domain's favicon.
  *
- * Four sources, in order of how much they can be trusted:
+ * Three sources, in order of how much they can be trusted:
  *
  *   1. A website Plaid actually gave us.
  *   2. A domain sitting in the payee text — "COMCAST.COM BILL PAY", and the
  *      surprisingly common "WWW.SOMETHING.COM" descriptor.
- *   3. The table below, matched against any meaningful word in the payee, for
- *      chains a bank statement mangles beyond recognition: "SQ *BLUE BOTTLE",
- *      "TST* CHIPOTLE 2245", "AMZN Mktp US*RT4G59DK3", "ACH DEBIT PGE WEB".
- *   4. A domain guessed from the merchant's own name — see guessedDomain.
- *      A table can only ever cover national chains, which on a real statement
- *      is a minority of the rows; the dentist, the daycare and the landlord
- *      are the charges someone actually scans for, and most of them own the
- *      .com of their name.
+ *   3. The table below, matched against the payee with its spaces and
+ *      punctuation removed, for chains a bank statement mangles beyond
+ *      recognition: "SQ *BLUE BOTTLE", "TST* CHIPOTLE 2245", "CHIK FIL A",
+ *      "AMZN Mktp US*RT4G59DK3", "ACH DEBIT PGE WEB ONLINE".
  *
- * A wrong logo is worse than no logo: it makes the whole list untrustworthy,
- * and someone scanning for a charge they don't recognise is exactly the person
- * who must not be shown the wrong brand. So the guessing rules are built so
- * that being wrong lands on a domain that does not resolve — the logo services
- * answer those with a 404, and the row falls back to its coloured initial.
+ * There used to be a fourth: a domain guessed from the merchant's own name,
+ * on the theory that a wrong guess would land on a domain that doesn't
+ * resolve and quietly fall back to the initial. In practice a guessed name
+ * usually IS registered — parked, for sale, or an unrelated business — and
+ * the logo services answer those with a generic globe rather than a 404. The
+ * result was rows of identical globes, which is worse than a letter: a letter
+ * says "we don't know this merchant", a globe says "here is its logo" and is
+ * lying. So the rule is now simply: show a logo only where the brand is
+ * actually known, and a coloured initial everywhere else.
  */
 
 import { payeeStem } from './similar-payee.js';
@@ -38,92 +38,180 @@ import { payeeStem } from './similar-payee.js';
 export const MERCHANT_DOMAINS = {
   // Groceries and warehouse
   safeway: 'safeway.com', kroger: 'kroger.com', albertsons: 'albertsons.com',
-  costco: 'costco.com', trader: 'traderjoes.com', whole: 'wholefoodsmarket.com',
-  publix: 'publix.com', aldi: 'aldi.us', wegmans: 'wegmans.com',
+  costco: 'costco.com', publix: 'publix.com', aldi: 'aldi.us', wegmans: 'wegmans.com',
   sprouts: 'sprouts.com', heb: 'heb.com', meijer: 'meijer.com',
   instacart: 'instacart.com', walmart: 'walmart.com', target: 'target.com',
   vons: 'vons.com', ralphs: 'ralphs.com',
 
   // Restaurants, coffee, delivery
   starbucks: 'starbucks.com', chipotle: 'chipotle.com', panera: 'panera.com',
-  mcdonald: 'mcdonalds.com', subway: 'subway.com', dunkin: 'dunkindonuts.com',
+  subway: 'subway.com', dunkin: 'dunkindonuts.com',
   doordash: 'doordash.com', grubhub: 'grubhub.com', postmates: 'postmates.com',
-  chickfila: 'chick-fil-a.com', wendys: 'wendys.com', taco: 'tacobell.com',
-  domino: 'dominos.com', papa: 'papajohns.com', peets: 'peets.com',
+  chickfila: 'chick-fil-a.com', wendys: 'wendys.com', peets: 'peets.com',
+  kfc: 'kfc.com', arbys: 'arbys.com', hardees: 'hardees.com',
+  sbarro: 'sbarro.com', qdoba: 'qdoba.com', moes: 'moes.com',
 
   // Fuel and transport
   shell: 'shell.com', chevron: 'chevron.com', exxon: 'exxon.com',
   mobil: 'exxon.com', arco: 'arco.com', valero: 'valero.com',
-  marathon: 'marathonbrand.com', speedway: 'speedway.com', wawa: 'wawa.com',
+  speedway: 'speedway.com', wawa: 'wawa.com',
   uber: 'uber.com', lyft: 'lyft.com', bart: 'bart.gov',
 
   // Shopping and general
   amazon: 'amazon.com', amzn: 'amazon.com', ebay: 'ebay.com', etsy: 'etsy.com',
   ikea: 'ikea.com', wayfair: 'wayfair.com', lowes: 'lowes.com',
-  homedepot: 'homedepot.com', home: 'homedepot.com', best: 'bestbuy.com',
-  rei: 'rei.com', nordstrom: 'nordstrom.com', macys: 'macys.com',
+  homedepot: 'homedepot.com', rei: 'rei.com', nordstrom: 'nordstrom.com', macys: 'macys.com',
   petco: 'petco.com', petsmart: 'petsmart.com', chewy: 'chewy.com',
 
   // Pharmacy and health
-  cvs: 'cvs.com', walgreens: 'walgreens.com', rite: 'riteaid.com',
-  kaiser: 'kp.org', quest: 'questdiagnostics.com', labcorp: 'labcorp.com',
+  cvs: 'cvs.com', walgreens: 'walgreens.com', kaiser: 'kp.org', labcorp: 'labcorp.com',
 
   // Subscriptions and services
   netflix: 'netflix.com', spotify: 'spotify.com', hulu: 'hulu.com',
-  disney: 'disneyplus.com', apple: 'apple.com', google: 'google.com',
+  disney: 'disneyplus.com', google: 'google.com',
   microsoft: 'microsoft.com', adobe: 'adobe.com', dropbox: 'dropbox.com',
-  audible: 'audible.com', peloton: 'onepeloton.com', planet: 'planetfitness.com',
-  equinox: 'equinox.com', nytimes: 'nytimes.com', patreon: 'patreon.com',
+  audible: 'audible.com', peloton: 'onepeloton.com', equinox: 'equinox.com', nytimes: 'nytimes.com', patreon: 'patreon.com',
   openai: 'openai.com', anthropic: 'anthropic.com',
 
   // Utilities, telecom, insurance, finance
   comcast: 'xfinity.com', xfinity: 'xfinity.com', verizon: 'verizon.com',
   tmobile: 't-mobile.com', sprint: 't-mobile.com', spectrum: 'spectrum.com',
   geico: 'geico.com', progressive: 'progressive.com', allstate: 'allstate.com',
-  statefarm: 'statefarm.com', usaa: 'usaa.com', chase: 'chase.com',
-  amex: 'americanexpress.com', discover: 'discover.com', capital: 'capitalone.com',
-  wells: 'wellsfargo.com', citi: 'citi.com', venmo: 'venmo.com',
+  statefarm: 'statefarm.com', usaa: 'usaa.com', amex: 'americanexpress.com', venmo: 'venmo.com',
   paypal: 'paypal.com', cashapp: 'cash.app', zelle: 'zellepay.com',
-  bright: 'brighthorizons.com', pge: 'pge.com', pgande: 'pge.com',
-  sdge: 'sdge.com', socalgas: 'socalgas.com', edison: 'sce.com',
-  duke: 'duke-energy.com', conedison: 'coned.com', dominion: 'dominionenergy.com',
-  waste: 'wm.com', recology: 'recology.com', att: 'att.com',
-  frontier: 'frontier.com', cox: 'cox.com', dish: 'dish.com',
-  directv: 'directv.com', ring: 'ring.com', adt: 'adt.com',
+  pge: 'pge.com', pgande: 'pge.com',
+  sdge: 'sdge.com', socalgas: 'socalgas.com', conedison: 'coned.com', recology: 'recology.com', att: 'att.com',
+  directv: 'directv.com', adt: 'adt.com',
 
   // More of everyday life
-  dollar: 'dollartree.com', family: 'dollargeneral.com', five: 'fivebelow.com',
   michaels: 'michaels.com', joann: 'joann.com', staples: 'staples.com',
-  office: 'officedepot.com', autozone: 'autozone.com', napa: 'napaonline.com',
-  jiffy: 'jiffylube.com', discount: 'discounttire.com', firestone: 'firestonecompleteautocare.com',
-  enterprise: 'enterprise.com', hertz: 'hertz.com', delta: 'delta.com',
-  united: 'united.com', southwest: 'southwest.com', alaska: 'alaskaair.com',
-  american: 'aa.com', marriott: 'marriott.com', hilton: 'hilton.com',
+  autozone: 'autozone.com', napa: 'napaonline.com',
+  enterprise: 'enterprise.com', hertz: 'hertz.com', southwest: 'southwest.com', marriott: 'marriott.com', hilton: 'hilton.com',
   airbnb: 'airbnb.com', booking: 'booking.com', expedia: 'expedia.com',
-  amc: 'amctheatres.com', regal: 'regmovies.com', ticketmaster: 'ticketmaster.com',
-  steam: 'steampowered.com', nintendo: 'nintendo.com', playstation: 'playstation.com',
+  ticketmaster: 'ticketmaster.com',
+  nintendo: 'nintendo.com', playstation: 'playstation.com',
   xbox: 'xbox.com', roblox: 'roblox.com', sephora: 'sephora.com',
-  ulta: 'ulta.com', supercuts: 'supercuts.com', great: 'greatclips.com',
-  panda: 'pandaexpress.com', shake: 'shakeshack.com', five_guys: 'fiveguys.com',
-  jersey: 'jerseymikes.com', jimmy: 'jimmyjohns.com', raising: 'raisingcanes.com',
-  popeyes: 'popeyes.com', sonic: 'sonicdrivein.com', culvers: 'culvers.com',
-  ihop: 'ihop.com', denny: 'dennys.com', cracker: 'crackerbarrel.com',
-  olive: 'olivegarden.com', cheesecake: 'thecheesecakefactory.com',
-  buffalo: 'buffalowildwings.com', outback: 'outback.com',
-  safeco: 'safeco.com', farmers: 'farmers.com', nationwide: 'nationwide.com',
-  liberty: 'libertymutual.com', aetna: 'aetna.com', cigna: 'cigna.com',
-  anthem: 'anthem.com', united_health: 'uhc.com', delta_dental: 'deltadental.com',
-  fidelity: 'fidelity.com', vanguard: 'vanguard.com', schwab: 'schwab.com',
-  robinhood: 'robinhood.com', coinbase: 'coinbase.com', ally: 'ally.com',
-  synchrony: 'synchrony.com', navient: 'navient.com', nelnet: 'nelnet.com',
-  sallie: 'salliemae.com', carmax: 'carmax.com', carvana: 'carvana.com',
-  tesla: 'tesla.com', toyota: 'toyota.com', honda: 'honda.com',
-  ford: 'ford.com', subaru: 'subaru.com', chevrolet: 'chevrolet.com',
+  ulta: 'ulta.com', supercuts: 'supercuts.com', popeyes: 'popeyes.com', culvers: 'culvers.com',
+  ihop: 'ihop.com', outback: 'outback.com',
+  safeco: 'safeco.com', aetna: 'aetna.com', cigna: 'cigna.com',
+  anthem: 'anthem.com', fidelity: 'fidelity.com', vanguard: 'vanguard.com', schwab: 'schwab.com',
+  robinhood: 'robinhood.com', coinbase: 'coinbase.com', synchrony: 'synchrony.com', navient: 'navient.com', nelnet: 'nelnet.com',
+  carmax: 'carmax.com', carvana: 'carvana.com',
+  tesla: 'tesla.com', subaru: 'subaru.com', chevrolet: 'chevrolet.com',
 };
 
 /**
- * Words that are a category rather than a company, so guessing a domain from
- * them lands on somebody unrelated. "MEDICAL GROUP OF X" must not become
+ * Brands matched against the payee with every space and separator removed,
+ * so a bank's spelling can't hide them: "CHIK FIL A", "Chick-Fil-A #1220"
+ * and "CHICKFILA" are all the same nine letters once compacted.
+ *
+ * Longest key wins, so "jackinthebox" is never shadowed by a shorter key
+ * that happens to sit inside it.
+ */
+export const BRAND_KEYS = {
+  chickfila: 'chick-fil-a.com', chikfila: 'chick-fil-a.com',
+  jackinthebox: 'jackinthebox.com', wingstop: 'wingstop.com',
+  cicispizza: 'cicispizza.com',
+  littlecaesars: 'littlecaesars.com', whataburger: 'whataburger.com',
+  dairyqueen: 'dairyqueen.com', elpolloloco: 'elpolloloco.com',
+  tacocabana: 'tacocabana.com', zaxbys: 'zaxbys.com',
+  bojangles: 'bojangles.com', chilis: 'chilis.com',
+  applebees: 'applebees.com', reddobster: 'redlobster.com',
+  redlobster: 'redlobster.com', texasroadhouse: 'texasroadhouse.com',
+  longhorn: 'longhornsteakhouse.com', chuckecheese: 'chuckecheese.com',
+  freddys: 'freddys.com', portillos: 'portillos.com', innout: 'in-n-out.com',
+  torchys: 'torchystacos.com', jimmyjohns: 'jimmyjohns.com',
+  firehouse: 'firehousesubs.com', potbelly: 'potbelly.com',
+  smoothieking: 'smoothieking.com', jambajuice: 'jamba.com',
+  dutchbros: 'dutchbros.com', scooters: 'scooterscoffee.com',
+  bigblue: 'bigbluebagels.com', crumbl: 'crumblcookies.com',
+  sonicdrivein: 'sonicdrivein.com', carlsjr: 'carlsjr.com',
+  deltaco: 'deltaco.com',
+  familydollar: 'familydollar.com', dollartree: 'dollartree.com',
+  dollargeneral: 'dollargeneral.com', tjmaxx: 'tjmaxx.com',
+  marshalls: 'marshalls.com', rossstores: 'ross.com',
+  homegoods: 'homegoods.com', bathbody: 'bathandbodyworks.com',
+  academysports: 'academy.com', dickssporting: 'dickssportinggoods.com',
+  harborfreight: 'harborfreight.com', tractorsupply: 'tractorsupply.com',
+  oreilly: 'oreillyauto.com', advanceauto: 'advanceautoparts.com',
+  circlek: 'circlek.com', quiktrip: 'quiktrip.com', racetrac: 'racetrac.com',
+  buccees: 'buc-ees.com', pilotflying: 'pilotflyingj.com',
+  lovestravel: 'loves.com', seveneleven: '7-eleven.com',
+  fidelity: 'fidelity.com',
+
+  // Moved here from the single-word table: each of these is the first word of
+  // a longer brand, so as a single token it would brand any merchant that
+  // happens to start the same way — "Del Taco" as Taco Bell, "Best Western"
+  // as Best Buy, "Family Dentistry" as Dollar General.
+  alaskaair: 'alaskaair.com',
+  allybank: 'ally.com',
+  amctheatres: 'amctheatres.com',
+  americanairlines: 'aa.com',
+  applemusic: 'apple.com', applecom: 'apple.com',
+  bestbuy: 'bestbuy.com',
+  brighthorizons: 'brighthorizons.com',
+  buffalowildwings: 'buffalowildwings.com',
+  capitalone: 'capitalone.com',
+  chasecredit: 'chase.com', chasebank: 'chase.com',
+  thecheesecakefactory: 'thecheesecakefactory.com',
+  citibank: 'citi.com', citicard: 'citi.com',
+  coxcomm: 'cox.com', coxcable: 'cox.com',
+  crackerbarrel: 'crackerbarrel.com',
+  deltaairlines: 'delta.com', deltaair: 'delta.com',
+  deltadental: 'deltadental.com',
+  dennys: 'dennys.com',
+  discounttire: 'discounttire.com',
+  discover: 'discover.com',
+  dishnetwork: 'dish.com',
+  dollartree: 'dollartree.com',
+  dominionenergy: 'dominionenergy.com',
+  dominos: 'dominos.com',
+  dukeenergy: 'duke-energy.com',
+  socaledison: 'sce.com',
+  dollargeneral: 'dollargeneral.com',
+  farmers: 'farmers.com',
+  firestonecompleteautocare: 'firestonecompleteautocare.com',
+  fivebelow: 'fivebelow.com',
+  fiveguys: 'fiveguys.com',
+  fordcredit: 'ford.com', fordmotor: 'ford.com',
+  frontier: 'frontier.com',
+  greatclips: 'greatclips.com',
+  homedepot: 'homedepot.com',
+  hondafinancial: 'honda.com', americanhonda: 'honda.com',
+  jerseymikes: 'jerseymikes.com',
+  jiffylube: 'jiffylube.com',
+  jimmyjohns: 'jimmyjohns.com',
+  libertymutual: 'libertymutual.com',
+  marathonbrand: 'marathonbrand.com',
+  mcdonalds: 'mcdonalds.com',
+  nationwide: 'nationwide.com',
+  officedepot: 'officedepot.com',
+  olivegarden: 'olivegarden.com',
+  pandaexpress: 'pandaexpress.com',
+  papajohns: 'papajohns.com',
+  planetfitness: 'planetfitness.com',
+  questdiagnostics: 'questdiagnostics.com',
+  raisingcanes: 'raisingcanes.com',
+  regmovies: 'regmovies.com',
+  ringcom: 'ring.com',
+  riteaid: 'riteaid.com',
+  salliemae: 'salliemae.com',
+  shakeshack: 'shakeshack.com',
+  sonicdrivein: 'sonicdrivein.com',
+  steampowered: 'steampowered.com',
+  tacobell: 'tacobell.com',
+  toyota: 'toyota.com',
+  traderjoes: 'traderjoes.com',
+  united: 'united.com',
+  unitedhealthcare: 'uhc.com', unitedhealth: 'uhc.com',
+  wastemanagement: 'wm.com',
+  wellsfargo: 'wellsfargo.com',
+  wholefoodsmarket: 'wholefoodsmarket.com', wholefoods: 'wholefoodsmarket.com',
+};
+
+/**
+ * Words that are a category rather than a company, so treating one as a
+ * brand lands on somebody unrelated. "MEDICAL GROUP OF X" must not become
  * medical.com.
  */
 const GENERIC_WORDS = new Set([
@@ -193,8 +281,35 @@ export function domainForPayee(payee, website = null) {
     if (MERCHANT_DOMAINS[word]) return MERCHANT_DOMAINS[word];
   }
 
-  return guessedDomain(cleaned || payee);
+  // Last: brands that only appear once the bank's spacing is removed.
+  const compact = compactName(cleaned || payee);
+  if (compact) {
+    for (const key of BRAND_KEYS_BY_LENGTH) {
+      if (compact.includes(key)) return BRAND_KEYS[key];
+    }
+  }
+
+  // Nothing recognised it. That is a complete answer: the row keeps its
+  // coloured initial rather than being given a logo nobody can vouch for.
+  return null;
 }
+
+/** Words a bank appends that are never part of the merchant's name. */
+const NAME_NOISE = new Set([
+  'llc', 'inc', 'corp', 'co', 'ltd', 'lp', 'plc', 'the', 'and', 'of',
+  'web', 'pmt', 'pymt', 'bill', 'billpay', 'online', 'recurring', 'auto',
+  'ach', 'pos', 'debit', 'credit', 'purchase', 'payment', 'store', 'grp',
+  'group', 'usa', 'us', 'intl', 'international',
+]);
+
+/** A payee with every space, digit and separator removed. */
+export function compactName(payee) {
+  return String(payee ?? '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+/** Longest first, so a short key never shadows the brand containing it. */
+const BRAND_KEYS_BY_LENGTH = Object.keys(BRAND_KEYS).map((k) => k.toLowerCase())
+  .sort((a, b) => b.length - a.length);
 
 /** Words in a payee that carry meaning: no noise, no one/two-letter scraps. */
 function meaningfulWords(payee) {
@@ -203,55 +318,6 @@ function meaningfulWords(payee) {
     .replace(/[^a-z\s]/g, ' ')
     .split(/\s+/)
     .filter((w) => w.length >= 3 && !NAME_NOISE.has(w));
-}
-
-/**
- * A domain guessed from the merchant's own name — "OAKWOOD PROPERTIES" →
- * oakwoodproperties.com, "MERIDIAN HEALTH GRP" → meridianhealth.com.
- *
- * The table above can only ever cover national chains, which on a real
- * statement is a minority of the rows: the dentist, the daycare, the local
- * hardware store and the landlord are all missing from it, and they are
- * exactly the charges someone scans for. Most small businesses do own the
- * .com of their own name, so this is right far more often than not.
- *
- * When it's wrong it is nearly always wrong by landing on a domain that does
- * not exist, and the favicon service answers that with a neutral globe — a
- * "no logo" outcome, not another company's brand. The guards below exist to
- * keep it that way:
- *
- *   - never guess from a single generic word (medical.com, properties.com);
- *   - two words are joined before one is used alone, since "oakwood
- *     properties" is far more identifying than "oakwood";
- *   - noise words a bank appends (LLC, INC, #1425, WEB PMT) are dropped
- *     first, so they never end up inside the guessed hostname.
- */
-const NAME_NOISE = new Set([
-  'llc', 'inc', 'corp', 'co', 'ltd', 'lp', 'plc', 'the', 'and', 'of',
-  'web', 'pmt', 'pymt', 'bill', 'billpay', 'online', 'recurring', 'auto',
-  'ach', 'pos', 'debit', 'credit', 'purchase', 'payment', 'store', 'grp',
-  'group', 'usa', 'us', 'intl', 'international',
-]);
-
-export function guessedDomain(payee) {
-  const words = meaningfulWords(payee);
-
-  // Leading category nouns are what a bank puts in front of the actual name
-  // ("RENT PAYMENT OAKWOOD PROPERTIES", "MEDICAL GROUP OF BERKELEY"), so
-  // drop them — but never the last word, or there is nothing left to guess
-  // from and "medical.com" is precisely the wrong answer.
-  let start = 0;
-  while (start < words.length - 1 && GENERIC_WORDS.has(words[start])) start += 1;
-
-  const [first, second] = words.slice(start);
-
-  // Pairs only. A single word is either a chain already in the table above or
-  // too thin to bet a brand on: guessing from one word turns the local
-  // "BERKELEY ORTHODONTICS" into berkeley.com, which is somebody else, and
-  // "PHARMACY" into pharmacy.com, which is nobody's dentist. The coverage a
-  // solo guess would add is not worth a list that shows the wrong brands.
-  if (!first || !second) return null;
-  return `${first}${second}.com`;
 }
 
 /**

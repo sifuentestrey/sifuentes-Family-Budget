@@ -126,9 +126,22 @@ whatever looks good in isolation rather than for this:
 Rows show the merchant's own logo where one can be found, falling back to a
 coloured initial. Three things about it are load-bearing:
 
-- The domain is **derived from the payee** (`src/engine/merchant-domain.js`),
-  because Plaid supplies a logo for only a minority of transactions. Wrong is
-  worse than missing, so guessing refuses on a lone or generic word.
+- The domain comes from a **curated brand table** matched against the payee
+  (`src/engine/merchant-domain.js`), because Plaid supplies a logo for only a
+  minority of transactions. Matching happens on the payee with spaces and
+  punctuation removed, so "CHIK FIL A", "Chick-Fil-A #1220" and "CHICKFILA"
+  all land on the same brand.
+- **Domains are never guessed from a name.** That was tried: the theory was
+  that a wrong guess lands on a domain that doesn't resolve and falls back to
+  the initial. It doesn't — guessed names are usually registered and parked,
+  and the logo services answer those with a generic globe. Rows of identical
+  globes are worse than rows of letters: a letter says "not recognised", a
+  globe claims to be the merchant's logo.
+- Brand keys are **six letters minimum**, because they are matched as
+  substrings: "ally" sits inside "Sally Beauty", "loves" inside "gloves". For
+  the same reason a single word that merely *starts* a brand name never gets
+  its own key — "Del Taco" was resolving to Taco Bell, "Best Western" to Best
+  Buy, "Family Dentistry" to Dollar General.
 - Each logo has **two sources on different hosts**, tried in order. Either can
   404 for a site the other knows, and both are the kind of host a content
   blocker or filtering DNS blocks wholesale — which strips every logo at once
