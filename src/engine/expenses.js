@@ -22,6 +22,7 @@
  */
 
 import { SEED_CATEGORIES } from './seed-rules.js';
+import { isSplitParent } from './split.js';
 
 /**
  * Categories that are unavoidable even though the amount moves.
@@ -142,7 +143,7 @@ function spendingOnly(transactions) {
       !t.is_income &&
       !t.pending &&
       t.amount > 0 &&
-      !parents.has(t.plaid_transaction_id ?? t.id),
+      !isSplitParent(t, parents),
   );
 }
 

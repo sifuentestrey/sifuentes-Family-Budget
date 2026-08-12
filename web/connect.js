@@ -194,6 +194,39 @@ export async function revokeInvite(id) {
 }
 
 /**
+ * Save a split: write the child rows, and let the parent fall out of every
+ * total by virtue of having children.
+ *
+ * The parent row is deliberately left untouched. It is still the real charge
+ * the bank shows, and keeping it means a split can be undone by deleting the
+ * children — no reconstruction, nothing lost.
+ */
+export async function saveSplit(children) {
+  const { data: categories, error: catError } = await supabase
+    .from('categories')
+    .select('id, name');
+  if (catError) throw catError;
+  const idByName = new Map((categories ?? []).map((c) => [c.name, c.id]));
+
+  const rows = children.map(({ category, ...child }) => ({
+    ...child,
+    category_id: category ? idByName.get(category) ?? null : null,
+  }));
+
+  const { error } = await supabase.from('transactions').insert(rows);
+  if (error) throw error;
+}
+
+/** Undo a split: the children go, the original charge stays as it was. */
+export async function unsplit(parentId) {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('parent_transaction_id', parentId);
+  if (error) throw error;
+}
+
+/**
  * Ask the server to name the payees nothing recognised.
  *
  * Deliberately on demand rather than automatic: it costs a model call, and a

@@ -23,6 +23,7 @@ import { buildExpensePicture, floorCoverage } from './expenses.js';
 import { analyzeSubscriptions } from './subscriptions.js';
 import { buildAlerts } from './alerts.js';
 import { calculateSafeToSpend } from './budget/safe-to-spend.js';
+import { isSplitParent } from './split.js';
 
 // Matches web/app.js's gatherSafeToSpendInputs() placeholder — neither side
 // pulls a live Plaid balance yet. Kept identical so the two never disagree.
@@ -88,7 +89,7 @@ function gatherSafeToSpendInputs({ transactions, months, month, picture, streams
   const spendingIn = (m) => transactions.filter((t) =>
     monthKey(t.posted_date) === m
     && !t.is_transfer && !t.is_income && !t.pending && t.amount > 0
-    && !parents.has(t.plaid_transaction_id));
+    && !isSplitParent(t, parents));
 
   for (const m of recentMonths) {
     const txns = spendingIn(m).filter((t) => variableCategories.includes(t.category || ''));

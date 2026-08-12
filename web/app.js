@@ -21,6 +21,7 @@ import { buildAlerts } from '../src/engine/alerts.js';
 import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
 import { buildMonthlyBudget } from '../src/engine/budget/monthly-budget.js';
 import { buildMonthInFull } from '../src/engine/month-in-full.js';
+import { isSplitParent, planSplit } from '../src/engine/split.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -417,6 +418,13 @@ const state = {
   showLogos: localStorage.getItem('showLogos') !== '0',
   // The one transaction whose category picker is open, if any.
   editingCategory: null,
+  // The transaction being split, the parts as typed so far, and the state of
+  // saving them. The draft lives here rather than in the DOM because every
+  // keystroke that changes the remainder re-renders the row.
+  splitting: null,
+  splitDraft: [],
+  splitBusy: false,
+  splitError: null,
   autoCategorizing: false,
   autoCategorizeResult: null,
   autoCategorizeError: null,
@@ -862,7 +870,7 @@ function spendingIn(month) {
       !t.is_income &&
       !t.pending &&
       t.amount > 0 &&
-      !parents.has(t.plaid_transaction_id),
+      !isSplitParent(t, parents),
   );
 }
 
@@ -1670,16 +1678,34 @@ function renderTransactionRow(t) {
         ${t.category ? escapeHtml(t.category) : 'Add category'}
       </button>`;
 
+  const rowId = t.plaid_transaction_id ?? t.id;
+  const parts = splitChildrenOf(t);
+
   return `
-    <div class="row" data-id="${t.plaid_transaction_id}"
+    <div class="row" data-id="${rowId}"
       data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
       ${avatarFor(t.payee, logoForPayee(t.payee))}
       <div class="row-body">
         <div class="row-title">${t.payee}</div>
-        <div class="row-sub">${date} · ${category}</div>
-        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${t.plaid_transaction_id}">
+        <div class="row-sub">
+          ${date} · ${parts.length ? `<span class="chip">split ${parts.length} ways</span>` : category}
+        </div>
+        ${parts.length ? `
+          <div class="split-parts">
+            ${parts.map((c) => `
+              <span><b>${moneyExact(Math.abs(c.amount))}</b> ${escapeHtml(c.category ?? 'Uncategorized')}</span>
+            `).join('')}
+          </div>` : ''}
+        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${rowId}">
           ${categoryOptions(t.category)}
         </select>` : ''}
+        ${kind || !state.session ? '' : `
+          <div class="row-sub" style="margin-top:5px;">
+            <button class="cat-pill" data-split="${rowId}">
+              ${parts.length ? 'Change the split' : 'Split this'}
+            </button>
+          </div>`}
+        ${state.splitting === rowId ? renderSplitForm(t, parts) : ''}
       </div>
       <div class="row-end">
         <div class="row-amount ${t.amount < 0 ? 'income' : ''}">
@@ -1687,6 +1713,80 @@ function renderTransactionRow(t) {
         </div>
       </div>
     </div>
+  `;
+}
+
+/**
+ * What the remainder line says.
+ *
+ * "Adds up" is deliberately withheld while only one part carries an amount:
+ * the sum is right, but saving would be refused, and a green line followed by
+ * a refusal is worse than an amber line that says what's missing.
+ */
+function splitFootState(rows, total) {
+  const filled = rows.filter((r) => (Number(r.amount) || 0) > 0);
+  const assigned = filled.reduce((s, r) => s + Number(r.amount), 0);
+  const left = Math.round((total - assigned) * 100) / 100;
+
+  if (left > 0) return { ok: false, label: `${moneyExact(left)} left to assign` };
+  if (left < 0) return { ok: false, label: `${moneyExact(-left)} too much` };
+  if (filled.length < 2) return { ok: false, label: 'Give a second category some of it' };
+  return { ok: true, label: 'Adds up' };
+}
+
+/** The child rows of a split, if this transaction has been split. */
+function splitChildrenOf(txn) {
+  if (!txn.id) return [];
+  return state.transactions.filter((c) => c.parent_transaction_id === txn.id);
+}
+
+/**
+ * The split editor, inline under the charge it belongs to.
+ *
+ * Opens with the whole amount on one line, because the common move is "most
+ * of this was groceries, and $40 of it wasn't" — starting from the real total
+ * means the household adjusts one number rather than entering two.
+ */
+function renderSplitForm(txn, existing) {
+  const total = Math.abs(txn.amount);
+  const rows = state.splitDraft.length
+    ? state.splitDraft
+    : existing.length
+      ? existing.map((c) => ({ amount: Math.abs(c.amount).toFixed(2), category: c.category ?? '' }))
+      : [{ amount: total.toFixed(2), category: txn.category ?? '' }, { amount: '', category: '' }];
+
+  const state_ = splitFootState(rows, total);
+
+  return `
+    <form class="split-form" data-split-form="${txn.plaid_transaction_id ?? txn.id}"
+      data-total="${total.toFixed(2)}">
+      ${rows.map((r, i) => `
+        <div class="split-row">
+          <input class="input" type="number" step="0.01" min="0" name="amount"
+            value="${escapeHtml(String(r.amount))}" placeholder="0.00" inputmode="decimal" />
+          <select class="select" name="category">${categoryOptions(r.category)}</select>
+          ${rows.length > 2 ? `<button type="button" class="linkbtn quiet" data-split-remove="${i}">Remove</button>` : ''}
+        </div>
+      `).join('')}
+
+      <div class="split-foot">
+        <span class="${state_.ok ? 'ok' : 'off'}">${state_.label}</span>
+        <button type="button" class="linkbtn" data-split-add="1">Add a part</button>
+      </div>
+
+      ${state.splitError ? `<div class="field-hint" style="color:var(--negative);">${escapeHtml(state.splitError)}</div>` : ''}
+
+      <div class="row-actions">
+        <button type="submit" class="btn btn-sm btn-primary" ${state.splitBusy ? 'disabled' : ''}>
+          ${state.splitBusy ? 'Saving…' : 'Save split'}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline" data-split-cancel="1">Cancel</button>
+        ${existing.length ? `
+          <button type="button" class="btn btn-sm btn-danger" data-unsplit="${txn.id}" ${state.splitBusy ? 'disabled' : ''}>
+            Undo split
+          </button>` : ''}
+      </div>
+    </form>
   `;
 }
 
@@ -3324,6 +3424,119 @@ function render() {
   // "Where it went" rows are <details>. Remember which are open so the next
   // render — triggered by categorizing something inside one, for instance —
   // leaves them open.
+  // --- Splitting a charge ------------------------------------------------
+  app.querySelectorAll('[data-split]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.split;
+      state.splitting = state.splitting === id ? null : id;
+      state.splitDraft = [];
+      state.splitError = null;
+      render();
+    }),
+  );
+
+  // Reading the draft out of the DOM before every re-render is what lets the
+  // remainder update as it is typed without losing what is already entered.
+  const readSplitDraft = (form) => [...form.querySelectorAll('.split-row')].map((row) => ({
+    amount: row.querySelector('[name="amount"]').value,
+    category: row.querySelector('[name="category"]').value,
+  }));
+
+  app.querySelectorAll('[data-split-form]').forEach((form) => {
+    form.addEventListener('input', () => {
+      state.splitDraft = readSplitDraft(form);
+      state.splitError = null;
+      // Re-render only the remainder line, so focus and the caret stay put.
+      const foot = form.querySelector('.split-foot span');
+      if (!foot) return;
+      const next = splitFootState(state.splitDraft, Math.abs(Number(form.dataset.total ?? 0)));
+      foot.className = next.ok ? 'ok' : 'off';
+      foot.textContent = next.label;
+    });
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const txn = state.transactions.find(
+        (t) => (t.plaid_transaction_id ?? t.id) === form.dataset.splitForm,
+      );
+      if (!txn) return;
+
+      const plan = planSplit(txn, readSplitDraft(form));
+      if (!plan.ok) {
+        state.splitDraft = readSplitDraft(form);
+        state.splitError = plan.error;
+        render();
+        return;
+      }
+
+      state.splitBusy = true;
+      state.splitError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        // Replacing an existing split rather than stacking a second one.
+        if (splitChildrenOf(txn).length) await connect.unsplit(txn.id);
+        await connect.saveSplit(plan.children);
+        state.transactions = await connect.listTransactions();
+        buildPlan();
+        state.splitting = null;
+        state.splitDraft = [];
+      } catch (e) {
+        state.splitError = `Couldn't save that split: ${e.message}`;
+      } finally {
+        state.splitBusy = false;
+        render();
+      }
+    });
+  });
+
+  app.querySelectorAll('[data-split-add]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const form = btn.closest('[data-split-form]');
+      state.splitDraft = [...readSplitDraft(form), { amount: '', category: '' }];
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-split-remove]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const form = btn.closest('[data-split-form]');
+      const draft = readSplitDraft(form);
+      draft.splice(Number(btn.dataset.splitRemove), 1);
+      state.splitDraft = draft;
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-split-cancel]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      state.splitting = null;
+      state.splitDraft = [];
+      state.splitError = null;
+      render();
+    }),
+  );
+
+  app.querySelectorAll('[data-unsplit]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      state.splitBusy = true;
+      render();
+      try {
+        const connect = await loadConnect();
+        await connect.unsplit(btn.dataset.unsplit);
+        state.transactions = await connect.listTransactions();
+        buildPlan();
+        state.splitting = null;
+        state.splitDraft = [];
+      } catch (e) {
+        state.splitError = `Couldn't undo that split: ${e.message}`;
+      } finally {
+        state.splitBusy = false;
+        render();
+      }
+    }),
+  );
+
   const logoToggle = app.querySelector('[data-action="toggle-logos"]');
   if (logoToggle) {
     logoToggle.addEventListener('click', () => {

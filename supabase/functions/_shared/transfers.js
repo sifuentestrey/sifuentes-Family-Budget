@@ -20,6 +20,8 @@
  * window.
  */
 
+import { isSplitParent } from './split.js';
+
 const DEFAULT_WINDOW_DAYS = 4;
 /** Tolerance for amount matching, in dollars. Transfers are exact; this guards float noise. */
 const AMOUNT_EPSILON = 0.005;
@@ -183,7 +185,7 @@ export function totalSpending(transactions) {
         !t.is_income &&
         !t.pending &&
         t.amount > 0 &&
-        !parentIds.has(t.plaid_transaction_id ?? t.id),
+        !isSplitParent(t, parentIds),
     )
     .reduce((sum, t) => sum + t.amount, 0);
 }
