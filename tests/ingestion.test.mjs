@@ -612,7 +612,7 @@ test('pending transactions reduce what is available', () => {
 
 test('the emergency buffer is held back, not spendable', () => {
   const result = calculateSafeToSpend({ ...spendInput, bufferTarget: 1000, bufferBalance: 250 });
-  const buffer = result.deductions.find((d) => /buffer/i.test(d.label));
+  const buffer = result.deductions.find((d) => /cushion/i.test(d.label));
   assert.equal(buffer.amount, 750, 'only the shortfall against the target is withheld');
 });
 
@@ -622,7 +622,7 @@ test('savings goals and sinking funds are prorated across the stretch', () => {
     sinkingFundContribution: 480,
     savingsGoals: [{ label: 'Baby fund', monthlyContribution: 300 }],
   });
-  const sinking = result.deductions.find((d) => /annual bills/i.test(d.label));
+  const sinking = result.deductions.find((d) => /once-a-year bills/i.test(d.label));
   const goal = result.deductions.find((d) => /Baby fund/.test(d.label));
   // 14 days of a monthly figure, not the whole month.
   assert.ok(sinking.amount > 0 && sinking.amount < 480);
@@ -633,7 +633,7 @@ test('a negative result says so plainly', () => {
   const result = calculateSafeToSpend({ ...spendInput, currentBalance: 200 });
   assert.equal(result.status, 'negative');
   assert.ok(result.safeToSpend < 0);
-  assert.match(result.headline, /exceeds available money/);
+  assert.match(result.headline, /more than you have/);
 });
 
 test('every deduction is explained', () => {

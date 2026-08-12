@@ -114,7 +114,7 @@ export function calculateSafeToSpend(input) {
   const variable = (input.dailyVariableSpend ?? 0) * daysUntilPayday;
   if (variable > 0) {
     deductions.push({
-      label: 'Groceries, fuel and similar',
+      label: 'Groceries, gas and the everyday',
       amount: round(variable),
       note: `${daysUntilPayday} days at ${formatMoney(input.dailyVariableSpend)}/day, from your own history`,
     });
@@ -126,7 +126,7 @@ export function calculateSafeToSpend(input) {
   if (input.sinkingFundContribution > 0) {
     const prorated = (input.sinkingFundContribution * 12 / 365) * daysUntilPayday;
     deductions.push({
-      label: 'Set aside for annual bills',
+      label: 'Saved for once-a-year bills',
       amount: round(prorated),
       note: 'insurance premiums, registration and similar, spread across the year',
     });
@@ -151,11 +151,11 @@ export function calculateSafeToSpend(input) {
   const bufferShortfall = Math.max(0, bufferTarget - bufferBalance);
   if (bufferShortfall > 0) {
     deductions.push({
-      label: 'Emergency buffer floor',
+      label: 'Emergency cushion',
       amount: round(bufferShortfall),
       note: bufferBalance > 0
-        ? `${formatMoney(bufferBalance)} of a ${formatMoney(bufferTarget)} target is held elsewhere`
-        : 'kept back so a slow stretch does not become credit card debt',
+        ? `you already have ${formatMoney(bufferBalance)} of the ${formatMoney(bufferTarget)} you're aiming for`
+        : 'kept back so a slow stretch does not turn into credit card debt',
     });
   }
 
@@ -165,8 +165,8 @@ export function calculateSafeToSpend(input) {
 
   if (incomeBasis === 'floor' && expectedIncome > 0) {
     warnings.push(
-      'Income before payday is counted at your conservative floor, not an average. ' +
-      'A better-than-usual check makes this number rise, never fall.',
+      'The paycheck coming is counted at the low end of what you usually earn, not the average. ' +
+      'A better-than-usual check makes this number go up, never down.',
     );
   }
   if (expectedIncome > 0 && input.currentBalance < billTotal) {
@@ -199,8 +199,8 @@ export function calculateSafeToSpend(input) {
 
 function buildHeadline(status, safeToSpend, perDay, days, payday) {
   if (status === 'negative') {
-    return `Committed spending exceeds available money by ${formatMoney(Math.abs(safeToSpend))} before ${payday}. ` +
-      `Something has to move — a bill's due date, or discretionary spending.`;
+    return `What you owe before ${payday} is ${formatMoney(Math.abs(safeToSpend))} more than you have. ` +
+      `Something has to move — ask a company to shift a due date, or cut back on the optional spending.`;
   }
   if (status === 'tight') {
     return `${formatMoney(safeToSpend)} free until ${payday} — about ${formatMoney(perDay)} a day across ${days} days. Tight.`;
