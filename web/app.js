@@ -1368,7 +1368,7 @@ function renderCategoryRows(categories, max) {
             <div class="meter-fill ${name === 'Uncategorized' ? 'quiet' : ''}" style="width:${Math.min(100, (amount / max) * 100)}%"></div>
           </div>
           ${showDelta ? `
-            <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--accent)'};">
+            <div class="row-sub" style="margin-top:7px;color:${delta > 0 ? 'var(--negative)' : 'var(--positive)'};">
               ${delta > 0 ? '↑' : '↓'} ${Math.abs(Math.round(delta))}% vs recent average
             </div>` : ''}
         </summary>
@@ -1951,7 +1951,7 @@ function renderPlan() {
         <div class="card ${step.status === 'done' ? 'done' : ''}">
           <div class="card-head">
             <span class="card-title">
-              ${step.status === 'done' ? `<span style="color:var(--accent);">${icon('check', 15)}</span> ` : `${step.priority}. `}${step.title}
+              ${step.status === 'done' ? `<span style="color:var(--positive);">${icon('check', 15)}</span> ` : `${step.priority}. `}${step.title}
             </span>
             ${step.amount ? `<span class="row-amount">${money(step.amount)}</span>` : ''}
           </div>
@@ -2058,7 +2058,7 @@ function renderBudget() {
         </div>
         ${l.planned !== null ? `
           <div class="meter">
-            <div class="meter-fill ${l.over ? 'warn' : ''}" style="width:${pct}%"></div>
+            <div class="meter-fill ${l.over ? 'warn' : 'ok'}" style="width:${pct}%"></div>
           </div>` : ''}
         <div class="row-sub" style="margin-top:5px;">
           <span>

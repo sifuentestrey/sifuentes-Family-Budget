@@ -96,16 +96,30 @@ Small supporting text:
 
 Do not expose the full calculation unless the user taps the card.
 
-## Visual language
+## Visual language — "Signal"
 
-- Background: warm off-white / very light neutral.
-- Cards: white with subtle border, not heavy shadows.
-- Primary text: near-black.
-- Secondary text: muted gray.
-- One restrained accent color for positive/primary actions.
-- Red/orange only for genuinely actionable problems.
-- Rounded corners around 16–20px.
-- Buttons are compact and calm; avoid oversized marketing-style CTAs.
+Chosen by the household from three directions built as side-by-side mockups;
+the other two were a hairline-and-serif "Ledger" and a dense dark "After Dark".
+Worth knowing, because the temptation when adding a screen is to reach for
+whatever looks good in isolation rather than for this:
+
+- **Ground is soft grey** (`--bg`), and cards are **white and lifted off it**
+  with a shadow — not outlined onto it with a border. In dark, the ground
+  drops to near-black and cards lift above it the same way.
+- **One dark hero card** per screen, carrying the single number that screen
+  exists to answer. It is the only near-black surface in light mode, and the
+  only raised one in dark. Nothing else on the screen competes with it.
+- **Coral is the only saturated colour, and it means "this wants you"** — the
+  active tab, a link, a category over its target, a primary button. Spending
+  it on anything else is what makes an interface stop signalling.
+- **Green is money coming in**, and nothing else. Income amounts, a target
+  being kept to, a step already done.
+- Type is **rounded and heavy** (SF Pro Rounded where available). Titles are
+  700–800 weight with tight tracking; this is what stops it reading as a
+  spreadsheet.
+- Corners are round — 18px on cards, 22px on the hero, 11px on avatars.
+- Amber/red stay reserved for genuinely actionable problems.
+- Buttons are compact pills; avoid oversized marketing-style CTAs.
 
 ## Budget screen
 

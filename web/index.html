@@ -24,91 +24,120 @@
 <link rel="stylesheet" href="./vendor/open-props.min.css" />
 <style>
   /* ==========================================================================
-   * Family Budget — design system
+   * Family Budget — design system ("Signal")
    *
-   * Follows docs/ui/README.md: a calm household control center, not an
-   * accounting spreadsheet. Warm off-white ground, white cards with a hairline
-   * border rather than heavy shadows, one restrained green accent, red/orange
-   * reserved for things that are genuinely actionable.
+   * The household picked this direction from three, so the intent is worth
+   * writing down rather than rediscovering: a soft grey ground with white
+   * cards floating on it, heavy rounded type, and one near-black hero card
+   * carrying the single number a screen exists to answer. One hot coral is
+   * the only saturated colour, and it means "this wants you" — the active
+   * tab, a link, a category over its target. Green is money coming in and
+   * nothing else.
    *
    * The rule that keeps this cohesive: there is ONE way to draw each kind of
    * thing. One list row (.row) for bills, transactions, subscriptions, income
    * streams, shifts, members and accounts alike. One card (.card). One button
    * scale (.btn). One form field (.field). Views compose these; they do not
-   * invent their own. Every previous screen having its own row shape is what
-   * made the app read as five apps stapled together.
+   * invent their own.
+   *
+   * Dark is not an inversion. The ground drops to near-black, cards lift
+   * *above* it rather than sitting flat, and the hero — which is a black card
+   * on a grey ground in light — becomes the one raised surface, since a black
+   * card on a black ground would disappear.
    * ====================================================================== */
 
   :root {
     /* Ground and surfaces */
-    --bg: #f5f4f0;
+    --bg: #f4f5f8;
     --surface: #fff;
-    --surface-2: #faf9f6;
-    --border: #e6e5df;
-    --border-strong: #d6d5cd;
+    --surface-2: #f8f9fb;
+    --border: #e9eaf0;
+    --border-strong: #d6d9e2;
 
-    /* Text */
-    --text: #16150f;
-    --text-2: #57554c;
-    --muted: #86837a;
+    /* Text — cool near-black, biased very slightly blue like the ground */
+    --text: #14161c;
+    --text-2: #4c5261;
+    --muted: #767b8a;
 
-    /* One accent, used for money-positive and primary action alike */
-    --accent: #1f7a57;
-    --accent-ink: #17603f;
-    --accent-soft: #e8f3ed;
+    /* The one saturated colour: attention and action. */
+    --accent: #f0402f;
+    --accent-ink: #cf3323;
+    --accent-soft: #ffece9;
     --on-accent: #fff;
 
-    /* Reserved for things a household can actually act on */
-    --warn: #9a5a17;
-    --warn-soft: #fbf1e3;
-    --negative: #ab372f;
-    --negative-soft: #fbeae8;
-    --quiet-soft: #f0efea;
+    /* Money coming in, and nothing else. */
+    --positive: #0d8f5f;
+    --positive-soft: #e4f5ed;
 
-    /* Shape */
-    --radius-lg: 20px;
-    --radius: 14px;
-    --radius-sm: 10px;
+    --warn: #b46a10;
+    --warn-soft: #fdf1de;
+    --negative: #d13b2a;
+    --negative-soft: #ffeae7;
+    --quiet-soft: #f0f1f6;
+
+    /* The hero card: near-black in light, the one raised surface in dark. */
+    --hero-bg: #14161c;
+    --hero-ink: #fff;
+    --hero-label: #9aa0b2;
+    --hero-note: #b9bfcd;
+    --hero-rule: #2c2f38;
+
+    /* Shape — rounder than most apps, on purpose. */
+    --radius-lg: 22px;
+    --radius: 18px;
+    --radius-sm: 11px;
     --radius-full: 999px;
 
-    --shadow-sm: 0 1px 2px rgba(22, 21, 15, 0.04);
-    --shadow-md: 0 1px 2px rgba(22, 21, 15, 0.05), 0 8px 20px -14px rgba(22, 21, 15, 0.28);
-    --shadow-lg: 0 1px 2px rgba(22, 21, 15, 0.05), 0 16px 32px -18px rgba(22, 21, 15, 0.35);
+    /* Cards lift off the ground rather than being outlined onto it. */
+    --shadow-sm: 0 1px 2px rgba(20, 22, 28, 0.05);
+    --shadow-md: 0 2px 4px rgba(20, 22, 28, 0.05), 0 10px 24px -16px rgba(20, 22, 28, 0.35);
+    --shadow-lg: 0 2px 6px rgba(20, 22, 28, 0.06), 0 20px 40px -20px rgba(20, 22, 28, 0.4);
 
-    /* Deterministic avatar palette — warm, low-saturation, never neon. */
-    --av-0: #2f6f5a; --av-1: #7a5230; --av-2: #4b5b8a;
-    --av-3: #8a4257; --av-4: #396a7a; --av-5: #6b5a2c;
+    /* Deterministic avatar palette. Deep and slightly desaturated so a column
+       of them reads as a set rather than as confetti. */
+    --av-0: #2f6f5a; --av-1: #8a4b28; --av-2: #45589b;
+    --av-3: #8f3a55; --av-4: #2d6f85; --av-5: #6b5aa6;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #15140e;
-      --surface: #1e1c15;
-      --surface-2: #24221a;
-      --border: #322f24;
-      --border-strong: #423f30;
+      --bg: #0d0f13;
+      --surface: #171a20;
+      --surface-2: #1e222a;
+      --border: #242832;
+      --border-strong: #333845;
 
-      --text: #f3f1e8;
-      --text-2: #c2bdac;
-      --muted: #948f7e;
+      --text: #f1f2f6;
+      --text-2: #b6bcc9;
+      --muted: #838a99;
 
-      --accent: #57c194;
-      --accent-ink: #6ed0a6;
-      --accent-soft: #1c3830;
-      --on-accent: #10241c;
+      --accent: #ff6a58;
+      --accent-ink: #ff8574;
+      --accent-soft: #34201d;
+      --on-accent: #1a0d0b;
 
-      --warn: #d9a061;
-      --warn-soft: #33261a;
-      --negative: #e58b80;
-      --negative-soft: #38211f;
-      --quiet-soft: #262319;
+      --positive: #35c98d;
+      --positive-soft: #12291f;
 
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 20px -14px rgba(0, 0, 0, 0.7);
-      --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 32px -18px rgba(0, 0, 0, 0.75);
+      --warn: #e0a552;
+      --warn-soft: #2f2415;
+      --negative: #f0705d;
+      --negative-soft: #331b18;
+      --quiet-soft: #20242c;
 
-      --av-0: #3d8a70; --av-1: #97663c; --av-2: #5f72a8;
-      --av-3: #a55568; --av-4: #457f92; --av-5: #85713a;
+      /* Lifted, not black-on-black. */
+      --hero-bg: #232833;
+      --hero-ink: #f6f7fa;
+      --hero-label: #98a0b1;
+      --hero-note: #b6bcc9;
+      --hero-rule: #343a47;
+
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+      --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.45), 0 10px 24px -16px rgba(0, 0, 0, 0.8);
+      --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 20px 40px -20px rgba(0, 0, 0, 0.85);
+
+      --av-0: #3d8a70; --av-1: #a75f35; --av-2: #5b6fb8;
+      --av-3: #a84a68; --av-4: #3a89a2; --av-5: #8271c4;
     }
   }
 
@@ -118,7 +147,11 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 16px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    /* Rounded first: on iOS this is SF Pro Rounded, which is what gives the
+       whole app its friendlier, less spreadsheet-like voice. Everything else
+       falls back through the usual system stack. */
+    font: 16px/1.5 "SF Pro Rounded", ui-rounded, -apple-system, BlinkMacSystemFont,
+          "Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
@@ -148,7 +181,7 @@
     gap: 12px; padding: 14px 2px 10px;
   }
   .app-bar-text { min-width: 0; }
-  .app-bar-title { font-size: 21px; font-weight: 680; letter-spacing: -0.03em; }
+  .app-bar-title { font-size: 22px; font-weight: 800; letter-spacing: -0.035em; }
   .app-bar-sub { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
   .icon-btn {
     flex-shrink: 0; width: 34px; height: 34px; border-radius: var(--radius-full);
@@ -166,7 +199,7 @@
     display: flex; align-items: baseline; justify-content: space-between;
     gap: 12px; margin-bottom: 7px; padding: 0 3px;
   }
-  .section-title { font-size: 14.5px; font-weight: 660; letter-spacing: -0.01em; }
+  .section-title { font-size: 16px; font-weight: 780; letter-spacing: -0.025em; }
   .section-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
   .section-action {
     background: none; border: 0; padding: 0; cursor: pointer;
@@ -178,36 +211,38 @@
   /* The one number a screen exists to answer. docs/ui/README.md's hero card:
    * big, plain, bold sans, tight tracking — never a gradient. */
 
+  /* The hero is the one dark card on the screen. It carries the single
+     number the screen exists to answer, and nothing else competes with it. */
   .hero {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-lg); padding: 16px 16px 14px;
-    box-shadow: var(--shadow-sm);
+    background: var(--hero-bg); color: var(--hero-ink); border: 0;
+    border-radius: var(--radius-lg); padding: 17px 17px 15px;
+    box-shadow: var(--shadow-md);
   }
   .hero-label {
-    font-size: 11px; font-weight: 620; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.06em;
+    font-size: 11px; font-weight: 700; color: var(--hero-label);
+    text-transform: uppercase; letter-spacing: 0.07em;
   }
   .hero-value {
-    font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1.05;
-    margin: 5px 0 4px; font-variant-numeric: tabular-nums;
+    font-size: 38px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.04;
+    margin: 4px 0 5px; font-variant-numeric: tabular-nums;
   }
-  .hero-value.bad { color: var(--negative); }
-  .hero-value.good { color: var(--accent); }
-  .hero-note { font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+  .hero-value.bad { color: #ff8574; }
+  .hero-value.good { color: #4fd6a0; }
+  .hero-note { font-size: 12.5px; line-height: 1.45; color: var(--hero-note); }
   .hero-foot {
     display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 11px;
-    padding-top: 10px; border-top: 1px solid var(--border);
-    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+    padding-top: 10px; border-top: 1px solid var(--hero-rule);
+    font-size: 12px; color: var(--hero-note); font-variant-numeric: tabular-nums;
   }
-  .hero-foot b { color: var(--text); font-weight: 620; }
+  .hero-foot b { color: var(--hero-ink); font-weight: 700; }
 
   .hero-sm .hero-value { font-size: 27px; }
 
   /* --- Cards ------------------------------------------------------------ */
 
   .card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 13px 14px;
+    background: var(--surface); border: 0;
+    border-radius: var(--radius); padding: 14px 15px;
     box-shadow: var(--shadow-sm);
   }
   .card + .card { margin-top: 8px; }
@@ -225,18 +260,18 @@
   .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .stat-row.two { grid-template-columns: repeat(2, 1fr); }
   .stat {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 10px 11px;
+    background: var(--surface); border: 0; box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-sm); padding: 11px 12px;
   }
   .stat-label {
     font-size: 11px; font-weight: 620; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.05em;
   }
   .stat-value {
-    font-size: 17.5px; font-weight: 660; margin-top: 3px;
+    font-size: 18px; font-weight: 780; margin-top: 3px;
     letter-spacing: -0.025em; font-variant-numeric: tabular-nums;
   }
-  .stat-value.positive { color: var(--accent); }
+  .stat-value.positive { color: var(--positive); }
   .stat-value.negative { color: var(--negative); }
   .stat-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
@@ -250,7 +285,7 @@
      twenty gaps of dead space, which is most of why a long list felt heavy. */
   .list {
     display: flex; flex-direction: column;
-    background: var(--surface); border: 1px solid var(--border);
+    background: var(--surface); border: 0;
     border-radius: var(--radius); overflow: hidden;
     box-shadow: var(--shadow-sm);
   }
@@ -262,7 +297,7 @@
     gap: 6px; border-radius: 0;
   }
   .list.loose > * + * { border-top: 0; }
-  .list.loose > .row { border: 1px solid var(--border); border-radius: var(--radius); }
+  .list.loose > .row { box-shadow: var(--shadow-sm); border-radius: var(--radius); }
 
   .row {
     display: flex; align-items: center; gap: 11px;
@@ -279,9 +314,9 @@
   .row.warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
 
   .row-avatar {
-    flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--radius-full);
+    flex-shrink: 0; width: 32px; height: 32px; border-radius: 11px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 12.5px; font-weight: 700; color: #fff; letter-spacing: -0.01em;
+    font-size: 12.5px; font-weight: 800; color: #fff; letter-spacing: -0.01em;
   }
   .row-avatar.av-0 { background: var(--av-0); }
   .row-avatar.av-1 { background: var(--av-1); }
@@ -310,7 +345,7 @@
 
   .row-body { flex: 1; min-width: 0; }
   .row-title {
-    font-size: 14px; font-weight: 590; letter-spacing: -0.005em;
+    font-size: 14px; font-weight: 680; letter-spacing: -0.015em;
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     /* One line, ellipsised. A payee that wraps to three lines is what makes
        one row in a list twice the height of its neighbours. min-width:0 is
@@ -324,8 +359,8 @@
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
   }
   .row-end { flex-shrink: 0; text-align: right; }
-  .row-amount { font-size: 14px; font-weight: 620; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .row-amount.income, .row-amount.positive { color: var(--accent); }
+  .row-amount { font-size: 14px; font-weight: 720; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row-amount.income, .row-amount.positive { color: var(--positive); }
   .row-amount.negative { color: var(--negative); }
   .row-amount-sub { font-size: 11px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
   .row-chev { flex-shrink: 0; color: var(--muted); display: flex; }
@@ -354,23 +389,23 @@
 
   .chip {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; font-weight: 680; letter-spacing: 0.04em;
-    text-transform: uppercase; padding: 1px 6px; border-radius: 5px;
+    font-size: 10px; font-weight: 720; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 7px;
     background: var(--quiet-soft); color: var(--muted); white-space: nowrap;
   }
-  .chip-ok { background: var(--accent-soft); color: var(--accent-ink); }
+  .chip-ok { background: var(--positive-soft); color: var(--positive); }
   .chip-warn { background: var(--warn-soft); color: var(--warn); }
   .chip-bad { background: var(--negative-soft); color: var(--negative); }
   .chip-outline { background: transparent; border: 1px solid var(--border-strong); color: var(--muted); font-weight: 600; }
 
   /* The category on a transaction row: reads as text, behaves as a button. */
   .cat-pill {
-    font: inherit; font-size: 11.5px; color: var(--text-2); font-weight: 550;
-    background: none; border: 0; padding: 0; cursor: pointer;
-    border-bottom: 1px dashed var(--border-strong);
+    font: inherit; font-size: 11px; font-weight: 650; color: var(--text-2);
+    background: var(--quiet-soft); border: 0; cursor: pointer;
+    padding: 2px 7px; border-radius: 7px;
   }
-  .cat-pill:active { color: var(--accent); }
-  .cat-pill.unset { color: var(--accent); border-bottom-color: transparent; font-weight: 600; }
+  .cat-pill:active { background: var(--border-strong); }
+  .cat-pill.unset { background: var(--accent-soft); color: var(--accent-ink); }
 
   .badge {
     display: inline-block; min-width: 19px; padding: 0 6px;
@@ -384,16 +419,16 @@
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    font: inherit; font-size: 14px; font-weight: 620; line-height: 1;
-    padding: 11px 16px; border-radius: var(--radius-full);
+    font: inherit; font-size: 14px; font-weight: 720; line-height: 1;
+    padding: 11px 17px; border-radius: var(--radius-full);
     border: 1px solid transparent; cursor: pointer; white-space: nowrap;
     background: var(--quiet-soft); color: var(--text);
   }
   .btn:disabled { opacity: 0.55; cursor: default; }
-  .btn-primary { background: var(--accent); color: var(--on-accent); }
+  .btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-sm); }
   .btn-primary:active:not(:disabled) { background: var(--accent-ink); }
   .btn-secondary { background: var(--accent-soft); color: var(--accent-ink); }
-  .btn-outline { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+  .btn-outline { background: var(--surface); border-color: var(--border); color: var(--text); box-shadow: var(--shadow-sm); }
   .btn-danger { background: var(--negative-soft); color: var(--negative); }
   .btn-sm { font-size: 13px; padding: 8px 13px; }
   .btn-block { display: flex; width: 100%; }
@@ -420,12 +455,12 @@
   }
   .seg::-webkit-scrollbar { display: none; }
   .seg-btn {
-    flex: 1; white-space: nowrap; font: inherit; font-size: 12.5px; font-weight: 600;
+    flex: 1; white-space: nowrap; font: inherit; font-size: 12.5px; font-weight: 650;
     padding: 6px 12px; border: 0; border-radius: var(--radius-full);
     background: none; color: var(--muted); cursor: pointer;
   }
   .seg-btn.active {
-    background: var(--surface); color: var(--text);
+    background: var(--surface); color: var(--text); font-weight: 750;
     box-shadow: var(--shadow-sm);
   }
 
@@ -447,24 +482,28 @@
   /* --- Meters ----------------------------------------------------------- */
 
   .meter {
-    height: 4px; background: var(--quiet-soft);
+    height: 5px; background: var(--quiet-soft);
     border-radius: var(--radius-full); overflow: hidden; margin-top: 7px;
   }
-  .meter-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); }
-  .meter-fill.quiet { background: var(--border-strong); }
-  .meter-fill.warn { background: var(--warn); }
+  /* Neutral by default: a "where it went" bar is a share of the month, not a
+     verdict. Green when a target is being kept to, coral when it isn't —
+     coral only ever means "this wants you". */
+  .meter-fill { height: 100%; background: var(--border-strong); border-radius: var(--radius-full); }
+  .meter-fill.ok { background: var(--positive); }
+  .meter-fill.warn { background: var(--accent); }
+  .meter-fill.quiet { background: var(--quiet-soft); }
 
   /* --- Banners ---------------------------------------------------------- */
 
   .banner {
     display: flex; gap: 10px; align-items: flex-start; justify-content: space-between;
-    padding: 9px 12px; border-radius: var(--radius-sm);
+    padding: 10px 13px; border-radius: var(--radius-sm);
     font-size: 12.5px; line-height: 1.45; margin-bottom: 10px;
     border: 1px solid transparent; background: var(--quiet-soft); color: var(--text-2);
   }
   .banner strong { color: var(--text); font-weight: 620; }
-  .banner-good { background: var(--accent-soft); color: var(--accent-ink); }
-  .banner-good strong { color: var(--accent-ink); }
+  .banner-good { background: var(--positive-soft); color: var(--positive); }
+  .banner-good strong { color: var(--positive); }
   .banner-warn {
     background: var(--warn-soft); color: var(--warn);
     border-color: color-mix(in srgb, var(--warn) 22%, transparent);
@@ -540,6 +579,7 @@
     border-top: 1px solid var(--border);
     background: var(--surface-2);
   }
+  .cat-row[open] > summary { background: var(--surface-2); }
   .cat-body > * + * { border-top: 1px solid var(--border); }
   .cat-body .row { background: transparent; padding: 8px 13px 8px 11px; }
 
@@ -609,9 +649,9 @@
     position: fixed; left: 50%; transform: translateX(-50%);
     bottom: 0; width: 100%; max-width: 560px;
     padding-bottom: env(safe-area-inset-bottom);
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    background: var(--surface);
     border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 24px -20px rgba(20, 22, 28, 0.5);
     display: flex; z-index: 40;
   }
   @media (min-width: 900px) { .tabbar { max-width: 680px; } }
@@ -619,7 +659,7 @@
     flex: 1; background: none; border: 0; cursor: pointer; font: inherit;
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     padding: 10px 4px 12px; color: var(--muted);
-    font-size: 10.5px; font-weight: 620; letter-spacing: 0.01em;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.01em;
     position: relative;
   }
   .tab.active { color: var(--accent); }
