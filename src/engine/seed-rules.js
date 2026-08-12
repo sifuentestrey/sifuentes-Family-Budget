@@ -217,6 +217,11 @@ export const PFC_DETAILED_MAP = {
   TRANSPORTATION_PUBLIC_TRANSIT: 'Parking/Transit',
   TRANSPORTATION_TAXIS_AND_RIDE_SHARES: 'Parking/Transit',
   TRANSPORTATION_TOLLS: 'Parking/Transit',
+  LOAN_PAYMENTS_CAR_PAYMENT: 'Car Payment',
+  LOAN_PAYMENTS_MORTGAGE_PAYMENT: 'Rent/Mortgage',
+  LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT: 'Fees/Interest',
+  LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT: 'Fees/Interest',
+  LOAN_PAYMENTS_OTHER_PAYMENT: 'Fees/Interest',
   RENT_AND_UTILITIES_RENT: 'Rent/Mortgage',
   RENT_AND_UTILITIES_INTERNET_AND_CABLE: 'Internet/Phone',
   RENT_AND_UTILITIES_TELEPHONE: 'Internet/Phone',
@@ -265,5 +270,9 @@ export const PFC_PRIMARY_MAP = {
   GENERAL_SERVICES: 'Shopping',
   GOVERNMENT_AND_NON_PROFIT: 'Taxes',
   INCOME: 'Other Income',
-  LOAN_PAYMENTS: 'Car Payment',
+  // Deliberately absent: LOAN_PAYMENTS. It covers a car loan, a student loan,
+  // a mortgage and a credit card payment, and mapping the whole primary to
+  // 'Car Payment' filed all four as a car payment. The detailed values below
+  // name the ones we can place; the rest go to the review queue, which is the
+  // honest outcome for "some loan, we don't know which".
 };

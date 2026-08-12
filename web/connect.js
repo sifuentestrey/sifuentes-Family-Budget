@@ -144,7 +144,7 @@ export async function listTransactions() {
       id, plaid_transaction_id, account_id, posted_date, amount,
       raw_description, payee, categorized_by, is_transfer, transfer_pair_id,
       is_income, manually_categorized, parent_transaction_id, pending,
-      logo_url, merchant_website,
+      logo_url, merchant_website, pfc_primary, pfc_detailed,
       categories(name)
     `)
     .order('posted_date', { ascending: false });
