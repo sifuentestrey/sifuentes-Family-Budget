@@ -31,9 +31,22 @@ PWA frontend, deployed to GitHub Pages. Zero-cost stack by design.
   a fresh clone needs `npm install` first (`unpdf` won't resolve otherwise).
 - Service worker at **v26**. Bump `CACHE_VERSION` whenever a shell asset is
   added or returning users keep the old shell.
-- **Unverified**: whether the second household member has been invited, and
-  whether any bills are actually tracked. Both change what several screens
-  show. Check, don't assume.
+- **Verified 2026-08-12 against the live database**: 1 user, 1 household,
+  **1 member**, **no invite ever sent**, 1 bank connection, **479
+  transactions**, **6 tracked bills**, 0 budget targets.
+- **The second person is still not in the household.** Everything shared —
+  budget targets, bills, the plan — is running for one person. The invite
+  path itself is complete and was read end to end:
+  `create_household_invite(email)` issues one scoped to the caller's own
+  household; `hook_restrict_signup` blocks signup by anyone without a live
+  invite; and on first sign-in `bootstrap_household()` finds the pending
+  invite matching that address, adds the user to **that** household, and
+  marks the invite accepted. Nothing to build — it needs the email address.
+- **Worth confirming in the dashboard**: the "Before user created" auth hook
+  must be selected under Authentication → Hooks, or `hook_restrict_signup`
+  is inert and signup is open to anyone. An uninvited signup would land in
+  its own empty household rather than this one, so it is not a data-exposure
+  risk, but it is an open door.
 
 ## The shape of the app now
 

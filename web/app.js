@@ -1454,6 +1454,7 @@ function renderDashboard() {
 
   return `
     ${renderAlerts()}
+    ${renderHouseholdPrompt()}
 
     <div class="month-picker">
       <button class="chev-btn" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>${icon('back', 16)}</button>
@@ -1577,6 +1578,37 @@ function renderDashboard() {
         })}
       </div>
     `) : ''}
+  `;
+}
+
+/**
+ * "It's just you in here."
+ *
+ * The app is built end to end for two people — one household, shared budget
+ * targets, a plan both can see — and none of that does anything while there
+ * is one member. The invite form has always existed, three taps deep under
+ * Accounts & sync, which is not where anybody looks for it. So the app says
+ * so once, on the screen they actually open, and stops as soon as an invite
+ * is out.
+ */
+function renderHouseholdPrompt() {
+  if (!state.session) return '';
+  if (state.members.length !== 1) return '';
+  if (state.invites.length) return '';
+  if (localStorage.getItem('householdPromptDismissed') === '1') return '';
+
+  return `
+    <div class="banner banner-good">
+      <div class="banner-body">
+        <strong>It's just you in here.</strong>
+        Budget targets, bills and the plan are shared across the household —
+        invite the other half of it and you'll both see the same numbers.
+      </div>
+      <span style="display:flex;gap:12px;flex-shrink:0;">
+        <button class="linkbtn" data-view="connect">Invite</button>
+        <button class="linkbtn quiet" data-action="dismiss-household-prompt">Not now</button>
+      </span>
+    </div>
   `;
 }
 
@@ -3719,6 +3751,18 @@ function render() {
       }
     }),
   );
+
+  const dismissHousehold = app.querySelector('[data-action="dismiss-household-prompt"]');
+  if (dismissHousehold) {
+    dismissHousehold.addEventListener('click', () => {
+      try {
+        localStorage.setItem('householdPromptDismissed', '1');
+      } catch {
+        /* Blocked storage just means it asks again next launch. */
+      }
+      render();
+    });
+  }
 
   const trackAll = app.querySelector('[data-action="track-all-bills"]');
   if (trackAll) {
