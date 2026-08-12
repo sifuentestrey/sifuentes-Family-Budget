@@ -1,0 +1,11 @@
+-- A fifth way a category can get decided: inherited from a payee that looks
+-- like one already decided about ("SAFEWAY #0881" from "SAFEWAY #1425").
+--
+-- See src/engine/similar-payee.js for what qualifies. It exists because the
+-- review queue was filling up with the same merchant under six different
+-- store numbers, and nobody works through a queue like that.
+--
+-- Additive only, and required before the app writes it: reprocessWindow in
+-- sync-transactions writes categorized_by straight from categorizeBatch, so
+-- a value the enum doesn't have would fail the whole sync, not just one row.
+alter type categorized_by add value if not exists 'similar';

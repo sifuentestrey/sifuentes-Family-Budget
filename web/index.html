@@ -273,6 +273,13 @@
   .row-avatar.av-3 { background: var(--av-3); }
   .row-avatar.av-4 { background: var(--av-4); }
   .row-avatar.av-5 { background: var(--av-5); }
+  /* A real merchant logo. White plate behind it because most logos are drawn
+     for a white background and several are transparent PNGs that vanish in
+     dark mode. */
+  .row-avatar.row-logo {
+    object-fit: contain; background: #fff; padding: 3px;
+    border: 1px solid var(--border);
+  }
   .row-avatar.ghost {
     background: var(--quiet-soft); color: var(--muted);
     border: 1px dashed var(--border-strong);
@@ -466,6 +473,33 @@
   .fold > summary::after { content: " ›"; display: inline-block; transition: transform 0.15s; }
   .fold[open] > summary::after { transform: rotate(90deg); }
   .fold-body { margin-top: 8px; }
+
+  /* --- Expandable category row ------------------------------------------ */
+  /* "Where it went": the total is the summary, its transactions the body.
+     The whole row is the hit target, so it opens under a thumb. */
+  .cat-row { display: block; padding: 0; }
+  .cat-row > summary {
+    cursor: pointer; list-style: none; padding: 12px 14px;
+    border-radius: inherit;
+  }
+  .cat-row > summary::-webkit-details-marker { display: none; }
+  .cat-row > summary .row-title::after {
+    content: " ›"; color: var(--muted); display: inline-block;
+    transition: transform 0.15s;
+  }
+  .cat-row[open] > summary .row-title::after { transform: rotate(90deg); }
+  .cat-row[open] > summary:active, .cat-row > summary:active { background: var(--surface-2); }
+  .cat-body {
+    border-top: 1px solid var(--border);
+    padding: 4px 6px 6px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  /* Rows inside an open category are already inside a card — flatten them so
+     it doesn't read as cards stacked inside cards. */
+  .cat-body .row {
+    border-color: transparent; box-shadow: none; background: transparent;
+    padding: 8px;
+  }
 
   /* --- Forms ------------------------------------------------------------ */
 

@@ -39,7 +39,10 @@ verify_jwt = false
 [functions.send-alerts]
 verify_jwt = false
 
-# Same reasoning again: cron presents a Vault-held secret, not a user JWT.
+# Two callers, so verify_jwt stays off and the function checks both itself:
+# cron presenting a Vault-held secret (every household), and a signed-in
+# person tapping "Find categories for these" (only their own households, via
+# their own token and RLS). Turning verify_jwt on here would lock cron out.
 [functions.categorize-llm]
 verify_jwt = false
 

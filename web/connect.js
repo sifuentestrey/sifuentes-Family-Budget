@@ -144,6 +144,7 @@ export async function listTransactions() {
       id, plaid_transaction_id, account_id, posted_date, amount,
       raw_description, payee, categorized_by, is_transfer, transfer_pair_id,
       is_income, manually_categorized, parent_transaction_id, pending,
+      logo_url, merchant_website,
       categories(name)
     `)
     .order('posted_date', { ascending: false });
@@ -190,6 +191,28 @@ export async function createInvite(email) {
 export async function revokeInvite(id) {
   const { error } = await supabase.from('household_invites').delete().eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Ask the server to name the payees nothing recognised.
+ *
+ * Deliberately on demand rather than automatic: it costs a model call, and a
+ * household that has just connected a bank does not need every historical
+ * oddity resolved the moment they arrive. The nightly sweep does the same
+ * work unprompted; this is the "do it now" button.
+ *
+ * Only ever touches rows still uncategorized, and only in this household —
+ * enforced server-side against the caller's own token, not requested here.
+ */
+export async function categorizeUnknowns() {
+  const { results } = await callFunction('categorize-llm');
+  return (results ?? []).reduce(
+    (acc, r) => ({
+      categorized: acc.categorized + (r.categorized ?? 0),
+      skipped: acc.skipped + (r.skipped ?? 0),
+    }),
+    { categorized: 0, skipped: 0 },
+  );
 }
 
 async function callFunction(name, body) {

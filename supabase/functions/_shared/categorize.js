@@ -22,14 +22,18 @@
  *   1. learned    - a human corrected this payee before. Absolute.
  *   2. rule       - household keyword rules, then seed keyword rules.
  *   3. plaid_pfc  - Plaid's own ML category.
- *   4. llm        - optional, off by default, unknown payees only.
- *   5. none       - Uncategorized, surfaced in the review queue.
+ *   4. similar    - inherits from an already-categorized lookalike payee
+ *                   ("SAFEWAY #0881" from "SAFEWAY #1425"). See
+ *                   similar-payee.js for why this is safe to do automatically.
+ *   5. llm        - optional, unknown payees only, runs server-side.
+ *   6. none       - Uncategorized, surfaced in the review queue.
  */
 
 import { cleanPayee, payeeKey } from './normalize.js';
 import { SEED_RULES, PFC_DETAILED_MAP, PFC_PRIMARY_MAP } from './seed-rules.js';
+import { buildStemIndex, categoryFromSimilarPayee } from './similar-payee.js';
 
-/** @typedef {{category: string|null, by: 'learned'|'rule'|'plaid_pfc'|'llm'|'none'}} Decision */
+/** @typedef {{category: string|null, by: 'learned'|'rule'|'plaid_pfc'|'similar'|'llm'|'none'}} Decision */
 
 /**
  * Build a fast lookup of learned rules keyed by normalized payee.
@@ -111,7 +115,8 @@ export function categorizeOne(txn, ctx) {
   const pfcHit = matchPlaidCategory(txn.plaidCategory);
   if (pfcHit) return { category: pfcHit, by: 'plaid_pfc' };
 
-  // 5. Give up loudly, not silently. Uncategorized rows go to the review queue
+  // 5. Give up — for now. categorizeBatch gets one more go at these, from
+  //    payees the layers above did decide (the 'similar' layer). Uncategorized rows go to the review queue
   //    where a single correction becomes a permanent learned rule.
   return { category: null, by: 'none' };
 }
@@ -127,10 +132,24 @@ export function categorizeOne(txn, ctx) {
  * @returns {Array<object>} transactions with {category, categorized_by} set
  */
 export function categorizeBatch(transactions, ctx) {
-  return transactions.map((txn) => {
+  // Two passes. The first runs the deterministic layers; the second lets
+  // anything they decided teach the leftovers, so "SAFEWAY #0881" inherits
+  // from "SAFEWAY #1425" whether that one was decided by a human, a rule or
+  // Plaid. One pass could not do this — the teaching row may come later in
+  // the list than the row that needs it.
+  const first = transactions.map((txn) => {
     if (txn.manually_categorized) return txn;
     const decision = categorizeOne(txn, ctx);
     return { ...txn, category: decision.category, categorized_by: decision.by };
+  });
+
+  const stemIndex = ctx.stemIndex ?? buildStemIndex(first);
+  if (!stemIndex.size) return first;
+
+  return first.map((txn) => {
+    if (txn.manually_categorized || txn.categorized_by !== 'none') return txn;
+    const similar = categoryFromSimilarPayee(txn.payee, stemIndex);
+    return similar ? { ...txn, category: similar, categorized_by: 'similar' } : txn;
   });
 }
 
@@ -150,6 +169,12 @@ export function normalizePlaidTransaction(raw, accountId) {
     raw_description: raw.original_description || raw.name || '',
     payee: cleanPayee(raw.name, raw.merchant_name),
     plaidCategory: raw.personal_finance_category || null,
+    // Plaid returns a merchant logo and website for most recognisable
+    // merchants. Stored as URLs, never copied: a list of charges that shows
+    // the actual logos is scannable in a way a column of initials is not,
+    // and a missing one simply falls back to the initial.
+    logo_url: raw.logo_url ?? null,
+    merchant_website: raw.website ?? null,
     pending: Boolean(raw.pending),
     manually_categorized: false,
     category: null,
@@ -165,7 +190,7 @@ export function normalizePlaidTransaction(raw, accountId) {
  * categorized without them having to intervene.
  */
 export function categorizationStats(transactions) {
-  const counts = { learned: 0, rule: 0, plaid_pfc: 0, llm: 0, none: 0 };
+  const counts = { learned: 0, rule: 0, plaid_pfc: 0, similar: 0, llm: 0, none: 0 };
   for (const txn of transactions) {
     counts[txn.categorized_by] = (counts[txn.categorized_by] || 0) + 1;
   }
