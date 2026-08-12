@@ -8,20 +8,25 @@
  * the domain is derived here, from the payee string itself, and the logo is
  * fetched from that domain's favicon.
  *
- * Three sources, in order of how much they can be trusted:
+ * Four sources, in order of how much they can be trusted:
  *
  *   1. A website Plaid actually gave us.
  *   2. A domain sitting in the payee text — "COMCAST.COM BILL PAY", and the
  *      surprisingly common "WWW.SOMETHING.COM" descriptor.
- *   3. This table, keyed by the payee's leading word (the same stem the
- *      lookalike-categorizer uses), for merchants a bank statement mangles
- *      beyond recognition: "SQ *BLUE BOTTLE", "TST* CHIPOTLE 2245",
- *      "AMZN Mktp US*RT4G59DK3".
+ *   3. The table below, matched against any meaningful word in the payee, for
+ *      chains a bank statement mangles beyond recognition: "SQ *BLUE BOTTLE",
+ *      "TST* CHIPOTLE 2245", "AMZN Mktp US*RT4G59DK3", "ACH DEBIT PGE WEB".
+ *   4. A domain guessed from the merchant's own name — see guessedDomain.
+ *      A table can only ever cover national chains, which on a real statement
+ *      is a minority of the rows; the dentist, the daycare and the landlord
+ *      are the charges someone actually scans for, and most of them own the
+ *      .com of their name.
  *
- * The table is deliberately small and only holds merchants where the mapping
- * is unambiguous. A wrong logo is worse than no logo: it makes the whole list
- * untrustworthy, and someone scanning for a charge they don't recognise is
- * exactly the person who must not be shown the wrong brand.
+ * A wrong logo is worse than no logo: it makes the whole list untrustworthy,
+ * and someone scanning for a charge they don't recognise is exactly the person
+ * who must not be shown the wrong brand. So the guessing rules are built so
+ * that being wrong lands on a domain that does not resolve — which shows a
+ * neutral globe, not another company — rather than on a real business.
  */
 
 import { payeeStem } from './similar-payee.js';
@@ -76,8 +81,61 @@ export const MERCHANT_DOMAINS = {
   amex: 'americanexpress.com', discover: 'discover.com', capital: 'capitalone.com',
   wells: 'wellsfargo.com', citi: 'citi.com', venmo: 'venmo.com',
   paypal: 'paypal.com', cashapp: 'cash.app', zelle: 'zellepay.com',
-  bright: 'brighthorizons.com',
+  bright: 'brighthorizons.com', pge: 'pge.com', pgande: 'pge.com',
+  sdge: 'sdge.com', socalgas: 'socalgas.com', edison: 'sce.com',
+  duke: 'duke-energy.com', conedison: 'coned.com', dominion: 'dominionenergy.com',
+  waste: 'wm.com', recology: 'recology.com', att: 'att.com',
+  frontier: 'frontier.com', cox: 'cox.com', dish: 'dish.com',
+  directv: 'directv.com', ring: 'ring.com', adt: 'adt.com',
+
+  // More of everyday life
+  dollar: 'dollartree.com', family: 'dollargeneral.com', five: 'fivebelow.com',
+  michaels: 'michaels.com', joann: 'joann.com', staples: 'staples.com',
+  office: 'officedepot.com', autozone: 'autozone.com', napa: 'napaonline.com',
+  jiffy: 'jiffylube.com', discount: 'discounttire.com', firestone: 'firestonecompleteautocare.com',
+  enterprise: 'enterprise.com', hertz: 'hertz.com', delta: 'delta.com',
+  united: 'united.com', southwest: 'southwest.com', alaska: 'alaskaair.com',
+  american: 'aa.com', marriott: 'marriott.com', hilton: 'hilton.com',
+  airbnb: 'airbnb.com', booking: 'booking.com', expedia: 'expedia.com',
+  amc: 'amctheatres.com', regal: 'regmovies.com', ticketmaster: 'ticketmaster.com',
+  steam: 'steampowered.com', nintendo: 'nintendo.com', playstation: 'playstation.com',
+  xbox: 'xbox.com', roblox: 'roblox.com', sephora: 'sephora.com',
+  ulta: 'ulta.com', supercuts: 'supercuts.com', great: 'greatclips.com',
+  panda: 'pandaexpress.com', shake: 'shakeshack.com', five_guys: 'fiveguys.com',
+  jersey: 'jerseymikes.com', jimmy: 'jimmyjohns.com', raising: 'raisingcanes.com',
+  popeyes: 'popeyes.com', sonic: 'sonicdrivein.com', culvers: 'culvers.com',
+  ihop: 'ihop.com', denny: 'dennys.com', cracker: 'crackerbarrel.com',
+  olive: 'olivegarden.com', cheesecake: 'thecheesecakefactory.com',
+  buffalo: 'buffalowildwings.com', outback: 'outback.com',
+  safeco: 'safeco.com', farmers: 'farmers.com', nationwide: 'nationwide.com',
+  liberty: 'libertymutual.com', aetna: 'aetna.com', cigna: 'cigna.com',
+  anthem: 'anthem.com', united_health: 'uhc.com', delta_dental: 'deltadental.com',
+  fidelity: 'fidelity.com', vanguard: 'vanguard.com', schwab: 'schwab.com',
+  robinhood: 'robinhood.com', coinbase: 'coinbase.com', ally: 'ally.com',
+  synchrony: 'synchrony.com', navient: 'navient.com', nelnet: 'nelnet.com',
+  sallie: 'salliemae.com', carmax: 'carmax.com', carvana: 'carvana.com',
+  tesla: 'tesla.com', toyota: 'toyota.com', honda: 'honda.com',
+  ford: 'ford.com', subaru: 'subaru.com', chevrolet: 'chevrolet.com',
 };
+
+/**
+ * Words that are a category rather than a company, so guessing a domain from
+ * them lands on somebody unrelated. "MEDICAL GROUP OF X" must not become
+ * medical.com.
+ */
+const GENERIC_WORDS = new Set([
+  'medical', 'dental', 'clinic', 'health', 'hospital', 'pharmacy', 'family',
+  'city', 'county', 'state', 'water', 'power', 'energy', 'electric', 'gas',
+  'auto', 'motor', 'insurance', 'financial', 'capital', 'first', 'national',
+  'american', 'united', 'general', 'service', 'services', 'solutions',
+  'properties', 'property', 'management', 'rental', 'rentals', 'apartments',
+  'grocery', 'grocers', 'foods', 'restaurant', 'cafe', 'coffee', 'bakery',
+  'salon', 'barber', 'cleaners', 'laundry', 'daycare', 'childcare', 'academy',
+  'school', 'church', 'transfer', 'deposit', 'payroll', 'payment', 'billpay',
+  'withdrawal', 'atm', 'check', 'interest', 'fee', 'charge', 'refund',
+  'rent', 'mortgage', 'lease', 'utility', 'utilities', 'membership', 'monthly',
+  'direct', 'dep', 'purchase', 'debit', 'credit',
+]);
 
 /** Payment-processor prefixes that sit in front of the real merchant name. */
 const PROCESSOR_PREFIXES = /^(sq|tst|sp|py|pp|par|ci|ach|pos|debit|credit|web|recur|dd)\b[\s*]*/i;
@@ -110,13 +168,85 @@ export function domainForPayee(payee, website = null) {
   const inline = domainInText(payee);
   if (inline) return inline;
 
-  // Strip a processor prefix before taking the stem, so "SQ *BLUE BOTTLE"
-  // stems to "blue" rather than to the processor.
-  const cleaned = String(payee ?? '').replace(PROCESSOR_PREFIXES, '');
-  const stem = payeeStem(cleaned) ?? payeeStem(payee);
-  if (!stem) return null;
+  // Strip a processor prefix before matching, so "SQ *BLUE BOTTLE" is read as
+  // Blue Bottle rather than as the processor.
+  // "&" is dropped rather than spaced, so PG&E reads as one word (pge) and
+  // matches the table instead of dissolving into two one-letter fragments.
+  const cleaned = String(payee ?? '').replace(/&/g, '').replace(PROCESSOR_PREFIXES, '');
 
-  return MERCHANT_DOMAINS[stem] ?? null;
+  // The table is tried against the first word as well as against the stem:
+  // the stem deliberately ignores anything under four characters, which would
+  // otherwise lose CVS, REI and IKEA.
+  const firstWord = cleaned.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim().split(/\s+/)[0];
+  if (firstWord && MERCHANT_DOMAINS[firstWord]) return MERCHANT_DOMAINS[firstWord];
+
+  const stem = payeeStem(cleaned) ?? payeeStem(payee);
+  if (stem && MERCHANT_DOMAINS[stem]) return MERCHANT_DOMAINS[stem];
+
+  // A known merchant anywhere in the description, not only at the front:
+  // banks bury the name behind their own prefixes ("ACH DEBIT PGE WEB
+  // ONLINE"), and the words in front of it are noise by definition.
+  for (const word of meaningfulWords(cleaned || payee)) {
+    if (MERCHANT_DOMAINS[word]) return MERCHANT_DOMAINS[word];
+  }
+
+  return guessedDomain(cleaned || payee);
+}
+
+/** Words in a payee that carry meaning: no noise, no one/two-letter scraps. */
+function meaningfulWords(payee) {
+  return String(payee ?? '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !NAME_NOISE.has(w));
+}
+
+/**
+ * A domain guessed from the merchant's own name — "OAKWOOD PROPERTIES" →
+ * oakwoodproperties.com, "MERIDIAN HEALTH GRP" → meridianhealth.com.
+ *
+ * The table above can only ever cover national chains, which on a real
+ * statement is a minority of the rows: the dentist, the daycare, the local
+ * hardware store and the landlord are all missing from it, and they are
+ * exactly the charges someone scans for. Most small businesses do own the
+ * .com of their own name, so this is right far more often than not.
+ *
+ * When it's wrong it is nearly always wrong by landing on a domain that does
+ * not exist, and the favicon service answers that with a neutral globe — a
+ * "no logo" outcome, not another company's brand. The guards below exist to
+ * keep it that way:
+ *
+ *   - never guess from a single generic word (medical.com, properties.com);
+ *   - two words are joined before one is used alone, since "oakwood
+ *     properties" is far more identifying than "oakwood";
+ *   - noise words a bank appends (LLC, INC, #1425, WEB PMT) are dropped
+ *     first, so they never end up inside the guessed hostname.
+ */
+const NAME_NOISE = new Set([
+  'llc', 'inc', 'corp', 'co', 'ltd', 'lp', 'plc', 'the', 'and', 'of',
+  'web', 'pmt', 'pymt', 'bill', 'billpay', 'online', 'recurring', 'auto',
+  'ach', 'pos', 'debit', 'credit', 'purchase', 'payment', 'store', 'grp',
+  'group', 'usa', 'us', 'intl', 'international',
+]);
+
+export function guessedDomain(payee) {
+  const words = meaningfulWords(payee);
+
+  // Leading category nouns are what a bank puts in front of the actual name
+  // ("RENT PAYMENT OAKWOOD PROPERTIES", "MEDICAL GROUP OF BERKELEY"), so
+  // drop them — but never the last word, or there is nothing left to guess
+  // from and "medical.com" is precisely the wrong answer.
+  let start = 0;
+  while (start < words.length - 1 && GENERIC_WORDS.has(words[start])) start += 1;
+
+  const [first, second] = words.slice(start);
+
+  // Pairs only. A single word is either a chain already in the table above or
+  // too thin to bet a brand on: guessing from one word turns the local
+  // "BERKELEY ORTHODONTICS" into berkeley.com, which is somebody else.
+  if (!first || !second) return null;
+  return `${first}${second}.com`;
 }
 
 /**

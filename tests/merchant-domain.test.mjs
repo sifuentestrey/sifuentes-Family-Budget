@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  domainForPayee, domainInText, faviconUrl, MERCHANT_DOMAINS,
+  domainForPayee, domainInText, faviconUrl, guessedDomain, MERCHANT_DOMAINS,
 } from '../src/engine/merchant-domain.js';
 
 test('a website from Plaid wins over everything else', () => {
@@ -34,10 +34,9 @@ test('processor prefixes are stripped before matching the merchant', () => {
 });
 
 test('an unknown merchant gets no logo rather than a wrong one', () => {
-  assert.equal(domainForPayee('BERTELLI FARMS #1425'), null);
+  assert.equal(domainForPayee('POS 4471'), null, 'nothing to identify');
   assert.equal(domainForPayee('VENMO *JORDAN ELLIS'), 'venmo.com', 'the processor itself is known');
   assert.equal(domainForPayee(''), null);
-  assert.equal(domainForPayee('POS 4471'), null, 'nothing distinctive to match on');
 });
 
 test('every domain in the table looks like a hostname', () => {
@@ -52,4 +51,28 @@ test('the favicon URL escapes what it is given, and refuses nothing', () => {
   assert.equal(faviconUrl(null), null);
   assert.match(faviconUrl('costco.com'), /^https:\/\/www\.google\.com\/s2\/favicons\?domain=costco\.com&sz=64$/);
   assert.ok(!faviconUrl('a b&c=d').includes(' '), 'an unescaped domain would break the URL');
+});
+
+test('a known chain is found even when the bank buries it mid-description', () => {
+  assert.equal(domainForPayee('ACH DEBIT PG&E WEB ONLINE'), 'pge.com');
+  assert.equal(domainForPayee('POS DEBIT 07/11 TRADER JOES #123'), 'traderjoes.com');
+  assert.equal(domainForPayee('COMCAST XFINITY WEB PMT'), 'xfinity.com');
+  assert.equal(domainForPayee('CVS/PHARMACY #08812'), 'cvs.com', 'short names must not be lost');
+  assert.equal(domainForPayee('REI #0021 SEATTLE WA'), 'rei.com');
+});
+
+test('a local business is guessed from its own name, not from the noise around it', () => {
+  // The words a bank puts in front of the name are the ones that must not
+  // end up in the domain.
+  assert.equal(domainForPayee('RENT PAYMENT OAKWOOD PROPERTIES'), 'oakwoodproperties.com');
+  assert.equal(domainForPayee('DIRECT DEP NORTHSTAR LOGISTICS PAYROLL'), 'northstarlogistics.com');
+});
+
+test('guessing refuses when it would land on a category noun or a bare word', () => {
+  // "MEDICAL GROUP OF BERKELEY" must never become medical.com or berkeley.com —
+  // both are real sites belonging to somebody else entirely.
+  assert.equal(domainForPayee('MEDICAL GROUP OF BERKELEY'), null);
+  assert.equal(domainForPayee('ONLINE TRANSFER TO SAVINGS 7788'), null);
+  assert.equal(guessedDomain('PHARMACY'), null, 'one generic word is nothing to go on');
+  assert.equal(guessedDomain('ORTHODONTICS'), null, 'a single word is never enough');
 });

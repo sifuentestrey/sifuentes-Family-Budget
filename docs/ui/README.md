@@ -33,6 +33,27 @@ visibly part of the same place.
 earlier build put ten destinations there as ten identical rows, which is how
 Trends, Paystubs and Connect all ended up equally buried.
 
+## Density
+
+One card per *list*, hairlines between rows — not a card per row. Twenty
+separate cards is twenty borders, twenty shadows and twenty gaps of dead
+space, which is most of what made a long list feel heavy. `.list.loose` is
+the exception, for rows that carry their own buttons.
+
+A transaction row is one line of payee, one line of date + category, and the
+amount. The category reads as text and becomes a picker when tapped: it used
+to be a `<select>` on every row, which put a 34px control on a line that
+otherwise needs 40, nearly doubling the height of every transaction in the
+app to offer a control almost nobody uses on almost any row.
+
+Two things bite when working in here:
+
+- Every `<summary>` gets a **negative margin** from the normalize stylesheet
+  (to widen its tap target). Inside a card that makes the row 32px wider than
+  its container and it spills out both sides. Set `margin: 0`.
+- A `nowrap` title needs `min-width: 0` or it pushes its flex parent wider
+  than the card.
+
 ## Components
 
 There is one of each, and views compose them rather than inventing their own —

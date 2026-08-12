@@ -414,6 +414,8 @@ const state = {
   // display preference for this device, so localStorage is the right home for
   // it (unlike budget targets, which are a shared agreement).
   showLogos: localStorage.getItem('showLogos') !== '0',
+  // The one transaction whose category picker is open, if any.
+  editingCategory: null,
   autoCategorizing: false,
   autoCategorizeResult: null,
   autoCategorizeError: null,
@@ -1222,7 +1224,7 @@ function renderMore() {
           iconName: 'bank',
           title: 'Show merchant logos',
           sub: state.showLogos
-            ? 'On — logos are fetched from Google\'s public favicon service, which means it sees the merchant domains this device looks up (not your amounts, transactions, or who you are).'
+            ? 'On — matched from the merchant name, so the occasional one is wrong or missing. Fetched from Google\'s public favicon service, which means it sees the merchant domains this device looks up (not your amounts, transactions, or who you are).'
             : 'Off — coloured initials only, and nothing leaves this device.',
           actions: `<button class="btn btn-sm btn-outline" data-action="toggle-logos">
             ${state.showLogos ? 'Turn off' : 'Turn on'}
@@ -1620,11 +1622,17 @@ function renderTransactionRow(t) {
   const kind = t.is_transfer ? 'transfer' : t.is_income ? 'income' : null;
   const date = new Date(`${t.posted_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-  const chips = [
-    kind ? `<span class="chip ${kind === 'income' ? 'chip-ok' : ''}">${kind}</span>` : '',
-    !kind && t.categorized_by !== 'none'
-      ? `<span class="chip chip-outline">${CATEGORY_SOURCE_LABEL[t.categorized_by] ?? t.categorized_by}</span>` : '',
-  ].join('');
+  const editing = state.editingCategory === t.plaid_transaction_id;
+
+  // The category is text until it's tapped. It used to be a <select> on every
+  // single row, which put a 34px control on a line that otherwise needs 40 —
+  // nearly doubling the height of every transaction in the app to offer a
+  // control almost nobody uses on almost any row.
+  const category = kind
+    ? `<span class="chip ${kind === 'income' ? 'chip-ok' : ''}">${kind}</span>`
+    : `<button class="cat-pill ${t.category ? '' : 'unset'}" data-edit-category="${t.plaid_transaction_id}">
+        ${t.category ? escapeHtml(t.category) : 'Add category'}
+      </button>`;
 
   return `
     <div class="row" data-id="${t.plaid_transaction_id}"
@@ -1632,10 +1640,10 @@ function renderTransactionRow(t) {
       ${avatarFor(t.payee, logoForPayee(t.payee))}
       <div class="row-body">
         <div class="row-title">${t.payee}</div>
-        <div class="row-sub">${date}${chips ? ` ${chips}` : ''}</div>
-        ${kind ? '' : `<select class="cat-select select-sm" style="margin-top:7px;" data-id="${t.plaid_transaction_id}">
+        <div class="row-sub">${date} · ${category}</div>
+        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${t.plaid_transaction_id}">
           ${categoryOptions(t.category)}
-        </select>`}
+        </select>` : ''}
       </div>
       <div class="row-end">
         <div class="row-amount ${t.amount < 0 ? 'income' : ''}">
@@ -2052,21 +2060,17 @@ function renderBudget() {
           <div class="meter">
             <div class="meter-fill ${l.over ? 'warn' : ''}" style="width:${pct}%"></div>
           </div>` : ''}
-        <div class="row-sub" style="margin-top:7px;display:flex;justify-content:space-between;gap:10px;align-items:center;">
+        <div class="row-sub" style="margin-top:5px;">
           <span>
             ${l.planned === null
-              ? 'No target yet — not enough history to guess one'
+              ? 'No target yet'
               : l.over
                 ? `${moneyExact(l.spent - l.planned)} over`
                 : `${moneyExact(l.remaining)} left`}
-            ${l.plannedSource === 'typical' ? ' · target from your own average' : ''}
           </span>
-          <span style="display:flex;gap:6px;">
-            <button class="btn btn-sm btn-outline" data-action="edit-target" data-category="${escapeHtml(l.category)}">
-              ${editing ? 'Cancel' : l.planned === null ? 'Set target' : 'Edit'}
-            </button>
-            <button class="btn btn-sm btn-outline" data-category="${escapeHtml(l.category)}">Transactions</button>
-          </span>
+          <button class="cat-pill" data-action="edit-target" data-category="${escapeHtml(l.category)}">
+            ${editing ? 'Cancel' : l.planned === null ? 'Set a target' : 'Change target'}
+          </button>
         </div>
         ${editing ? `
           <form class="field-inline" data-target-form="${escapeHtml(l.category)}" style="margin-top:9px;">
@@ -3285,7 +3289,8 @@ function render() {
     }),
   );
 
-  // Budget's "Transactions" buttons still jump to the full list, filtered.
+  // Anything else that names a category and isn't an action jumps to the full
+  // transaction list, filtered to it.
   app.querySelectorAll('button[data-category]:not([data-action])').forEach((btn) =>
     btn.addEventListener('click', () => {
       state.transactionFilter = btn.dataset.category;
@@ -3339,8 +3344,22 @@ function render() {
     }),
   );
 
+  app.querySelectorAll('[data-edit-category]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.editCategory;
+      state.editingCategory = state.editingCategory === id ? null : id;
+      render();
+      // Open the picker straight away — the tap was the intent to change it,
+      // not a request to be shown a control to tap again.
+      document.querySelector(`.cat-select[data-id="${id}"]`)?.focus();
+    }),
+  );
+
   app.querySelectorAll('.cat-select').forEach((sel) =>
-    sel.addEventListener('change', () => recategorize(sel.dataset.id, sel.value)),
+    sel.addEventListener('change', () => {
+      state.editingCategory = null;
+      recategorize(sel.dataset.id, sel.value);
+    }),
   );
 
   const search = document.getElementById('search');
