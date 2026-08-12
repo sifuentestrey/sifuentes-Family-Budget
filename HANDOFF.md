@@ -1,35 +1,14 @@
 # Handoff — Family Budget
 
-Paste this into a new chat to resume. Last updated 2026-08-11 (evening —
-supersedes the afternoon version of the same date, which superseded the
-morning one; everything described in those has merged to `main`).
+Paste this into a new chat to resume. Last updated 2026-08-12 (evening).
 
-## Newest work (2026-08-11 evening)
+## Read this first
 
-- **The UI was rebuilt on one design system.** `web/index.html`'s stylesheet
-  is now tokens plus a fixed set of components (`.hero`, `.card`, `.row`,
-  `.kv`, `.chip`, `.btn`, `.field`, `.empty`, `.seg`), and every view composes
-  those instead of its own inline styles. Before this, each screen had its own
-  row shape and its own button styling, which is why the app read as several
-  apps stapled together. `docs/ui/README.md` documents the components and the
-  navigation model — read it before adding a screen.
-- **Navigation changed shape.** Still five tabs, but Spending and Income now
-  carry segmented controls for their sibling views (Overview / Transactions /
-  Recurring / Trends, and Overview / Paycheck / Shifts / Paystubs). "More" is
-  down to settings-ish destinations. Two tests in `tests/shifts.test.mjs`
-  guard both directions: every navigable id has a renderer, and every renderer
-  is reachable from the nav.
-- **Bills can now be added from transactions.** New pure module
-  `src/engine/bill-suggestions.js` (18 tests) proposes bills from recurring
-  charges already in the household's own transactions — the "Found in your
-  transactions" section on Bills, with one-tap Track as bill / Not a bill.
-  Nothing is saved without a tap. Accepted bills are `source: 'bank'`, a new
-  value on the `bill_source_type` enum — **migration `0017_bill_source_bank.sql`
-  is already applied to the live database** (verified), so the repo file is a
-  record, not a pending change.
-- Dismissed suggestions live in `localStorage` under
-  `dismissedBillSuggestions`, deliberately not in the database.
-- Service worker is at `v17`; `npm test` is **311 passing, 0 failing**.
+The previous version of this file said "no bank connected yet — `items` is
+empty", and a whole session was spent telling the household to connect a bank
+they had connected weeks earlier. **This file is a snapshot, not a live view.**
+Before repeating any factual claim from it, check it — the queries at the
+bottom take ten seconds.
 
 ## What this is
 
@@ -38,189 +17,113 @@ earner (call shifts, swings ~$1,400–$3,100/paycheck) and one stable
 semi-monthly earner. Plaid for bank sync, Supabase for backend/auth, static
 PWA frontend, deployed to GitHub Pages. Zero-cost stack by design.
 
-## Repo / project IDs
-
 - GitHub: `sifuentestrey/sifuentes-Family-Budget` (public)
 - Supabase project: `ytkpthlhtbxtvtadepqt`
 - Live app: https://sifuentestrey.github.io/sifuentes-Family-Budget/
-- `main` is the only branch that matters. PRs #1–#9 are all merged, 0 open.
-  The old working branch `claude/family-budget-shared-accounts-djv89t` is
-  fully superseded (everything on it is in `main`, some of it evolved
-  further) — safe to delete, nobody has done so yet.
+- `main` is the only branch that matters. PRs #1–#19 merged.
 
-## Current state (verified 2026-08-11 against live Supabase + local repo)
+## Current state
 
-- **311 tests passing** (`npm test`), 0 failing. Note: `node_modules` is not
-  checked in — a fresh clone/machine needs `npm install` before tests will
-  run (the `unpdf` dependency fails to resolve otherwise).
-- **1 user in `auth.users`** — the owner has signed up. Household exists.
-- **No bank connected yet** — `items` table is empty. This needs the owner,
-  in-app, with real bank credentials; not something an agent can or should
-  do.
-- **No invites sent yet** — `household_invites` is empty. Needs the second
-  household member's email, which only the owner has.
-- **Plaid is now on `production`, not `sandbox`.** Confirmed live via the
-  `plaid-health` edge function (unauthenticated diagnostic endpoint, reports
-  presence/shape only, never echoes secrets:
-  `curl https://ytkpthlhtbxtvtadepqt.supabase.co/functions/v1/plaid-health`).
-  The account is on Plaid's free trial tier — real production API access for
-  up to 10 real bank connections, no manual Plaid approval process needed
-  (0/10 used as of this writing). `PLAID_CLIENT_ID` is unchanged (shared
-  across Plaid environments); `PLAID_SECRET` was replaced with the
-  production secret from the Plaid dashboard's Keys page.
-- **Gmail bill-scanning OAuth is now fully configured**, not just coded.
-  Previously `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` were unset entirely —
-  `gmail-oauth-start` would 503 immediately. Set up end-to-end this session:
-  - Google Cloud project `family-budget-505203` (already existed, pre-dates
-    this session — unclear which prior session created it) now has an OAuth
-    consent screen: External audience, Testing publishing status (no Google
-    verification needed at this scale), app name "Family Budget", test users
-    `sifuentestrey@gmail.com` and `treysifuentes2@gmail.com`.
-  - OAuth 2.0 Client ID "Family Budget Gmail sync" (Web application type)
-    created with redirect URI
-    `https://ytkpthlhtbxtvtadepqt.supabase.co/functions/v1/gmail-oauth-callback`
-    (matches `gmail-oauth-callback/index.ts` exactly — this must stay in
-    sync if that function's URL ever changes).
-  - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` set as Supabase secrets via
-    the Supabase CLI (see below), values taken directly from Google's
-    one-time credential-reveal dialog, not retyped from a screenshot.
-  - **Testing-mode caveat**: only the two test-user emails above can
-    complete the Gmail OAuth flow. Adding a third household member's Gmail
-    for bill-scanning means adding them as a test user first at
-    console.cloud.google.com/auth/audience?project=family-budget-505203
-    (100 test-user cap, refreshed only by full Google app verification,
-    which is a bigger undertaking — not needed at household scale).
-- **The sync-transactions auth bug fix IS deployed and live**, not just
-  committed — confirmed by reading the deployed function body directly via
-  Supabase MCP (`get_edge_function`), not just checking git. It reads the
-  bearer secret from Vault, fails closed if unset, constant-time compares.
-- **Vault has `sync_secret`** (1 row), and three `pg_cron` jobs are active:
-  `daily-transaction-sync` (09:00 UTC), `daily-bill-sync` (09:15 UTC),
-  `daily-alert-email` (09:30 UTC).
-- **The GitHub Actions Supabase-deploy workflow (`supabase.yml`) now
-  actually works.** `SUPABASE_ACCESS_TOKEN` was never set — every run before
-  this session (4 runs, ~10s each) hit the "not set — skipping deploy"
-  branch and exited green without doing anything. Fixed this session: a
-  Supabase personal access token ("github-actions-deploy", expires
-  2026-09-10 — Supabase's token dialog offered no non-expiring option this
-  time, unlike the pre-existing "Migration" token which shows "Never") is
-  now set as the `SUPABASE_ACCESS_TOKEN` repo secret via `gh secret set`.
-  **Whoever picks this up before 2026-09-10 should rotate it** (same steps:
-  supabase.com/dashboard/account/tokens → generate → `gh secret set
-  SUPABASE_ACCESS_TOKEN --repo sifuentestrey/sifuentes-Family-Budget`) or CI
-  silently reverts to no-op mode again.
-- Shift logging, invite-only signup, Gmail bill scanning, PDF paystub
-  attachments, outbound alert emails, paystub reconciliation, and
-  Safe-to-Spend-as-the-authoritative-dashboard-number are all built, tested,
-  and merged (PRs #2, #4, #6, #7, #8, #9).
-- **The main dashboard still runs entirely on synthetic demo data,
-  regardless of bank-connection state.** This is a real, confirmed gap, not
-  a misconfiguration — traced through `web/app.js`: `state.transactions` is
-  set exactly once, in `load()`, always from `fixtures/sample-plaid.json`,
-  with zero code path that ever replaces it with real Supabase data. Shifts,
-  Bills, Paystubs, and Connect tabs all correctly use real data; the core
-  spending/budget/Safe-to-Spend dashboard does not. The app's own Connect-tab
-  copy says as much: "Connecting a bank replaces nothing shown elsewhere in
-  this app yet." **Once a bank is connected and real transactions exist in
-  the `transactions` table, wiring the dashboard to read them (instead of
-  the fixture) is the highest-value next task** — everything downstream
-  (categorization, transfer detection, Safe-to-Spend, subscriptions) is
-  already built and tested against the same data shape, it just needs a real
-  source instead of the fixture.
+- **The bank is connected and syncing real transactions.** Real merchants,
+  real amounts. The dashboard reads them — the old "dashboard always runs on
+  the fixture" gap is closed; fixtures are the signed-out demo only.
+- `npm test` — **359 passing, 0 failing**. `node_modules` is not checked in;
+  a fresh clone needs `npm install` first (`unpdf` won't resolve otherwise).
+- Service worker at **v26**. Bump `CACHE_VERSION` whenever a shell asset is
+  added or returning users keep the old shell.
+- **Unverified**: whether the second household member has been invited, and
+  whether any bills are actually tracked. Both change what several screens
+  show. Check, don't assume.
 
-## Loose ends (not blocking, but real)
+## The shape of the app now
 
-1. **`SUPABASE_ACCESS_TOKEN` GitHub secret expires 2026-09-10.** See above —
-   rotate it before then or CI deploys silently go back to no-op.
-2. **`GOOGLE_CLIENT_ID`/`SECRET` are on a Testing-mode consent screen**, not
-   verified/published. Fine indefinitely at household scale (100 test-user
-   cap, only 2 in use), but if this ever needs to work for a Gmail address
-   that isn't pre-listed as a test user, add it at
-   console.cloud.google.com/auth/audience?project=family-budget-505203
-   first — there's no other way in while Testing status holds.
-3. **~30 stale branches on the remote** (`payroll-v1` through `-v6`,
-   `payroll-engine-*`, `payroll-groundwork-*`, `payroll-system-a` through
-   `-h`, `x-pay`, etc.) — almost all point at the same abandoned commit
-   `4645f57`. Cosmetic clutter only, nothing depends on them. Fine to
-   delete in a batch; ask before doing it since it's a bulk destructive git
-   operation.
-4. **`claude/family-budget-shared-accounts-djv89t`** — the old working
-   branch, fully merged, safe to delete.
-5. **The dashboard-still-uses-demo-data gap** — see above, this is the real
-   next feature, not a loose end exactly, but it's the thing standing
-   between "bank connected" and "app shows your actual numbers."
+Five tabs: **Home**, **Budget** (Budget / Bills), **Spending** (Overview /
+Transactions), **Income** (Overview / Paycheck / Shifts / Paystubs), **More**.
 
-## What only the owner can do next
+- **Home** opens with money in the bank — the real account balance, checking
+  and savings broken out — then a plain "free to spend until <payday>" line.
+  The phrase "safe to spend" is gone; it was the app's own coinage.
+- **Budget** is bills and necessities with targets. Targets default to the
+  household's own trailing average and are stored per household in
+  `budget_targets` (migration 0018), so both people plan against the same
+  numbers.
+- **Spending → Overview** splits the month into **bills** and **after the
+  bills** (`src/engine/month-in-full.js`). Categories expand in place to the
+  transactions inside them.
+- **Design system is "Signal"** — soft grey ground, white cards lifted with a
+  shadow, one dark hero card per screen, coral for "this wants you", green
+  only for money coming in. `docs/ui/README.md` has the rules and the two
+  layout traps (`<summary>` carries a negative margin from the normalize
+  stylesheet; a nowrap title needs `min-width: 0`).
 
-1. **Connect a real bank** in the app — Plaid is live on production now
-   (see above), so this is a real bank login, not a sandbox test bank.
-2. **Invite the second household member** from the Connect tab — needs
-   their email; they need a pending invite to sign up at all now.
-3. **Connect Gmail** for bill-scanning from the Connect tab — OAuth is fully
-   configured now; this should just work for either of the two test-user
-   emails listed above.
+## Things that are easy to get wrong here
 
-## Tooling now available on this machine (wasn't, at session start)
+- **Plaid's category is stored in `pfc_primary` / `pfc_detailed`** (migration
+  0021). It used to be read at insert and thrown away, which silently
+  disabled the plaid_pfc categorization layer server-side — everything
+  downstream re-reads rows from the database, and the nested field is not a
+  column. If a new field from Plaid matters, give it a column.
+- **`reprocessWindow` (sync-transactions) is where categorization and
+  transfer detection actually run**, over the last 30 days, on every sync.
+  Insert-time values for category/transfer are not authoritative.
+- **Merchant logos are curated, never guessed** (`merchant-domain.js`).
+  Guessing a domain from a name produced parked domains and rows of generic
+  globes, and first-word matching branded Del Taco as Taco Bell. Brand keys
+  are six letters minimum and match the payee with separators stripped.
+- **Categorization layers**, in precedence: learned → household rule → seed
+  rule → plaid_pfc → similar (a lookalike payee, `similar-payee.js`) → llm →
+  none. A human decision is never overwritten.
 
-This session set up local tooling that didn't exist before, so a future
-session on this same machine doesn't need to redo it:
+## Infrastructure (verified 2026-08-11, unchanged since)
 
-- `gh` (GitHub CLI) installed at `~/.local/bin/gh`, authenticated as
-  `sifuentestrey`, and wired into git's global credential helper — `git
-  push`/`pull` against this repo just work now, no prompts.
-- Supabase CLI downloaded to a session-scoped temp path (NOT permanent —
-  re-download from github.com/supabase/cli/releases/latest if a future
-  session needs it again; used here only for `supabase secrets set`, which
-  needs `SUPABASE_ACCESS_TOKEN` in the environment and must be run from
-  inside the repo directory, not an arbitrary directory — the CLI resolves
-  `supabase/config.json` relative to cwd and errors confusingly otherwise).
+- **Plaid is on `production`.** Free trial tier, up to 10 real bank
+  connections. Diagnostic (no secrets echoed):
+  `curl https://ytkpthlhtbxtvtadepqt.supabase.co/functions/v1/plaid-health`
+- **Gmail bill-scanning OAuth is fully configured.** Google Cloud project
+  `family-budget-505203`, consent screen in **Testing** status, test users
+  `sifuentestrey@gmail.com` and `treysifuentes2@gmail.com`. Redirect URI is
+  `https://ytkpthlhtbxtvtadepqt.supabase.co/functions/v1/gmail-oauth-callback`
+  and must stay identical to `gmail-oauth-callback/index.ts`. Only listed
+  test users can complete the flow; add more at
+  console.cloud.google.com/auth/audience?project=family-budget-505203
+- **Vault holds `sync_secret`**; three `pg_cron` jobs are active:
+  `daily-transaction-sync` (09:00 UTC), `daily-bill-sync` (09:15),
+  `daily-alert-email` (09:30). The nightly LLM categorizer runs from the same
+  scheduling; `categorize-llm` also accepts a signed-in caller now, scoped to
+  their own households.
+- **CI deploys on merge to `main`**: `ci.yml` (tests), `pages.yml` (the app),
+  `supabase.yml` (migrations + edge functions).
 
-## Deliberately not done yet
+## Loose ends
 
-- Email/push delivery beyond the existing outbound alert emails — check
-  current alert wiring before assuming this is still true, PR #6 added
-  outbound alert emails.
-- Anything past what's listed above — check `git log --oneline -20` for
-  the actual current edge, this file is a snapshot, not a live view.
+1. **`SUPABASE_ACCESS_TOKEN` GitHub secret expires 2026-09-10.** Rotate at
+   supabase.com/dashboard/account/tokens then `gh secret set
+   SUPABASE_ACCESS_TOKEN --repo sifuentestrey/sifuentes-Family-Budget`, or
+   Supabase deploys silently go back to no-op.
+2. **~30 stale remote branches** (`payroll-v1`…`-v6`, `payroll-engine-*`,
+   `x-pay`, etc.), almost all pointing at abandoned commit `4645f57`.
+   Cosmetic; ask before bulk-deleting.
+3. **Push notifications are wired in the service worker but nothing sends
+   them** — no VAPID keys, no subscription table, no sender.
+4. **No way to split a transaction** in the UI, though the schema supports it
+   (`parent_transaction_id`, and the parent is excluded from totals).
+5. **Everything is scoped to one month.** No year view.
 
-## How to verify state quickly in a new session
+## Verifying state quickly
 
 ```sql
--- against project ytkpthlhtbxtvtadepqt via Supabase MCP tools
-select count(*) from auth.users;                              -- 1
-select count(*) from items;                                   -- 0 until a bank is connected
-select count(*) from household_invites;                       -- 0 until someone is invited
-select jobname, active from cron.job;                          -- 3 rows, all active=true
-select count(*) from vault.secrets where name='sync_secret';   -- 1
+-- project ytkpthlhtbxtvtadepqt, via Supabase MCP
+select count(*) from auth.users;
+select count(*) from items;                    -- bank connections
+select count(*) from transactions;             -- real rows?
+select count(*) from bills;                    -- tracked bills?
+select count(*) from household_invites;        -- second member invited?
+select count(*) from budget_targets;
+select jobname, active from cron.job;
 ```
 
 ```bash
-# Plaid config, unauthenticated, never echoes secret values:
-curl https://ytkpthlhtbxtvtadepqt.supabase.co/functions/v1/plaid-health
-# expect: "ready": true, "PLAID_ENV": "set to 'production'"
+npm install && npm test          # expect 359 passing
+curl -s https://sifuentestrey.github.io/sifuentes-Family-Budget/web/sw.js | grep CACHE_VERSION
+git log --oneline -20            # this file is a snapshot; the log is the truth
 ```
-
-```bash
-git fetch origin && git log --oneline origin/main -10
-npm install && npm test 2>&1 | tail -8   # expect 269+ passing, 0 failing
-```
-
-## Tone/process notes for the next session
-
-- User wants **all automation, nothing manual unless ABSOLUTELY necessary**,
-  and generally prefers the agent to just act rather than ask for each step
-  — but still confirm before anything destructive/hard-to-reverse (bulk
-  branch deletion, force-push, minting new credentials) or anything that
-  needs information only the owner has (bank login, spouse's email).
-- The user is non-technical — doesn't use the terminal, described their own
-  input as "pressing random buttons." Don't hand them shell commands to run
-  as the primary path; do the work directly (this session had local shell
-  + GitHub + Supabase MCP access and used all three) and explain outcomes
-  in plain language.
-- This repo is **public**. Before adding anything, sanity-check it's not
-  real financial data (`.gitignore` already blocks `data/*`, `*.csv`, etc. —
-  don't weaken that).
-- Don't trust an old handoff doc's "current state" section at face value —
-  this file itself was stale by one day and had already-merged work
-  described as still pending. Verify against the live DB and `git log`
-  before acting on anything a handoff claims.
