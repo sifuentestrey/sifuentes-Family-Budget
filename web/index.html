@@ -273,13 +273,20 @@
   .row-avatar.av-3 { background: var(--av-3); }
   .row-avatar.av-4 { background: var(--av-4); }
   .row-avatar.av-5 { background: var(--av-5); }
-  /* A real merchant logo. White plate behind it because most logos are drawn
-     for a white background and several are transparent PNGs that vanish in
-     dark mode. */
-  .row-avatar.row-logo {
-    object-fit: contain; background: #fff; padding: 3px;
-    border: 1px solid var(--border);
+  /* A real merchant logo, painted over the coloured initial. White plate
+     because most logos are drawn for a white background, and several are
+     transparent PNGs that would vanish in dark mode. The initial underneath
+     is what shows if the image 404s, is blocked, or never resolves. */
+  .row-avatar.has-logo { position: relative; overflow: hidden; }
+  .row-avatar.has-logo img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; padding: 3px; border-radius: inherit;
+    /* Invisible, and painting no plate of its own, until it has actually
+       loaded — otherwise a pending or blocked request covers the initial
+       with a blank white circle, which is worse than no logo. */
+    opacity: 0;
   }
+  .row-avatar.has-logo img.loaded { opacity: 1; background: #fff; }
   .row-avatar.ghost {
     background: var(--quiet-soft); color: var(--muted);
     border: 1px dashed var(--border-strong);
