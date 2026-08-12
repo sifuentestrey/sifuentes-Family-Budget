@@ -28,8 +28,8 @@
  * A wrong logo is worse than no logo: it makes the whole list untrustworthy,
  * and someone scanning for a charge they don't recognise is exactly the person
  * who must not be shown the wrong brand. So the guessing rules are built so
- * that being wrong lands on a domain that does not resolve — which shows a
- * neutral globe, not another company — rather than on a real business.
+ * that being wrong lands on a domain that does not resolve — the logo services
+ * answer those with a 404, and the row falls back to its coloured initial.
  */
 
 import { payeeStem } from './similar-payee.js';
@@ -247,25 +247,46 @@ export function guessedDomain(payee) {
 
   // Pairs only. A single word is either a chain already in the table above or
   // too thin to bet a brand on: guessing from one word turns the local
-  // "BERKELEY ORTHODONTICS" into berkeley.com, which is somebody else.
+  // "BERKELEY ORTHODONTICS" into berkeley.com, which is somebody else, and
+  // "PHARMACY" into pharmacy.com, which is nobody's dentist. The coverage a
+  // solo guess would add is not worth a list that shows the wrong brands.
   if (!first || !second) return null;
   return `${first}${second}.com`;
 }
 
 /**
- * Favicon URL for a domain, via Google's public favicon service.
+ * Where a domain's logo can be fetched from, best first.
+ *
+ * Two services rather than one, because either can fail for reasons that have
+ * nothing to do with the merchant: one 404s for a site the other knows, and
+ * both are the kind of host a content blocker or a filtering DNS blocks
+ * wholesale — which strips the logos off an entire list at once and looks
+ * like the feature is broken rather than blocked. Trying a second host turns
+ * that from "no logos anywhere" into "logos, slightly later".
+ *
+ * Both 404 for a domain they don't know, which is what makes guessing safe:
+ * a wrong guess ends as a coloured initial, not as another company's brand.
  *
  * The tradeoff, stated plainly because it is a real one: fetching these tells
- * Google which merchant domains this browser is looking up. It is a list of
- * places the household shops, tied to their IP — not their transactions, not
- * their amounts, and not their identity, but not nothing either. The app ships
- * with a switch to turn it off (More → Show merchant logos), and turning it off
- * falls back to coloured initials with no third-party request at all.
+ * whichever service answers which merchant domains this browser is looking
+ * up. It is a list of places the household shops, tied to their IP — not
+ * their transactions, not their amounts, not their identity, but not nothing
+ * either. The app ships with a switch (More → Show merchant logos), and off
+ * means no third-party request at all.
  *
  * The alternative was bundling brand images, which means shipping other
  * people's trademarks and going stale the moment a company rebrands.
  */
+export function logoSources(domain, size = 64) {
+  if (!domain) return [];
+  const host = encodeURIComponent(domain);
+  return [
+    `https://www.google.com/s2/favicons?domain=${host}&sz=${size}`,
+    `https://icons.duckduckgo.com/ip3/${host}.ico`,
+  ];
+}
+
+/** The first source, for callers that only want one URL. */
 export function faviconUrl(domain, size = 64) {
-  if (!domain) return null;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
+  return logoSources(domain, size)[0] ?? null;
 }

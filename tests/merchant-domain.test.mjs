@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  domainForPayee, domainInText, faviconUrl, guessedDomain, MERCHANT_DOMAINS,
+  domainForPayee, domainInText, faviconUrl, guessedDomain, logoSources, MERCHANT_DOMAINS,
 } from '../src/engine/merchant-domain.js';
 
 test('a website from Plaid wins over everything else', () => {
@@ -75,4 +75,30 @@ test('guessing refuses when it would land on a category noun or a bare word', ()
   assert.equal(domainForPayee('ONLINE TRANSFER TO SAVINGS 7788'), null);
   assert.equal(guessedDomain('PHARMACY'), null, 'one generic word is nothing to go on');
   assert.equal(guessedDomain('ORTHODONTICS'), null, 'a single word is never enough');
+});
+
+test('a logo has more than one place it can come from', () => {
+  // One host being blocked — by a content blocker, a filtering DNS, a captive
+  // network — strips the logos off the entire list at once, which reads as a
+  // broken feature rather than a blocked one. A second host makes that
+  // "logos, slightly later".
+  const sources = logoSources('costco.com');
+  assert.equal(sources.length, 2);
+  assert.ok(sources.every((u) => u.startsWith('https://')));
+  const hosts = sources.map((u) => new URL(u).host);
+  assert.equal(new Set(hosts).size, 2, 'two sources on the same host is one source');
+  assert.ok(sources.every((u) => u.includes('costco.com')));
+});
+
+test('no domain means no sources, not a broken URL', () => {
+  assert.deepEqual(logoSources(null), []);
+  assert.deepEqual(logoSources(''), []);
+  assert.equal(faviconUrl(null), null);
+});
+
+test('every source escapes the domain it is given', () => {
+  for (const url of logoSources('a b&c=d')) {
+    assert.ok(!url.includes(' '), `unescaped space in ${url}`);
+    assert.ok(!/[?&]c=d/.test(url), `unescaped separator in ${url}`);
+  }
 });

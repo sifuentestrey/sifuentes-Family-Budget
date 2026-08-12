@@ -28,7 +28,7 @@ import { daysUntilDue } from '../src/domain/bill.js';
 import { planPaycheckCoverage } from '../src/engine/bill-paycheck-plan.js';
 import { suggestBillsFromTransactions } from '../src/engine/bill-suggestions.js';
 import { payeeStem } from '../src/engine/similar-payee.js';
-import { domainForPayee, faviconUrl } from '../src/engine/merchant-domain.js';
+import { domainForPayee, logoSources } from '../src/engine/merchant-domain.js';
 import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -974,24 +974,55 @@ function icon(name, size = 18) {
  * one" long before they read the label, and a color that shuffled between
  * renders would make the list feel unstable.
  */
-function avatarFor(name, logoUrl = null) {
+function avatarFor(name, logos = null) {
   const label = (name || '?').trim();
   let hash = 0;
   for (let i = 0; i < label.length; i += 1) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
   const letter = escapeHtml(label.charAt(0).toUpperCase() || '?');
-  if (!logoUrl) return `<div class="row-avatar av-${hash % 6}">${letter}</div>`;
+
+  const sources = (Array.isArray(logos) ? logos : [logos]).filter(Boolean)
+    .filter((url) => !deadLogos.has(url));
+  if (!sources.length) return `<div class="row-avatar av-${hash % 6}">${letter}</div>`;
 
   // The initial is the base layer and the logo paints on top of it, rather
   // than the logo being swapped out for the initial when it fails. These URLs
   // are somebody else's CDN: they can 404, they can be blocked by a network,
   // and they can simply hang. Only the first of those fires an error event, so
-  // anything built on onerror leaves an empty plate in the other two cases —
+  // anything built on swapping leaves an empty plate in the other two cases —
   // which looks more broken than no logo at all. This way the row is complete
   // and readable before the image resolves, and stays that way if it never does.
+  const [first, ...rest] = sources;
   return `<span class="row-avatar av-${hash % 6} has-logo">${letter}<img
-    src="${escapeHtml(logoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"
-    onload="this.classList.add('loaded')" onerror="this.remove()" /></span>`;
+    src="${escapeHtml(first)}" alt="" loading="lazy" referrerpolicy="no-referrer"
+    data-next="${escapeHtml(rest.join(' '))}"
+    onload="this.classList.add('loaded')" onerror="window.__logoFailed(this)" /></span>`;
 }
+
+/**
+ * Logo URLs that have already failed once, so a re-render doesn't ask for
+ * them again. A blocked host fails for every row at once; without this the
+ * app would re-request a hundred images it already knows are unreachable
+ * every time a category is opened or a transaction is recategorized.
+ */
+const deadLogos = new Set();
+
+/**
+ * Move an <img> to its next source, or give up and leave the initial.
+ *
+ * On window because it is called from an inline onerror: the handler has to
+ * exist at parse time for images that fail before any listener could be
+ * attached — a cached 404 fires its error event immediately.
+ */
+window.__logoFailed = (img) => {
+  const next = (img.dataset.next || '').split(' ').filter(Boolean);
+  deadLogos.add(img.src);
+  if (!next.length) {
+    img.remove();
+    return;
+  }
+  img.dataset.next = next.slice(1).join(' ');
+  img.src = next[0];
+};
 
 /**
  * Logos by payee, so anything that knows a payee name can show its logo —
@@ -1005,8 +1036,12 @@ function logoIndex() {
   if (logoIndexCache.source === state.transactions) return logoIndexCache.map;
   const map = new Map();
   for (const t of state.transactions) {
-    const logo = t.logo_url ?? faviconUrl(domainForPayee(t.payee, t.merchant_website));
-    if (logo && !map.has(t.payee)) map.set(t.payee, logo);
+    // Plaid's own logo first when it gave us one, then the derived sources.
+    const sources = [
+      t.logo_url,
+      ...logoSources(domainForPayee(t.payee, t.merchant_website)),
+    ].filter(Boolean);
+    if (sources.length && !map.has(t.payee)) map.set(t.payee, sources);
   }
   logoIndexCache = { source: state.transactions, map };
   return map;
@@ -1030,11 +1065,11 @@ function logoForPayee(payee) {
   // ("PG&E" vs "PGANDE WEB ONLINE"), so try the leading word.
   const stem = payeeStem(payee);
   if (stem) {
-    for (const [name, url] of index) {
-      if (payeeStem(name) === stem) return url;
+    for (const [name, sources] of index) {
+      if (payeeStem(name) === stem) return sources;
     }
   }
-  return faviconUrl(domainForPayee(payee));
+  return logoSources(domainForPayee(payee));
 }
 
 /**
