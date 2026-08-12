@@ -417,6 +417,12 @@ const state = {
   // display preference for this device, so localStorage is the right home for
   // it (unlike budget targets, which are a shared agreement).
   showLogos: localStorage.getItem('showLogos') !== '0',
+  // Push reminders, per device. Read from the browser rather than stored,
+  // because the browser is the authority: permission can be revoked in
+  // settings without the app ever hearing about it.
+  push: { supported: false, enabled: false, blocked: false },
+  pushBusy: false,
+  pushError: null,
   // The one transaction whose category picker is open, if any.
   editingCategory: null,
   // The transaction being split, the parts as typed so far, and the state of
@@ -1261,6 +1267,36 @@ function renderMore() {
           iconName, title: label, sub, chevron: true,
           tag: 'button', attrs: `data-view="${id}"`,
         })).join('')}
+      </div>
+    `)}
+
+    ${section('Reminders', `
+      <div class="list">
+        ${row({
+          iconName: 'mail',
+          title: 'Bill reminders on this device',
+          sub: !state.session
+            ? 'Sign in to turn these on.'
+            : state.push.blocked
+              ? 'Blocked in your browser settings — they have to be turned back on there first.'
+              : !state.push.supported
+                ? 'This browser cannot show them. On iPhone, add the app to your home screen first.'
+                : state.push.enabled
+                  ? 'On — a bill due soon, or one you are short for, buzzes this device.'
+                  : 'Off — reminders only arrive by email at the daily sync.',
+          actions: state.session && state.push.supported && !state.push.blocked
+            ? `<button class="btn btn-sm ${state.push.enabled ? 'btn-outline' : 'btn-primary'}"
+                 data-action="toggle-push" ${state.pushBusy ? 'disabled' : ''}>
+                 ${state.pushBusy ? '…' : state.push.enabled ? 'Turn off' : 'Turn on'}
+               </button>`
+            : '',
+        })}
+      </div>
+      ${state.pushError ? `<div class="field-hint" style="color:var(--negative);margin-top:8px;">${escapeHtml(state.pushError)}</div>` : ''}
+      <div class="prose-sm" style="margin-top:9px;">
+        Each device is separate — turning these on here doesn't turn them on
+        anywhere else, and only the urgent ones are sent: a bill due within
+        days, or one the account can't cover.
       </div>
     `)}
 
@@ -3624,6 +3660,19 @@ function render() {
       // as the other tabs above — does not generate a note on visit, only
       // loads past ones, since generating one is a real API call the user
       // should trigger deliberately, not something that fires on every tab click.
+      // The browser is the authority on notification permission, and it can
+      // change outside the app, so this is re-read on every visit to More
+      // rather than cached.
+      if (state.view === 'more' && state.session) {
+        loadConnect()
+          .then((connect) => connect.pushStatus())
+          .then((status) => {
+            state.push = status;
+            render();
+          })
+          .catch(() => { /* the row falls back to "cannot show them" */ });
+      }
+
       if (state.view === 'advisor' && !state.advisorAttempted) {
         state.advisorAttempted = true;
         const haveSession = state.connectAttempted;
@@ -3751,6 +3800,30 @@ function render() {
       }
     }),
   );
+
+  const pushToggle = app.querySelector('[data-action="toggle-push"]');
+  if (pushToggle) {
+    pushToggle.addEventListener('click', async () => {
+      state.pushBusy = true;
+      state.pushError = null;
+      render();
+      try {
+        const connect = await loadConnect();
+        if (state.push.enabled) await connect.disablePushNotifications();
+        else await connect.enablePushNotifications(state.householdId);
+        state.push = await connect.pushStatus();
+      } catch (e) {
+        state.pushError = e.message;
+        // Re-read rather than assume: a denied permission changes what the
+        // row should say, not just whether this attempt worked.
+        try {
+          state.push = await (await loadConnect()).pushStatus();
+        } catch { /* leave the last known state */ }
+      }
+      state.pushBusy = false;
+      render();
+    });
+  }
 
   const dismissHousehold = app.querySelector('[data-action="dismiss-household-prompt"]');
   if (dismissHousehold) {
