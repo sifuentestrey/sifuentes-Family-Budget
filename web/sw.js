@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v22';
+const CACHE_VERSION = 'v23';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -60,6 +60,9 @@ const SHELL_ASSETS = [
   // app down, not just the safe-to-spend headline.
   '../src/engine/budget/safe-to-spend.js',
   '../src/engine/budget/monthly-budget.js',
+  // The month split into bills and everything after them: imported
+  // statically by app.js, and it reaches into domain/bill-payment-match.js.
+  '../src/engine/month-in-full.js',
   // Bills-by-paycheck: same reason as the modules above — imported statically.
   '../src/engine/bill-paycheck-plan.js',
   // Bill suggestions from recurring charges: imported statically by app.js and
@@ -72,6 +75,8 @@ const SHELL_ASSETS = [
   // Merchant logos: imported statically by app.js, same rule as above.
   '../src/engine/merchant-domain.js',
   '../src/domain/provider-match.js',
+  // Reached by month-in-full.js to tell which charge paid which tracked bill.
+  '../src/domain/bill-payment-match.js',
 ];
 
 self.addEventListener('install', (event) => {

@@ -238,6 +238,24 @@
 
   .hero-sm .hero-value { font-size: 27px; }
 
+  /* The month in two halves: what was always going out, and what wasn't.
+     One bar, two segments — a pie would need a legend to read and would
+     hide exactly the comparison the bar makes obvious. */
+  .split { margin-top: 13px; }
+  .split-bar {
+    display: flex; height: 8px; border-radius: var(--radius-full);
+    overflow: hidden; background: var(--hero-rule);
+  }
+  .split-bar i { display: block; height: 100%; }
+  .split-bills { background: var(--hero-note); }
+  .split-rest { background: var(--accent); }
+  .split-keys {
+    display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 9px;
+    font-size: 11.5px; color: var(--hero-note); font-variant-numeric: tabular-nums;
+  }
+  .split-key { display: inline-flex; align-items: center; gap: 6px; }
+  .split-key b { width: 8px; height: 8px; border-radius: 3px; display: block; }
+
   /* --- Cards ------------------------------------------------------------ */
 
   .card {
