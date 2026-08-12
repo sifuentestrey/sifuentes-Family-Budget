@@ -20,6 +20,7 @@ import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildAlerts } from '../src/engine/alerts.js';
 import { calculateSafeToSpend } from '../src/engine/budget/safe-to-spend.js';
 import { buildMonthlyBudget } from '../src/engine/budget/monthly-budget.js';
+import { buildMonthInFull } from '../src/engine/month-in-full.js';
 import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
@@ -2171,50 +2172,103 @@ function renderBudget() {
  * feeds safe-to-spend and the plan — it just isn't what someone opening
  * Spending is looking for.
  */
+/**
+ * The month, in full.
+ *
+ * The question this screen exists for is "where did it actually go", and the
+ * honest answer has two halves: the money that was always leaving — rent,
+ * childcare, the power bill — and what happened to the rest. A flat list of
+ * categories answers neither, because rent sitting next to dining out makes
+ * the fixed half look like overspending and buries the half anybody can
+ * actually change.
+ */
 function renderSpending() {
-  const txns = spendingIn(state.month);
-  const total = txns.reduce((s, t) => s + t.amount, 0);
-  const categories = byCategory(txns);
-  const max = categories.length ? categories[0][1] : 1;
+  const m = buildMonthInFull({
+    transactions: state.transactions,
+    bills: state.bills,
+    month: state.month,
+  });
   const reviewCount = uncategorizedCount();
 
-  const prior = state.months.filter((m) => m < state.month).slice(-3)
-    .map((m) => spendingIn(m).reduce((s, t) => s + t.amount, 0))
+  const prior = state.months.filter((x) => x < state.month).slice(-3)
+    .map((x) => spendingIn(x).reduce((s, t) => s + t.amount, 0))
     .filter((v) => v > 0);
   const priorAvg = prior.length >= MIN_MONTHS_FOR_AVERAGE
     ? prior.reduce((a, b) => a + b, 0) / prior.length
     : null;
+
+  const restMax = m.rest.categories.length ? m.rest.categories[0].amount : 1;
 
   return `
     ${segmented(SPENDING_TABS)}
     ${renderMonthPicker()}
 
     <div class="hero">
-      <div class="hero-label">Spent in ${monthLabel(state.month)}</div>
-      <div class="hero-value">${moneyExact(total)}</div>
+      <div class="hero-label">Out the door in ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(m.total)}</div>
       <div class="hero-note">
-        Across ${txns.length} transaction${txns.length === 1 ? '' : 's'}${priorAvg !== null
-          ? ` · ${money(priorAvg)} in a typical recent month` : ''}
+        ${priorAvg !== null
+          ? `${money(priorAvg)} in a typical recent month.`
+          : 'Everything that left the account, minus transfers between your own accounts.'}
       </div>
+      ${m.total > 0 ? `
+        <div class="split">
+          <div class="split-bar">
+            <i class="split-bills" style="width:${m.bills.share}%"></i>
+            <i class="split-rest" style="width:${m.rest.share}%"></i>
+          </div>
+          <div class="split-keys">
+            <span class="split-key"><b class="split-bills"></b>${money(m.bills.total)} bills · ${m.bills.share}%</span>
+            <span class="split-key"><b class="split-rest"></b>${money(m.rest.total)} everything else · ${m.rest.share}%</span>
+          </div>
+        </div>` : ''}
     </div>
 
     ${reviewCount ? `
       <div class="banner" style="margin-top:14px;">
         <div class="banner-body">
           <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
-          Setting one teaches that payee permanently.
+          They're sitting under Uncategorized below until they have one.
         </div>
         <button class="linkbtn" data-view="review">Review</button>
       </div>` : ''}
 
-    ${section('Where it went', categories.length ? `
-      <div class="list tight">${renderCategoryRows(categories, max)}</div>
+    ${section('Bills', m.bills.items.length ? `
+      <div class="list tight">
+        ${m.bills.items.map((b) => row({
+          avatar: b.name,
+          logo: logoForPayee(b.payee),
+          title: escapeHtml(b.name),
+          chips: b.source === 'fixed' ? '' : '<span class="chip chip-ok">tracked</span>',
+          sub: `${new Date(`${b.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${escapeHtml(b.category)}`,
+          amount: moneyExact(b.amount),
+        })).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:9px;">
+        ${m.bills.trackedCount
+          ? `${m.bills.trackedCount} of these matched a bill you track. `
+          : ''}The rest are charges in categories that are a bill by nature —
+        rent, utilities, insurance, childcare, a car payment, a subscription.
+      </div>
+    ` : emptyState({
+      iconName: 'bills',
+      title: 'No bills paid this month',
+      body: 'Nothing has cleared yet that looks like a fixed monthly cost.',
+    }), {
+      sub: `${moneyExact(m.bills.total)} that was always going out`,
+      action: '<button class="section-action" data-view="bills">Bills tab</button>',
+    })}
+
+    ${section('After the bills', m.rest.categories.length ? `
+      <div class="list tight">${renderCategoryRows(
+        m.rest.categories.map((c) => [c.category, c.amount]), restMax,
+      )}</div>
     ` : emptyState({
       iconName: 'list',
-      title: 'Nothing posted yet',
-      body: 'No spending has cleared for this month.',
+      title: 'Nothing else this month',
+      body: 'Every charge that cleared was a bill.',
     }), {
-      sub: 'Tap any category to see the transactions in it',
+      sub: `${moneyExact(m.rest.total)} across ${m.rest.count} transaction${m.rest.count === 1 ? '' : 's'} · tap any to open it`,
       action: '<button class="section-action" data-view="transactions">All transactions</button>',
     })}
   `;
