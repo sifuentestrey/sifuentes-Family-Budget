@@ -135,7 +135,7 @@ test('every nav entry has a renderer', () => {
   const groupsBlock = appJs.match(/const NAV_GROUPS = \[([\s\S]*?)\n\];/)[1];
   const groupIds = [...groupsBlock.matchAll(/id: '([\w-]+)'/g)].map((m) => m[1]);
 
-  const segIds = ['SPENDING_TABS', 'INCOME_TABS'].flatMap((name) => {
+  const segIds = ['SPENDING_TABS', 'INCOME_TABS', 'BUDGET_TABS'].flatMap((name) => {
     const block = appJs.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\n\\];`))[1];
     return [...block.matchAll(/\['([\w-]+)',/g)].map((m) => m[1]);
   });
@@ -159,7 +159,8 @@ test('every view the app can render is reachable from the nav', () => {
   // rebuild: a renderer that no longer appears in any tab, segmented control
   // or More row is dead weight nobody can reach, and the app silently loses a
   // screen. 'review' is the one deliberate exception — it is reached from a
-  // banner on Transactions and from Home, not from the nav itself.
+  // banner on Transactions and from Home, and 'category' by tapping a
+  // category row — neither is a destination the nav itself offers.
   const registry = appJs.slice(
     appJs.lastIndexOf('const body =', appJs.indexOf('}[state.view]()')),
     appJs.indexOf('}[state.view]()'),
@@ -169,12 +170,13 @@ test('every view the app can render is reachable from the nav', () => {
   const navSource = [
     appJs.match(/const NAV_GROUPS = \[([\s\S]*?)\n\];/)[1],
     appJs.match(/const SPENDING_TABS = \[([\s\S]*?)\n\];/)[1],
+    appJs.match(/const BUDGET_TABS = \[([\s\S]*?)\n\];/)[1],
     appJs.match(/const INCOME_TABS = \[([\s\S]*?)\n\];/)[1],
     appJs.match(/const rows = \[([\s\S]*?)\n  \];/)[1],
   ].join('\n');
 
   for (const id of viewIds) {
-    if (id === 'review') continue;
+    if (id === 'review' || id === 'category') continue;
     assert.ok(
       navSource.includes(`'${id}'`),
       `"${id}" has a renderer but nothing in the nav can reach it`,
