@@ -23,6 +23,7 @@ import { forecastPaycheck, nextPayPeriod } from '../src/payroll/forecast.js';
 import { reconcilePaycheck, learnFromHistory, applyLearnedAdjustments } from '../src/payroll/reconcile.js';
 import { makeTimeEntry, makePayProfile, validatePayProfile, makePaystub, validatePaystub } from '../src/domain/payroll.js';
 import { daysUntilDue } from '../src/domain/bill.js';
+import { planPaycheckCoverage } from '../src/engine/bill-paycheck-plan.js';
 import { SEED_CATEGORIES } from '../src/engine/seed-rules.js';
 
 // Loaded lazily, not at the top level: connect.js pulls in the Supabase SDK
@@ -1711,29 +1712,6 @@ function renderShifts() {
         ${field('Label', 'label', 'text', p?.label ?? 'Primary', 'required')}
         ${field('Employer (optional)', 'employerName', 'text', p?.employerName ?? '')}
         ${field('Base hourly rate', 'baseHourlyRate', 'number', p?.baseHourlyRate ?? '', 'step="0.01" min="0.01" required')}
-        ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
-
-        ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required')}
-        <p class="step-why">
-          <strong>0 disables it</strong>, which is the right default for a compressed
-          schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of
-          overtime that you were never paid — roughly 8 phantom hours a week.
-        </p>
-
-        ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
-
-        ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required')}
-        <p class="step-why">
-          Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a
-          2-hour minimum pay 4 hours, not 1.
-        </p>
-
-        ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
-        ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required')}
-        <p class="step-why">
-          Standby is time on call. It pays its own rate and never counts toward an
-          overtime threshold.
-        </p>
 
         <label style="display:block;margin-top:10px;font-size:13px;color:var(--muted);">
           Pay frequency
@@ -1752,18 +1730,49 @@ function renderShifts() {
           today, so they stay aligned to your employer's actual calendar.
         </p>
 
-        ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
-          p?.taxAssumptions?.federalRate != null
-            ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
-            : 18, 'step="1" min="0" max="60" required')}
-        <p class="step-why">
-          A starting guess for federal + state. Social Security and Medicare are
-          added automatically. Once you enter a real paystub the app learns your
-          actual effective rate — that is usually the biggest source of error in a
-          take-home estimate.
-        </p>
+        <details style="margin-top:14px;">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">
+            Overtime, call shifts &amp; standby — sensible defaults already set below
+          </summary>
+          <div style="margin-top:8px;">
+            ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
 
-        <button type="submit" class="link" style="${BUTTON_STYLE}" ${state.shiftsBusy ? 'disabled' : ''}>
+            ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required')}
+            <p class="step-why">
+              <strong>0 disables it</strong>, which is the right default for a compressed
+              schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of
+              overtime that you were never paid — roughly 8 phantom hours a week.
+            </p>
+
+            ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
+
+            ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required')}
+            <p class="step-why">
+              Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a
+              2-hour minimum pay 4 hours, not 1.
+            </p>
+
+            ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+            ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required')}
+            <p class="step-why">
+              Standby is time on call. It pays its own rate and never counts toward an
+              overtime threshold.
+            </p>
+
+            ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
+              p?.taxAssumptions?.federalRate != null
+                ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
+                : 18, 'step="1" min="0" max="60" required')}
+            <p class="step-why">
+              A starting guess for federal + state. Social Security and Medicare are
+              added automatically. Once you enter a real paystub the app learns your
+              actual effective rate — that is usually the biggest source of error in a
+              take-home estimate.
+            </p>
+          </div>
+        </details>
+
+        <button type="submit" class="link" style="${BUTTON_STYLE}margin-top:14px;" ${state.shiftsBusy ? 'disabled' : ''}>
           ${state.shiftsBusy ? 'Saving…' : 'Save pay setup'}
         </button>
         ${p ? `<button type="button" data-action="cancel-profile" class="link" style="margin-left:10px;">Cancel</button>` : ''}
@@ -1859,6 +1868,72 @@ function renderShifts() {
     </div>`;
 }
 
+function renderBillRow(b, urgency) {
+  return `
+    <div class="stream">
+      <div class="stream-head">
+        <span class="stream-payee">${b.providerName}</span>
+        <span class="pill ${urgency(b.dueDate)}">${moneyExact(b.amountDue)}</span>
+      </div>
+      <div class="stream-meta">Due ${b.dueDate} · ${b.category} · ${b.status}</div>
+    </div>
+  `;
+}
+
+/**
+ * Bills grouped by which specific upcoming paycheck needs to cover them —
+ * the question "which check do I need this money in hand by", not the
+ * dashboard's already-answered "how much total is due this month". Streams
+ * come from bank deposit history (state.streams), so this works whether or
+ * not a pay profile/timecard is set up — Shifts sharpens the paycheck
+ * *amount* forecast, not whether this grouping exists at all.
+ */
+function renderBillsByPaycheck(bills, urgency) {
+  const plan = planPaycheckCoverage(bills, state.streams);
+  const coveredGroups = plan.groups.filter((g) => g.bills.length);
+  const noPaydaysKnown = plan.groups.length === 0;
+
+  return `
+    <div class="step">
+      <div class="step-head"><span class="step-title">Save for these bills</span></div>
+      <p class="step-why">
+        Each group is the specific paycheck that needs to cover it by the due date —
+        not just what's due this calendar month.
+      </p>
+
+      ${plan.dueNow.bills.length ? `
+        <div class="stream-list" style="margin-top:10px;">
+          <div class="stream-meta" style="margin-bottom:4px;">
+            <strong>${noPaydaysKnown ? 'No income pattern detected yet' : 'Due before your next check'}</strong>
+            — ${moneyExact(plan.dueNow.total)}
+          </div>
+          ${plan.dueNow.bills.map((b) => renderBillRow(b, urgency)).join('')}
+        </div>
+      ` : ''}
+
+      ${coveredGroups.map((g) => `
+        <div class="stream-list" style="margin-top:14px;">
+          <div class="stream-meta" style="margin-bottom:4px;">
+            <strong>Save from your ${g.paycheckDate} check</strong> — ${moneyExact(g.total)}
+          </div>
+          ${g.bills.map((b) => renderBillRow(b, urgency)).join('')}
+        </div>
+      `).join('')}
+
+      ${plan.later.bills.length ? `
+        <details style="margin-top:14px;">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px;">
+            ${plan.later.bills.length} further out — ${moneyExact(plan.later.total)}
+          </summary>
+          <div class="stream-list" style="margin-top:8px;">
+            ${plan.later.bills.map((b) => renderBillRow(b, urgency)).join('')}
+          </div>
+        </details>
+      ` : ''}
+    </div>
+  `;
+}
+
 /**
  * Bills detected from Gmail. Plaid shows a payment after it lands; a bill is
  * the one piece of information the household needs *before* that, which is
@@ -1928,25 +2003,14 @@ function renderBills() {
       </div>
     ` : ''}
 
-    <div class="step">
-      <div class="step-head"><span class="step-title">Upcoming bills</span></div>
-      ${bills.length === 0 ? `
+    ${bills.length === 0 ? `
+      <div class="step">
+        <div class="step-head"><span class="step-title">Upcoming bills</span></div>
         <p class="step-why">
           No bills detected yet. ${anySynced ? 'The last scan found nothing due — check back after the next daily sync.' : 'The first scan runs on the next daily sync.'}
-        </p>` : `
-        <div class="stream-list" style="margin-top:10px;">
-          ${bills.map((b) => `
-            <div class="stream">
-              <div class="stream-head">
-                <span class="stream-payee">${b.providerName}</span>
-                <span class="pill ${urgency(b.dueDate)}">${moneyExact(b.amountDue)}</span>
-              </div>
-              <div class="stream-meta">Due ${b.dueDate} · ${b.category} · ${b.status}</div>
-            </div>
-          `).join('')}
-        </div>
-      `}
-    </div>
+        </p>
+      </div>
+    ` : renderBillsByPaycheck(bills, urgency)}
   `;
 }
 
