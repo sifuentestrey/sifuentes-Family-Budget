@@ -2263,11 +2263,15 @@ function renderBudget() {
       </div>
     ` : emptyState({
       iconName: 'bills',
-      title: 'No bills due this month',
+      title: 'No bills tracked yet',
       body: state.session
-        ? 'Track one from the Bills tab, or accept one of the recurring charges found in your transactions.'
+        ? billSuggestionCount()
+          ? `${billSuggestionCount()} recurring charges in your own transactions look like bills — rent, childcare, insurance, the utilities. Tracking them is what turns this half of the tab from a guess into your actual bills.`
+          : 'Nothing in your transactions repeats on a bill-shaped rhythm yet.'
         : 'Sign in to track bills.',
-      action: '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
+      action: state.session && billSuggestionCount()
+        ? `<button class="btn btn-primary" data-view="bills">See the ${billSuggestionCount()} found</button>`
+        : '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
     }), {
       sub: 'Known payee, known due date',
       action: '<button class="section-action" data-view="bills">All bills</button>',
@@ -3077,6 +3081,21 @@ function renderBillsByPaycheck(bills) {
  * has already cleared this account on a rhythm, so accepting one is a
  * confirmation, not data entry.
  */
+/**
+ * How many bills the app could track without being told anything.
+ *
+ * Used by the Budget tab's empty state, which is otherwise a dead end: it
+ * says "no bills" on a screen whose whole job is bills, while the app is
+ * already sitting on a list of them.
+ */
+function billSuggestionCount() {
+  const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+  return suggestBillsFromTransactions({
+    streams: recurring,
+    bills: [...state.bills, ...state.billsNeedingReview],
+  }).filter((s) => !state.dismissedSuggestions.has(s.key)).length;
+}
+
 function renderBillSuggestions() {
   const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
   const suggestions = suggestBillsFromTransactions({
@@ -3088,7 +3107,30 @@ function renderBillSuggestions() {
 
   const shown = suggestions.slice(0, 6);
 
+  // Tracking them one at a time is fine for the odd new subscription, but on
+  // first use the list is the household's entire set of bills — rent,
+  // childcare, insurance, the utilities — and six taps with a confirmation
+  // each is how a setup step gets abandoned half-done.
+  const confident = suggestions.filter((x) => !x.stale);
+
   return section('Found in your transactions', `
+    ${confident.length > 1 ? `
+      <div class="card" style="margin-bottom:10px;">
+        <div class="card-head">
+          <span class="card-title">Track these as bills</span>
+          <button class="btn btn-sm btn-primary" data-action="track-all-bills"
+            ${state.trackingBill ? 'disabled' : ''}>
+            ${state.trackingBill === '*' ? 'Adding…' : `Track all ${confident.length}`}
+          </button>
+        </div>
+        <div class="prose-sm" style="margin-top:6px;">
+          Each of these is a charge that has already cleared this account on a
+          rhythm. Tracking them is what makes the Budget tab show real bills
+          instead of guessing from categories — and you can drop any of them
+          afterwards.
+        </div>
+      </div>` : ''}
+
     <div class="list">
       ${shown.map((s) => {
         const busy = state.trackingBill === s.key;
@@ -3176,16 +3218,19 @@ function renderBills() {
       sub: 'Parsed with low confidence — confirm before it counts toward what\'s due',
     }) : ''}
 
+    ${/* With nothing tracked yet, the suggestions ARE the tab — putting the
+          paycheck grouping first would lead with an empty table above the
+          only actionable thing on screen. */ ''}
     ${bills.length ? renderBillsByPaycheck(bills) : ''}
 
     ${renderBillSuggestions()}
 
-    ${bills.length === 0 ? section('Upcoming bills', emptyState({
+    ${bills.length === 0 && billSuggestionCount() === 0 ? section('Upcoming bills', emptyState({
       iconName: 'bills',
       title: 'No bills tracked yet',
       body: gmailConnected
         ? 'Nothing found in your email yet — the next daily scan may pick some up. You can also add one by hand.'
-        : 'Connect Gmail to find them automatically, accept one of the recurring charges above, or add one by hand.',
+        : 'Connect Gmail to find them automatically, or add one by hand below.',
       action: gmailConnected ? '' : '<button class="btn btn-secondary" data-view="connect">Connect Gmail</button>',
     })) : ''}
 
@@ -3674,6 +3719,41 @@ function render() {
       }
     }),
   );
+
+  const trackAll = app.querySelector('[data-action="track-all-bills"]');
+  if (trackAll) {
+    trackAll.addEventListener('click', async () => {
+      const recurring = [...(state.subs?.bills ?? []), ...(state.subs?.subscriptions ?? [])];
+      const pending = suggestBillsFromTransactions({
+        streams: recurring,
+        bills: [...state.bills, ...state.billsNeedingReview],
+      }).filter((x) => !state.dismissedSuggestions.has(x.key) && !x.stale);
+
+      state.trackingBill = '*';
+      state.billsError = null;
+      render();
+      try {
+        const bills = await loadBills();
+        // Sequentially, not in parallel: each createBill dedupes against the
+        // bills that already exist, and a parallel burst would race that check
+        // and write the same provider twice.
+        for (const suggestion of pending) {
+          await bills.createBill({
+            providerName: suggestion.providerName,
+            amountDue: suggestion.amountDue,
+            dueDate: suggestion.dueDate,
+            category: suggestion.category,
+            source: 'bank',
+          });
+        }
+        await refreshBills();
+      } catch (e) {
+        state.billsError = e.message;
+      }
+      state.trackingBill = null;
+      render();
+    });
+  }
 
   const logoToggle = app.querySelector('[data-action="toggle-logos"]');
   if (logoToggle) {
