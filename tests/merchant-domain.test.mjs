@@ -9,7 +9,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  domainForPayee, domainInText, faviconUrl, guessedDomain, logoSources, MERCHANT_DOMAINS,
+  domainForPayee, domainInText, faviconUrl, logoSources, compactName,
+  MERCHANT_DOMAINS, BRAND_KEYS,
 } from '../src/engine/merchant-domain.js';
 
 test('a website from Plaid wins over everything else', () => {
@@ -61,20 +62,38 @@ test('a known chain is found even when the bank buries it mid-description', () =
   assert.equal(domainForPayee('REI #0021 SEATTLE WA'), 'rei.com');
 });
 
-test('a local business is guessed from its own name, not from the noise around it', () => {
-  // The words a bank puts in front of the name are the ones that must not
-  // end up in the domain.
-  assert.equal(domainForPayee('RENT PAYMENT OAKWOOD PROPERTIES'), 'oakwoodproperties.com');
-  assert.equal(domainForPayee('DIRECT DEP NORTHSTAR LOGISTICS PAYROLL'), 'northstarlogistics.com');
+test('a merchant nobody has heard of gets no logo at all', () => {
+  // The app used to guess a domain from the name — "OAKWOOD PROPERTIES" ->
+  // oakwoodproperties.com — on the theory that a wrong guess would 404 and
+  // fall back to the initial. It doesn't: guessed names are usually
+  // registered and parked, and the logo services answer those with a generic
+  // globe. A screen full of identical globes is worse than a screen of
+  // letters, because a globe claims to be the merchant's logo.
+  assert.equal(domainForPayee('RENT PAYMENT OAKWOOD PROPERTIES'), null);
+  assert.equal(domainForPayee('DIRECT DEP NORTHSTAR LOGISTICS PAYROLL'), null);
+  assert.equal(domainForPayee('MEDICAL GROUP OF BERKELEY'), null);
+  assert.equal(domainForPayee('CHILO BALLOON'), null);
+  assert.equal(domainForPayee('ONLINE TRANSFER TO SAVINGS 7788'), null);
 });
 
-test('guessing refuses when it would land on a category noun or a bare word', () => {
-  // "MEDICAL GROUP OF BERKELEY" must never become medical.com or berkeley.com —
-  // both are real sites belonging to somebody else entirely.
-  assert.equal(domainForPayee('MEDICAL GROUP OF BERKELEY'), null);
-  assert.equal(domainForPayee('ONLINE TRANSFER TO SAVINGS 7788'), null);
-  assert.equal(guessedDomain('PHARMACY'), null, 'one generic word is nothing to go on');
-  assert.equal(guessedDomain('ORTHODONTICS'), null, 'a single word is never enough');
+test("a brand survives the bank's spacing", () => {
+  // The same nine letters, however the statement chose to break them up.
+  assert.equal(compactName('CHIK FIL A #1220'), 'chikfila');
+  assert.equal(domainForPayee('Chik Fil A'), 'chick-fil-a.com');
+  assert.equal(domainForPayee('CHICK-FIL-A #01220'), 'chick-fil-a.com');
+  assert.equal(domainForPayee('Jack in the Box 3344'), 'jackinthebox.com');
+  assert.equal(domainForPayee('KFC G135021'), 'kfc.com');
+  assert.equal(domainForPayee('WINGSTOP 1044'), 'wingstop.com');
+});
+
+test('every brand key is compacted and maps to a hostname', () => {
+  for (const [key, domain] of Object.entries(BRAND_KEYS)) {
+    assert.equal(compactName(key), key.replace(/_/g, ''), `${key} must be lowercase letters`);
+    assert.match(domain, /^[a-z0-9-]+(\.[a-z0-9-]+)+$/, `${key} -> ${domain}`);
+    // Six letters, because these are matched as substrings of a compacted
+    // payee: "ally" sits inside "Sally Beauty", "loves" inside "gloves".
+    assert.ok(key.length >= 6, `${key} is short enough to match inside another word`);
+  }
 });
 
 test('a logo has more than one place it can come from', () => {
