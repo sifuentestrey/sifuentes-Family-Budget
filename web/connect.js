@@ -309,6 +309,55 @@ export async function unsplit(parentId) {
 }
 
 /**
+ * Save a category correction: the transaction itself, plus a learned rule so
+ * this payee (and every payee that looks like it) never has to be asked
+ * about again.
+ *
+ * Two writes, because there are two things a correction means. The row is
+ * what makes it stick past a reload — recategorize() used to update only
+ * `state.transactions` in memory, so the change looked instant and then
+ * vanished the moment the page reopened or another sync overwrote it. The
+ * rule is what the household actually wants from correcting a payee once:
+ * `priority: 0` puts it ahead of every seed rule, and reprocessWindow
+ * server-side reads it through the same `is_learned` index the browser does,
+ * so a correction survives the nightly sync as well as a reload.
+ *
+ * @param {string} transactionId  - the transaction's own uuid (not the Plaid id)
+ * @param {string} payee          - cleaned payee, used as the rule's pattern
+ * @param {string|null} category  - null clears the category back to uncategorized
+ */
+export async function saveCategory(householdId, transactionId, payee, category) {
+  const { data: categories, error: catError } = await supabase
+    .from('categories')
+    .select('id, name')
+    .eq('household_id', householdId);
+  if (catError) throw catError;
+  const categoryId = category
+    ? (categories ?? []).find((c) => c.name === category)?.id ?? null
+    : null;
+
+  const { error: txnError } = await supabase
+    .from('transactions')
+    .update({ category_id: categoryId, categorized_by: category ? 'learned' : 'none', manually_categorized: Boolean(category) })
+    .eq('id', transactionId);
+  if (txnError) throw txnError;
+
+  if (category && categoryId) {
+    const { error: ruleError } = await supabase
+      .from('rules')
+      .upsert({
+        household_id: householdId,
+        pattern: payee,
+        match_type: 'exact',
+        category_id: categoryId,
+        priority: 0,
+        is_learned: true,
+      }, { onConflict: 'household_id,pattern,match_type' });
+    if (ruleError) throw ruleError;
+  }
+}
+
+/**
  * Ask the server to name the payees nothing recognised.
  *
  * Deliberately on demand rather than automatic: it costs a model call, and a

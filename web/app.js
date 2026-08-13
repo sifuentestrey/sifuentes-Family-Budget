@@ -3531,12 +3531,16 @@ function renderAppBar() {
 // Interaction
 // ---------------------------------------------------------------------------
 
-function recategorize(id, category) {
-  const txn = state.transactions.find((t) => t.plaid_transaction_id === id);
+async function recategorize(id, category) {
+  const txn = state.transactions.find((t) => (t.plaid_transaction_id ?? t.id) === id);
   if (!txn) return;
 
+  const previous = { category: txn.category, categorized_by: txn.categorized_by, manually_categorized: txn.manually_categorized };
+
   // A human decision. Recorded as a learned rule so this payee is never
-  // asked about again — and never overridden by an automated layer.
+  // asked about again — and never overridden by an automated layer. Applied
+  // to local state immediately so the row updates without waiting on the
+  // network; rolled back below if the write fails.
   txn.category = category || null;
   txn.categorized_by = category ? 'learned' : 'none';
   txn.manually_categorized = Boolean(category);
@@ -3556,6 +3560,24 @@ function recategorize(id, category) {
   // this runs.
   buildPlan();
   render();
+
+  // Then the write. Without this the correction lived only in
+  // `state.transactions` — it looked instant and then vanished the moment
+  // the page reloaded or another sync overwrote it, which is exactly the
+  // "it doesn't stick" the household reported.
+  if (!state.session || !txn.id) return;
+  try {
+    const connect = await loadConnect();
+    await connect.saveCategory(state.householdId, txn.id, txn.payee, category || null);
+  } catch (e) {
+    txn.category = previous.category;
+    txn.categorized_by = previous.categorized_by;
+    txn.manually_categorized = previous.manually_categorized;
+    state.billsError = null;
+    state.autoCategorizeError = `Couldn't save that category: ${e.message}`;
+    buildPlan();
+    render();
+  }
 }
 
 function render() {
