@@ -172,14 +172,17 @@ export function buildBillMonth({
       .sort((a, b) => dayDistance(a.row.paidDate, bill.dueDate) - dayDistance(b.row.paidDate, bill.dueDate));
 
     let payment = settledPayment(bill);
-    if (!payment && candidateIndexes.length && dayDistance(candidateIndexes[0].row.paidDate, bill.dueDate) <= 20) {
+    if (candidateIndexes.length && dayDistance(candidateIndexes[0].row.paidDate, bill.dueDate) <= 20) {
       const selected = candidateIndexes[0];
       consumed.add(selected.index);
-      payment = {
-        posted_date: selected.row.paidDate,
-        amount: selected.row.paidAmount,
-      };
-    } else if (!payment) {
+      if (!payment) {
+        payment = {
+          posted_date: selected.row.paidDate,
+          amount: selected.row.paidAmount,
+        };
+      }
+    }
+    if (!payment) {
       payment = paymentForTrackedBill(bill, transactions, meta.amountVaries);
     }
 
