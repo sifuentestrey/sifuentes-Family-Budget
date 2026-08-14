@@ -5,6 +5,7 @@ import {
   billPreferences,
   buildBillMonth,
   buildUpcomingObligations,
+  obligationProvidersMatch,
 } from '../src/engine/bill-center.js';
 
 const bill = (overrides = {}) => ({
@@ -97,6 +98,59 @@ test('an active subscription is an automatic bill even before this month charge 
   assert.equal(upcoming.length, 1);
   assert.equal(upcoming[0].dueDate, '2026-08-15');
   assert.equal(upcoming[0].paymentMode, 'auto');
+});
+
+test('same-provider charges on the same day render as one paid Google row', () => {
+  const google = stream({
+    payee: 'Google',
+    category: 'Subscriptions',
+    kind: 'subscription',
+    fixedPrice: true,
+    last_amount: 3.19,
+    typical_amount: 3.19,
+    amounts: [3.19, 3.19, 3.19],
+    dates: ['2026-05-26', '2026-05-26', '2026-06-25'],
+    last_seen: '2026-06-25',
+    next_expected: '2026-07-25',
+  });
+
+  const may = buildBillMonth({ recurring: [google], month: '2026-05' });
+  assert.equal(may.rows.length, 1);
+  assert.equal(may.rows[0].providerName, 'Google');
+  assert.equal(may.rows[0].paidAmount, 6.38);
+  assert.equal(may.rows[0].occurrenceCount, 2);
+  assert.equal(may.totals.paidCount, 1);
+  assert.equal(may.totals.paid, 6.38);
+});
+
+test('a clean car-payment name matches the raw Advancial ACH descriptor', () => {
+  const autoLoan = bill({
+    providerName: 'Advancial Auto Loan',
+    providerKey: 'advancial-auto-loan',
+    category: 'Car Payment',
+    amountDue: 569.42,
+    dueDate: '2026-09-04',
+  });
+  const rawBankStream = stream({
+    payee: 'Advancial Fed Cu DES:Loan Pymt Id:302585 Indn:sifuentes,trey C Co Id:xxxxx88572',
+    category: 'Car Payment',
+    fixedPrice: true,
+    last_amount: 569.42,
+    typical_amount: 569.42,
+    amounts: [569.42, 569.42, 569.42],
+    dates: ['2026-06-05', '2026-07-06', '2026-08-05'],
+    last_seen: '2026-08-05',
+    next_expected: '2026-09-05',
+  });
+
+  assert.equal(obligationProvidersMatch(autoLoan.providerName, rawBankStream.payee), true);
+
+  const upcoming = buildUpcomingObligations({
+    bills: [autoLoan], recurring: [rawBankStream], asOf: '2026-08-14',
+  });
+  assert.equal(upcoming.length, 1, 'raw bank recurrence must not duplicate the tracked car bill');
+  assert.equal(upcoming[0].providerName, 'Advancial Auto Loan');
+  assert.equal(upcoming[0].dueDate, '2026-09-04');
 });
 
 test('a variable utility is marked paid from the provider even when the amount moved a lot', () => {
