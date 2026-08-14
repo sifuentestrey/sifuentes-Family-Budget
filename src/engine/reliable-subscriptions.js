@@ -59,14 +59,14 @@ function groupAliases(transactions) {
 }
 
 /**
- * Same provider, same date, same amount is one cadence observation.
+ * Same provider, same date, same amount is one CADENCE observation.
  *
  * The bank can expose two Google charges that post on the same day. They may
  * represent two products, but they emphatically do not mean the household pays
- * Google twice a month. Cadence is about distinct billing dates, so duplicates
- * on one date must not contribute a zero-day gap.
+ * Google twice a month. We dedupe only for rhythm inference; the raw cluster is
+ * preserved so the monthly paid total still includes every dollar that left.
  */
-function distinctOccurrences(items) {
+function distinctCadenceOccurrences(items) {
   const seen = new Map();
   for (const item of [...items].sort((a, b) => a.posted_date.localeCompare(b.posted_date))) {
     const key = `${item.posted_date}::${round(Math.abs(Number(item.amount))).toFixed(2)}`;
@@ -89,23 +89,27 @@ function priceClusters(items) {
 }
 
 function candidateFromCluster(cluster, minOccurrences) {
-  const items = distinctOccurrences(cluster.items);
-  if (items.length < minOccurrences) return null;
-  const cadence = inferCadence(items.map((t) => t.posted_date));
+  const cadenceItems = distinctCadenceOccurrences(cluster.items);
+  if (cadenceItems.length < minOccurrences) return null;
+  const cadence = inferCadence(cadenceItems.map((t) => t.posted_date));
   if (cadence === 'irregular') return null;
   return {
-    items,
+    // Keep all matching charges for cash-history totals. Only cadenceItems are
+    // deduped; bill-center.js intentionally sums same-day charges into one row.
+    items: cluster.items,
+    cadenceObservations: cadenceItems.length,
     cadence,
-    lastSeen: items.at(-1).posted_date,
+    lastSeen: cadenceItems.at(-1).posted_date,
   };
 }
 
-/** Pick the newest real rhythm, then the one with the most evidence. */
+/** Pick the newest real rhythm, then the one with the most cadence evidence. */
 function bestCandidate(clusters, minOccurrences) {
   return clusters
     .map((cluster) => candidateFromCluster(cluster, minOccurrences))
     .filter(Boolean)
-    .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen) || b.items.length - a.items.length)[0] ?? null;
+    .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)
+      || b.cadenceObservations - a.cadenceObservations)[0] ?? null;
 }
 
 function bestFixedFallback(items) {
@@ -153,7 +157,7 @@ export function buildReliableSubscriptionStreams(transactions = [], opts = {}) {
     const dates = sorted.map((t) => t.posted_date);
     const amounts = sorted.map((t) => round(Math.abs(Number(t.amount))));
     const last = sorted.at(-1);
-    const nextExpected = projectNext(last.posted_date, chosen.cadence);
+    const nextExpected = projectNext(chosen.lastSeen, chosen.cadence);
 
     // A stale bank pattern is useful history, but it is not an obligation the
     // household should be told WILL debit. Keep stale/cancelled-looking streams
@@ -172,9 +176,10 @@ export function buildReliableSubscriptionStreams(transactions = [], opts = {}) {
       amounts,
       dates,
       occurrences: sorted.length,
-      last_seen: last.posted_date,
+      cadence_observations: chosen.cadenceObservations,
+      last_seen: chosen.lastSeen,
       next_expected: nextExpected,
-      confidence: sorted.length >= 3 ? 'high' : 'low',
+      confidence: chosen.cadenceObservations >= 3 ? 'high' : 'low',
     });
   }
 
