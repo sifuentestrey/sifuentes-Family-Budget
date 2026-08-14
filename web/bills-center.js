@@ -124,6 +124,20 @@ async function loadData(force = false) {
 
 function showLogos() { return localStorage.getItem('showLogos') !== '0'; }
 
+// Plaid does not return merchant metadata for several ACH billers in this
+// household. These are verified first-party domains, not domains guessed from
+// a merchant name. Keep this deliberately small: an initial is better than the
+// wrong company's logo.
+const VERIFIED_BILL_DOMAINS = [
+  [/pennymac/i, 'pennymac.com'],
+  [/advancial/i, 'advancial.org'],
+  [/trinity\s+valley|\btvec\b/i, 'tvec.net'],
+];
+
+function verifiedBillDomain(name) {
+  return VERIFIED_BILL_DOMAINS.find(([pattern]) => pattern.test(String(name ?? '')))?.[1] ?? null;
+}
+
 function logoForPayee(name, transactions) {
   if (!showLogos() || !name) return [];
   const matches = (transactions ?? []).filter((t) => providersMatch(t.payee, name));
@@ -132,6 +146,7 @@ function logoForPayee(name, transactions) {
   const matchedName = matches[0]?.payee ?? name;
   return [...new Set([
     plaidLogo,
+    ...logoSources(verifiedBillDomain(name)),
     ...logoSources(domainForPayee(name, website)),
     ...logoSources(domainForPayee(matchedName, website)),
   ].filter(Boolean))];
