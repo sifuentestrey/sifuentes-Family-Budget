@@ -1,6 +1,6 @@
 # Handoff — Family Budget
 
-Paste this into a new chat to resume. Last updated 2026-08-12 (evening).
+Paste this into a new chat to resume. Last updated 2026-08-14.
 
 ## Read this first
 
@@ -68,6 +68,64 @@ Transactions), **Income** (Overview / Paycheck / Shifts / Paystubs), **More**.
   only for money coming in. `docs/ui/README.md` has the rules and the two
   layout traps (`<summary>` carries a negative margin from the normalize
   stylesheet; a nowrap title needs `min-width: 0`).
+
+## Product north star — preserve this while extending the existing app
+
+Do **not** rebuild the app around these notes. They are requirements to guide
+future work on top of the current architecture and UI.
+
+The app is for **both people in the household to view and control together**.
+It should stay mobile-first, low-maintenance, automatic where possible, and
+centered on actual household cash flow rather than traditional budgeting
+complexity.
+
+When future development gets scattered, return to four questions:
+
+1. **What will the next paycheck actually be?**
+2. **Which bills need to come out of that paycheck?**
+3. **What is the household actually spending money on?**
+4. **Was the variable-income paycheck paid correctly?**
+
+Highest-value future capabilities, in roughly this order:
+
+- **Bill-to-paycheck planning.** A bill should be assignable to a specific
+  paycheck, ideally auto-assigned to the latest paycheck before its due date
+  with a user override. A paycheck should show expected deposit, committed
+  bills, and remaining/uncommitted money.
+- **Paycheck forecasting.** Do not assume every paycheck is identical. The
+  variable-income earner's pay can include regular hours, overtime, standby
+  call, callback guarantees, evening differential, and night differential.
+  Forecasts should eventually show estimated net deposit and a confidence
+  level based on how complete/final the source timecard is.
+- **Payroll audit.** The long-term audit path is department call schedule →
+  UKG/Kronos timecard → paystub. Flag missing standby, callback, overtime,
+  shift differential, minimum callback guarantees, wrong rates, or hours
+  present upstream but absent from the paystub. The forecast and audit should
+  share one versioned pay-rule model rather than duplicate calculations.
+- **Food/restaurant awareness.** Keep merchant normalization and use the
+  household's combined transactions to show restaurant, fast-food,
+  delivery/coffee, and grocery spending by pay period and merchant. Inform;
+  do not shame or turn this into spouse policing.
+- **Variable utility forecasting.** Electricity and water should eventually
+  use historical bills/usage and seasonality rather than a fixed monthly
+  amount. Show a predicted amount/range and confidence. Weather, rate
+  changes, and billing-cycle length are optional inputs when they materially
+  improve accuracy.
+- **Automatic ingestion first.** Prefer direct/API connectors, Plaid, email
+  bill ingestion, and document extraction before asking for manual entry.
+  Manual entry remains the fallback.
+
+Pay rates are configuration/data, **not constants in source code**. Historical
+examples from the household included roughly: base $52.72/hr, overtime
+$79.08/hr, standby ~$8/hr, 2-hour callback minimum, evening differential
+~$26/hr, and night differential ~$34/hr. These can change; any future payroll
+model should version rates by effective date.
+
+Do not turn the product into an envelope-budget system, spreadsheet clone,
+generic Mint replacement, credit-score dashboard, or financial-advice bot.
+Avoid requiring daily manual categorization and avoid making "safe to spend"
+the product concept. The differentiator is **paycheck intelligence + bills
+mapped to paychecks + automatic household spending awareness**.
 
 ## Things that are easy to get wrong here
 
