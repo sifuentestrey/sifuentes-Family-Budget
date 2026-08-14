@@ -138,9 +138,6 @@ export async function syncBills(options) {
       duplicates = partition.duplicates;
     }
 
-    // A new billing cycle is not a duplicate of last month's ignored marker,
-    // so duplicate detection alone cannot enforce a durable Delete. Apply the
-    // provider-level suppression after parsing but before any insert/update.
     const beforeSuppression = accepted.length + needsReview.length;
     accepted = accepted.filter((bill) => !isUserSuppressedBill(bill, existing));
     needsReview = needsReview.filter((bill) => !isUserSuppressedBill(bill, existing));
@@ -178,16 +175,6 @@ export async function syncBills(options) {
   }
 }
 
-/**
- * Sync a timecard for a pay period.
- *
- * @param {object} options
- * @param {import('../providers/types.js').PayrollProvider} options.provider
- * @param {SyncStore} options.store
- * @param {string} options.householdId
- * @param {{start: string, end: string}} options.period
- * @returns {Promise<SyncRun>}
- */
 export async function syncPayroll(options) {
   const { provider, store, householdId, period } = options;
   const run = newRun(householdId, provider.info.key, 'payroll', provider.info.isLive);
@@ -201,11 +188,9 @@ export async function syncPayroll(options) {
 
     const entries = await provider.getTimecard(period);
     run.itemsFound = entries.length;
-
     const { created, updated } = await store.saveTimeEntries(entries);
     run.itemsCreated = created;
     run.itemsUpdated = updated;
-
     return finish(run, 'success');
   } catch (error) {
     run.errors.push({ stage: 'sync', message: error.message });
@@ -215,16 +200,6 @@ export async function syncPayroll(options) {
   }
 }
 
-/**
- * Sync paystubs.
- *
- * @param {object} options
- * @param {import('../providers/types.js').PayrollProvider} options.provider
- * @param {SyncStore} options.store
- * @param {string} options.householdId
- * @param {string} [options.since]
- * @returns {Promise<SyncRun>}
- */
 export async function syncPaystubs(options) {
   const { provider, store, householdId } = options;
   const run = newRun(householdId, provider.info.key, 'paystubs', provider.info.isLive);
@@ -259,15 +234,6 @@ export async function syncPaystubs(options) {
   }
 }
 
-/**
- * Summarize sync state for the UI ("Electricity — 12 minutes ago").
- *
- * Anything not synced within `staleAfterHours` is reported stale, because the
- * only thing worse than no data is data the household believes is current.
- *
- * @param {SyncRun[]} runs
- * @param {number} [staleAfterHours=26]
- */
 export function summarizeSyncState(runs, staleAfterHours = 26) {
   const latestByProvider = new Map();
 
@@ -314,10 +280,6 @@ function formatRelative(minutes) {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-/**
- * In-memory SyncStore. For tests and local development only — nothing persists.
- * @returns {SyncStore & {bills: object[], paystubs: object[], timeEntries: object[], runs: SyncRun[]}}
- */
 export function createMemoryStore() {
   const bills = [];
   const paystubs = [];
@@ -326,13 +288,9 @@ export function createMemoryStore() {
 
   return {
     bills, paystubs, timeEntries, runs,
-
     async recordRun(run) { runs.push(run); return run; },
     async completeRun(run) { return run; },
-
-    async getExistingBills(householdId) {
-      return bills.filter((b) => b.householdId === householdId);
-    },
+    async getExistingBills(householdId) { return bills.filter((b) => b.householdId === householdId); },
     async saveBills(newBills) { bills.push(...newBills); return newBills.length; },
     async updateBills(updates) {
       for (const { existing, candidate } of updates) {
@@ -341,20 +299,14 @@ export function createMemoryStore() {
       }
       return updates.length;
     },
-
-    async getExistingPaystubs(householdId) {
-      return paystubs.filter((s) => s.householdId === householdId);
-    },
+    async getExistingPaystubs(householdId) { return paystubs.filter((s) => s.householdId === householdId); },
     async savePaystubs(stubs) { paystubs.push(...stubs); return stubs.length; },
-
     async saveTimeEntries(entries) {
       let created = 0;
       let updated = 0;
       for (const entry of entries) {
         const key = `${entry.payProfileId ?? 'default'}|${entry.date}`;
-        const index = timeEntries.findIndex(
-          (e) => `${e.payProfileId ?? 'default'}|${e.date}` === key,
-        );
+        const index = timeEntries.findIndex((e) => `${e.payProfileId ?? 'default'}|${e.date}` === key);
         if (index >= 0) { timeEntries[index] = entry; updated++; }
         else { timeEntries.push(entry); created++; }
       }
