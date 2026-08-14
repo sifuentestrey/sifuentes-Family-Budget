@@ -40,6 +40,44 @@ export async function dismissBill(id) {
 }
 
 /**
+ * Store the household's planning facts without adding schema just for UI
+ * preferences. `raw` is already the provider-agnostic JSON payload on a bill,
+ * so a tiny namespaced object is the safest place for "autopay vs we pay it"
+ * and "fixed vs variable" until those concepts need first-class columns.
+ *
+ * These are shared database values, not localStorage: both people in the
+ * household see the same answer on their phones.
+ */
+export async function updateBillPreferences(id, patch = {}) {
+  const { data, error: readError } = await supabase
+    .from('bills')
+    .select('raw')
+    .eq('id', id)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!data) throw new Error('Bill not found');
+
+  const currentRaw = data.raw && typeof data.raw === 'object' ? data.raw : {};
+  const currentPlanning = currentRaw.planning && typeof currentRaw.planning === 'object'
+    ? currentRaw.planning
+    : {};
+
+  const planning = { ...currentPlanning };
+  if (patch.paymentMode === 'auto' || patch.paymentMode === 'manual') {
+    planning.paymentMode = patch.paymentMode;
+  }
+  if (patch.amountMode === 'fixed' || patch.amountMode === 'variable') {
+    planning.amountMode = patch.amountMode;
+  }
+
+  const { error } = await supabase
+    .from('bills')
+    .update({ raw: { ...currentRaw, planning } })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/**
  * Extract provider/amount/due-date/category from pasted bill text — a
  * screenshot transcript, a portal page, an email body for a provider Gmail
  * scanning hasn't seen. Extraction only; nothing is saved until the
