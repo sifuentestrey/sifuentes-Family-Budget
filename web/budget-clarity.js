@@ -71,6 +71,21 @@
       setOwnText(primary, 'Bills');
     }
 
+    // Spending answers a different time question than Bills. Bills is what is
+    // coming due; Spending is what actually left the account in the selected
+    // month. Give the section its honest name so two correct lists do not look
+    // like conflicting data.
+    const spendingSeg = [...document.querySelectorAll('main .seg')].find(
+      (seg) => seg.querySelector('.seg-btn[data-view="spending"].active'),
+    );
+    if (spendingSeg) {
+      renameSection(
+        'Bills',
+        'Bills paid this month',
+        'Actual recurring household bills that cleared from the account.',
+      );
+    }
+
     const budgetSeg = [...document.querySelectorAll('main .seg')].find(
       (seg) => seg.querySelector('.seg-btn[data-view="budget"]')
         && seg.querySelector('.seg-btn[data-view="bills"]'),
@@ -83,8 +98,6 @@
     setText(monthlyBtn, 'Monthly plan');
     setText(billsBtn, 'Bills');
 
-    // Put the everyday task first: what bills are due and which paycheck pays
-    // them. Monthly targets are secondary planning, not a competing bill view.
     if (budgetSeg.firstElementChild !== billsBtn) budgetSeg.insertBefore(billsBtn, monthlyBtn);
 
     const billsActive = billsBtn.classList.contains('active');
@@ -126,10 +139,6 @@
       setText(headerTitle, 'Monthly plan');
       setText(headerSub, 'Bills plus everyday essentials for this month.');
 
-      // Bills already have a dedicated, paycheck-aware screen. Showing the
-      // same bill list again here was the biggest source of “which one do I
-      // use?” confusion, so Monthly plan now does one job: show the monthly
-      // amount and the flexible essentials targets underneath it.
       const billsSection = sectionByTitle('Bills');
       if (billsSection) billsSection.hidden = true;
 
