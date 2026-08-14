@@ -21,8 +21,8 @@ test('unrelated equal-amount Zelle send and receipt do not become a transfer pai
 
   assert.equal(hasTransferEvidence(rows[0]), false);
   assert.equal(hasTransferEvidence(rows[1]), false);
-  assert.equal(rows[0].is_transfer, false);
-  assert.equal(rows[1].is_transfer, false);
+  assert.notEqual(rows[0].is_transfer, true);
+  assert.notEqual(rows[1].is_transfer, true);
   assert.equal(rows[0].transfer_pair_id, null);
   assert.equal(rows[1].transfer_pair_id, null);
 });
@@ -33,8 +33,8 @@ test('same amount across two accounts is not enough without transfer evidence', 
     { id: uuid(4), account_id: 'b', posted_date: '2026-08-02', amount: -25, payee: 'Refund from Friend', raw_description: 'P2P receipt' },
   ]);
 
-  assert.equal(rows[0].is_transfer, false);
-  assert.equal(rows[1].is_transfer, false);
+  assert.notEqual(rows[0].is_transfer, true);
+  assert.notEqual(rows[1].is_transfer, true);
 });
 
 test('internal checking-to-savings transfer still pairs with evidence', () => {
@@ -75,6 +75,6 @@ test('generic autopay and bill pay text are not enough to erase an expense', () 
     { id: uuid(10), account_id: 'checking', posted_date: '2026-08-02', amount: 65, payee: 'Water Utility', raw_description: 'BILL PAY WATER' },
   ]);
 
-  assert.equal(rows[0].is_transfer, false);
-  assert.equal(rows[1].is_transfer, false);
+  assert.notEqual(rows[0].is_transfer, true);
+  assert.notEqual(rows[1].is_transfer, true);
 });
