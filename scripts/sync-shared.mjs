@@ -43,6 +43,8 @@ const RULES = [
 const BROWSER_ONLY = new Set([
   'engine/bill-center.js',
   'engine/reliable-subscriptions.js',
+  'engine/adaptive-budget.js',
+  'engine/money-plan-summary.js',
 ]);
 
 // Single files, named explicitly rather than by directory, so files that
