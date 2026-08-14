@@ -1,14 +1,22 @@
 /**
- * Bills center: one place for what must be paid, what cleared, and which
- * paycheck covers what remains.
+ * Bills center: one place for what must be paid, what already cleared, and
+ * which paycheck covers each remaining obligation.
+ *
+ * This intentionally owns the Bills screen. The older view grew several
+ * separate lists (tracked bills, detected charges, paycheck groups, paid
+ * history) that could all show the same provider. A household should never
+ * have to mentally dedupe its own budget.
  */
 import {
   createBill,
+  listBillSuppressions,
   listBillsForCenter,
+  suppressBill,
   updateBillDetails,
   updateBillPreferences,
 } from './bills.js';
 import { listTransactions } from './connect.js';
+import { requestTransactionSync } from './refresh-transactions.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscriptions.js';
 import { detectIncomeStreams } from '../src/engine/income.js';
@@ -23,10 +31,20 @@ import {
 import { providersMatch } from '../src/domain/provider-match.js';
 import { domainForPayee, logoSources } from '../src/engine/merchant-domain.js';
 
-let selectedMonth = new Date().toISOString().slice(0, 7);
+function localIsoDate(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+let selectedMonth = localIsoDate().slice(0, 7);
 let dataPromise = null;
 let mounting = false;
 let editingKey = null;
+let addingBill = false;
+let syncBusy = false;
+let notice = null;
 
 const money = (n) => Number(n || 0).toLocaleString('en-US', {
   style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -36,17 +54,19 @@ const esc = (value) => String(value ?? '')
   .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 
 function monthLabel(month) {
-  return new Date(`${month}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const [year, monthNumber] = month.split('-').map(Number);
+  return new Date(year, monthNumber - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 function dateLabel(date) {
+  if (!date) return '';
   return new Date(`${date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 function moveMonth(month, delta) {
-  const d = new Date(`${month}-01T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + delta);
-  return d.toISOString().slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const d = new Date(year, monthNumber - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function todayIso() { return new Date().toISOString().slice(0, 10); }
+function todayIso() { return localIsoDate(); }
 function currentMonth() { return todayIso().slice(0, 7); }
 function isBillsView() { return Boolean(document.querySelector('main .seg-btn[data-view="bills"].active')); }
 
@@ -55,47 +75,60 @@ function ensureStyle() {
   const style = document.createElement('style');
   style.id = 'bill-center-style';
   style.textContent = `
-    [data-bill-center]{margin-top:12px}
-    [data-bill-center] .bill-center-month{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 2px 12px}
-    [data-bill-center] .bill-center-month strong{font-size:15px}
-    [data-bill-center] .bill-center-month button{width:38px;height:38px;border:0;border-radius:12px;background:var(--surface-2,rgba(255,255,255,.06));color:var(--text);font-size:22px;cursor:pointer}
-    [data-bill-center] .bill-progress{height:7px;border-radius:999px;overflow:hidden;margin-top:12px;background:rgba(255,255,255,.12)}
-    [data-bill-center] .bill-progress>i{display:block;height:100%;border-radius:inherit;background:var(--positive)}
-    [data-bill-center] .bill-center-group{margin-top:14px}
-    [data-bill-center] .bill-center-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 4px 7px}
-    [data-bill-center] .bill-center-group-head strong{font-size:14px}
-    [data-bill-center] .bill-center-row.paid{opacity:.8}
+    [data-bill-center]{margin-top:8px}
+    [data-bill-center] .bill-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 2px 10px}
+    [data-bill-center] .bill-month-nav{display:flex;align-items:center;gap:6px}
+    [data-bill-center] .bill-month-nav strong{min-width:126px;text-align:center;font-size:15px}
+    [data-bill-center] .bill-icon-btn{width:36px;height:36px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);font:inherit;font-size:20px;cursor:pointer}
+    [data-bill-center] .bill-toolbar-actions{display:flex;gap:6px}
+    [data-bill-center] .bill-text-btn{min-height:36px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);font:inherit;font-size:12px;font-weight:750;padding:0 10px;cursor:pointer}
+    [data-bill-center] .bill-text-btn:disabled{opacity:.55;cursor:default}
+    [data-bill-center] .bill-month-meta{display:flex;gap:8px;flex-wrap:wrap;margin:0 3px 12px;color:var(--muted);font-size:12px}
+    [data-bill-center] .bill-month-meta span{padding:5px 8px;border-radius:999px;background:var(--surface-2,rgba(255,255,255,.05))}
+    [data-bill-center] .bill-calendar{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:10px;margin-bottom:16px}
+    [data-bill-center] .bill-calendar-weekdays,[data-bill-center] .bill-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+    [data-bill-center] .bill-calendar-weekdays span{text-align:center;color:var(--muted);font-size:10px;font-weight:700;padding:2px 0 5px}
+    [data-bill-center] .bill-day{min-height:46px;border-radius:10px;padding:5px 4px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px}
+    [data-bill-center] .bill-day.today{outline:1px solid var(--accent)}
+    [data-bill-center] .bill-day.has-items{background:var(--surface-2,rgba(255,255,255,.05))}
+    [data-bill-center] .bill-day-num{font-weight:750}
+    [data-bill-center] .bill-day-dots{display:flex;gap:3px;justify-content:center;flex-wrap:wrap}
+    [data-bill-center] .bill-day-dot{width:5px;height:5px;border-radius:999px;background:var(--accent)}
+    [data-bill-center] .bill-day-dot.paid{background:var(--positive)}
+    [data-bill-center] .bill-day-count{font-size:9px;color:var(--muted)}
+    [data-bill-center] .bill-center-row.paid{opacity:.78}
     [data-bill-center] .bill-center-row .row-title .chip{margin-left:6px}
     [data-bill-center] .bill-center-row .row-end{min-width:88px}
     [data-bill-center] .bill-center-loading{padding:22px 10px;text-align:center;color:var(--muted)}
-    [data-bill-center] .bill-row-edit{border:0;background:transparent;color:var(--accent);font:inherit;font-size:12px;font-weight:700;padding:4px 0 0;cursor:pointer}
+    [data-bill-center] .bill-row-edit{border:0;background:transparent;color:var(--accent);font:inherit;font-size:12px;font-weight:750;padding:4px 0 0;cursor:pointer}
     [data-bill-center] .bill-edit-card{margin:0 0 8px;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2,rgba(255,255,255,.05))}
     [data-bill-center] .bill-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-    [data-bill-center] .bill-edit-grid label:first-child,[data-bill-center] .bill-edit-grid label:last-child{grid-column:1/-1}
+    [data-bill-center] .bill-edit-grid .wide{grid-column:1/-1}
     [data-bill-center] .bill-edit-grid label{font-size:11px;color:var(--muted);display:grid;gap:5px}
-    [data-bill-center] .bill-edit-grid input{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);padding:10px;font:inherit;font-size:14px}
-    [data-bill-center] .bill-edit-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
-    [data-bill-center] .bill-edit-actions button{border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text);padding:8px 12px;font:inherit;font-weight:700;cursor:pointer}
+    [data-bill-center] .bill-edit-grid input,[data-bill-center] .bill-edit-grid select{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);padding:10px;font:inherit;font-size:14px}
+    [data-bill-center] .bill-edit-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px}
+    [data-bill-center] .bill-edit-actions button{border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text);padding:8px 12px;font:inherit;font-weight:750;cursor:pointer}
     [data-bill-center] .bill-edit-actions button[type="submit"]{background:var(--text);color:var(--surface);border-color:var(--text)}
-    [data-bill-center] .bill-pref-row{padding:12px 0;border-top:1px solid var(--border,rgba(255,255,255,.08))}
-    [data-bill-center] .bill-pref-row:first-child{border-top:0}
-    [data-bill-center] .bill-pref-title{font-weight:700;margin-bottom:7px}
-    [data-bill-center] .bill-pref-line{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px}
-    [data-bill-center] .bill-pref-label{font-size:12px;color:var(--muted)}
-    [data-bill-center] .bill-pref-buttons{display:flex;gap:6px}
-    [data-bill-center] .bill-pref-buttons button{border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--muted);padding:5px 9px;font:inherit;font-size:12px;cursor:pointer}
-    [data-bill-center] .bill-pref-buttons button.active{color:var(--text);border-color:var(--accent);background:var(--accent-soft,rgba(80,130,255,.12))}
-    @media(max-width:520px){[data-bill-center] .bill-edit-grid{grid-template-columns:1fr}}
+    [data-bill-center] .bill-edit-actions .danger{color:var(--negative);margin-right:auto}
+    [data-bill-center] .bill-add-card{margin-bottom:14px}
+    [data-bill-center] .bill-notice{margin:0 0 10px;padding:9px 11px;border-radius:11px;background:var(--surface-2,rgba(255,255,255,.05));color:var(--muted);font-size:12px}
+    @media(max-width:520px){
+      [data-bill-center] .bill-toolbar{align-items:flex-start}
+      [data-bill-center] .bill-toolbar-actions{flex-direction:column}
+      [data-bill-center] .bill-edit-grid{grid-template-columns:1fr}
+      [data-bill-center] .bill-edit-grid .wide{grid-column:auto}
+      [data-bill-center] .bill-day{min-height:42px;padding:4px 2px}
+    }
   `;
   document.head.appendChild(style);
 }
 
-function hideLegacyTop(main) {
-  const firstHero = [...main.children].find((node) => node.classList?.contains('hero'));
-  if (firstHero) firstHero.hidden = true;
-  for (const section of main.querySelectorAll('.section')) {
-    const title = section.querySelector('.section-title')?.textContent.trim();
-    if (['Which check covers what', 'Bills by paycheck', 'Upcoming bills'].includes(title)) section.hidden = true;
+/** Hide the old duplicate Bills implementation; this center owns the screen. */
+function hideLegacy(main, host = null) {
+  const seg = [...main.children].find((node) => node.classList?.contains('seg'));
+  for (const child of [...main.children]) {
+    if (child === seg || child === host) continue;
+    child.hidden = true;
   }
 }
 
@@ -114,17 +147,28 @@ function dedupeTrackedBills(bills) {
   return out;
 }
 
+function suppressedProvider(name, suppressions) {
+  return suppressions.some((marker) => obligationProvidersMatch(marker.providerName, name));
+}
+
 async function loadData(force = false) {
   if (force) dataPromise = null;
   if (!dataPromise) {
-    dataPromise = Promise.all([listBillsForCenter(), listTransactions()]).then(([rawBills, transactions]) => {
+    dataPromise = Promise.all([
+      listBillsForCenter(),
+      listBillSuppressions(),
+      listTransactions(),
+    ]).then(([rawBills, suppressions, transactions]) => {
       const recurringAnalysis = analyzeSubscriptions(transactions);
       const recurring = [
         ...(recurringAnalysis.bills ?? []),
-        ...buildReliableSubscriptionStreams(transactions),
-      ];
+        ...buildReliableSubscriptionStreams(transactions, { asOf: todayIso() }),
+      ].filter((stream) => !suppressedProvider(stream.payee, suppressions));
+
       return {
-        bills: dedupeTrackedBills(rawBills),
+        bills: dedupeTrackedBills(rawBills)
+          .filter((bill) => !suppressedProvider(bill.providerName, suppressions)),
+        suppressions,
         transactions,
         recurring,
         incomeStreams: detectIncomeStreams(transactions),
@@ -136,10 +180,6 @@ async function loadData(force = false) {
 
 function showLogos() { return localStorage.getItem('showLogos') !== '0'; }
 
-// Plaid does not return merchant metadata for several ACH billers in this
-// household. These are verified first-party domains, not domains guessed from
-// a merchant name. Keep this deliberately small: an initial is better than the
-// wrong company's logo.
 const VERIFIED_BILL_DOMAINS = [
   [/pennymac/i, 'pennymac.com'],
   [/advancial/i, 'advancial.org'],
@@ -197,71 +237,65 @@ function trackedBillFor(item, bills) {
   return bills.find((bill) => obligationProvidersMatch(bill.providerName, item.providerName)) ?? null;
 }
 
+function modeOption(value, current, label) {
+  return `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`;
+}
+
 function renderEditForm(item, bills) {
   if (editingKey !== item.id) return '';
   const tracked = trackedBillFor(item, bills);
   const source = tracked ?? item;
+  const prefs = tracked ? billPreferences(tracked) : {};
+  const paymentMode = prefs.paymentMode ?? item.paymentMode ?? '';
+  const amountMode = prefs.amountMode ?? (item.amountVaries ? 'variable' : item.amountVaries === false ? 'fixed' : '');
   return `
     <form class="bill-edit-card" data-bill-edit-form data-item-id="${esc(item.id)}" data-tracked-id="${esc(tracked?.id ?? '')}">
       <div class="bill-edit-grid">
-        <label>Bill name<input name="providerName" required value="${esc(source.providerName)}" /></label>
+        <label class="wide">Bill name<input name="providerName" required value="${esc(source.providerName)}" /></label>
         <label>Amount<input name="amountDue" type="number" inputmode="decimal" min="0" step="0.01" required value="${esc(Number(source.amountDue || 0).toFixed(2))}" /></label>
         <label>Due date<input name="dueDate" type="date" required value="${esc(source.dueDate)}" /></label>
-        <label>Category<input name="category" required value="${esc(source.category ?? 'Other')}" /></label>
+        <label>Payment<select name="paymentMode">
+          ${modeOption('', paymentMode, 'Not set')}
+          ${modeOption('auto', paymentMode, 'Automatic')}
+          ${modeOption('manual', paymentMode, 'We pay it')}
+        </select></label>
+        <label>Amount type<select name="amountMode">
+          ${modeOption('', amountMode, 'Not set')}
+          ${modeOption('fixed', amountMode, 'Fixed')}
+          ${modeOption('variable', amountMode, 'Varies')}
+        </select></label>
+        <label class="wide">Category<input name="category" required value="${esc(source.category ?? 'Other')}" /></label>
       </div>
       ${tracked ? '' : '<div class="field-hint" style="margin-top:8px">Saving turns this bank-detected item into a bill you control.</div>'}
       <div class="bill-edit-actions">
+        <button type="button" class="danger" data-bill-delete>Delete</button>
         <button type="button" data-bill-edit-cancel>Cancel</button>
         <button type="submit">Save</button>
       </div>
     </form>`;
 }
 
-function renderObligationRow(item, transactions, bills) {
-  const amount = item.paid ? item.paidAmount : item.amountDue;
-  const primaryDate = item.paid ? `Paid ${dateLabel(item.paidDate ?? item.dueDate)}` : `Due ${dateLabel(item.dueDate)}`;
-  const merged = item.occurrenceCount > 1 ? ` · ${item.occurrenceCount} charges` : '';
+function renderAddForm() {
+  if (!addingBill) return '';
   return `
-    <div class="row bill-center-row ${item.paid ? 'paid' : ''}">
-      ${avatar(item.providerName, transactions)}
-      <div class="row-body">
-        <div class="row-title">${esc(item.providerName)}${statusChips(item)}</div>
-        <div class="row-sub">${primaryDate}${merged} · ${esc(item.category ?? 'Other')}</div>
+    <form class="bill-edit-card bill-add-card" data-bill-add-form>
+      <div class="bill-edit-grid">
+        <label class="wide">Bill name<input name="providerName" required autocomplete="off" /></label>
+        <label>Amount<input name="amountDue" type="number" inputmode="decimal" min="0" step="0.01" required /></label>
+        <label>Due date<input name="dueDate" type="date" required value="${todayIso()}" /></label>
+        <label>Payment<select name="paymentMode"><option value="">Not set</option><option value="auto">Automatic</option><option value="manual">We pay it</option></select></label>
+        <label>Amount type<select name="amountMode"><option value="">Not set</option><option value="fixed">Fixed</option><option value="variable">Varies</option></select></label>
+        <label class="wide">Category<input name="category" value="Other" required /></label>
       </div>
-      <div class="row-end">
-        <div class="row-amount">${money(amount)}</div>
-        <div class="row-amount-sub">${item.paid ? 'paid' : item.amountVaries ? 'estimate' : 'due'}</div>
-        <button type="button" class="bill-row-edit" data-bill-edit="${esc(item.id)}">Edit</button>
+      <div class="bill-edit-actions">
+        <button type="button" data-bill-add-cancel>Cancel</button>
+        <button type="submit">Add bill</button>
       </div>
-    </div>
-    ${renderEditForm(item, bills)}`;
+    </form>`;
 }
 
-function renderMonth(monthData, transactions, bills, showDue) {
-  const due = monthData.rows.filter((r) => !r.paid);
-  const paid = monthData.rows.filter((r) => r.paid);
-  const t = monthData.totals;
-  const pct = t.total > 0 ? Math.min(100, Math.round((t.paid / t.total) * 100)) : 0;
-  const list = (items) => items.length
-    ? `<div class="list">${items.map((item) => renderObligationRow(item, transactions, bills)).join('')}</div>`
-    : '<div class="empty"><div class="empty-title">Nothing here</div></div>';
-  const paidOpen = paid.some((item) => item.id === editingKey) ? ' open' : '';
-
-  return `
-    <div class="bill-center-month">
-      <button type="button" data-bill-month-step="-1" aria-label="Previous month">‹</button>
-      <strong>${monthLabel(monthData.month)}</strong>
-      <button type="button" data-bill-month-step="1" aria-label="Next month">›</button>
-    </div>
-    <div class="hero">
-      <div class="hero-label">${monthLabel(monthData.month).replace(/ \d{4}$/, '')} bills</div>
-      <div class="hero-value">${t.remaining > 0 ? `${money(t.remaining)} left` : 'Paid'}</div>
-      <div class="hero-note">${money(t.paid)} paid of ${money(t.total)} expected.</div>
-      <div class="bill-progress"><i style="width:${pct}%"></i></div>
-      <div class="hero-foot"><span><b>${t.paidCount}</b> paid</span><span><b>${t.remainingCount}</b> still due</span></div>
-    </div>
-    ${showDue ? `<section class="section"><div class="section-head"><div><div class="section-title">Expected this month</div><div class="section-sub">Unpaid items for the month you selected.</div></div></div>${list(due)}</section>` : ''}
-    ${paid.length ? `<details class="fold bill-paid-history"${paidOpen}><summary>${paid.length} paid this month · ${money(t.paid)}</summary><div class="fold-body">${list(paid)}</div></details>` : ''}`;
+function obligationMatch(a, b) {
+  return a.dueDate === b.dueDate && obligationProvidersMatch(a.providerName, b.providerName);
 }
 
 function dedupeUpcoming(items, bills) {
@@ -272,7 +306,6 @@ function dedupeUpcoming(items, bills) {
       out.push(item);
       continue;
     }
-
     const existingTracked = trackedBillFor(out[index], bills);
     const incomingTracked = trackedBillFor(item, bills);
     if (!existingTracked && incomingTracked) out[index] = item;
@@ -281,38 +314,101 @@ function dedupeUpcoming(items, bills) {
   return out;
 }
 
-function renderPaycheckPlan(upcoming, incomeStreams, transactions, bills) {
-  const uniqueUpcoming = dedupeUpcoming(upcoming, bills);
-  const plan = planPaycheckCoverage(uniqueUpcoming, incomeStreams, { asOf: todayIso() });
-  const groups = plan.groups.filter((g) => g.bills.length).slice(0, 4);
-  const group = (label, items, total) => `
-    <div class="bill-center-group"><div class="bill-center-group-head"><strong>${label}</strong><span>${money(total)}</span></div>
-      <div class="list">${items.map((item) => renderObligationRow({ ...item, paid: false }, transactions, bills)).join('')}</div></div>`;
-  if (!plan.dueNow.bills.length && !groups.length && !plan.later.bills.length) return '';
-  return `<section class="section"><div class="section-head"><div><div class="section-title">Next paychecks</div><div class="section-sub">One row per bill. Tap Edit whenever the bank gets something wrong.</div></div></div>
-    ${plan.dueNow.bills.length ? group(incomeStreams.length ? 'Needs money already in the account' : 'Paycheck pattern still learning', plan.dueNow.bills, plan.dueNow.total) : ''}
-    ${groups.map((g) => group(`${dateLabel(g.paycheckDate)} paycheck`, g.bills, g.total)).join('')}
-    ${plan.later.bills.length ? `<details class="fold"><summary>${plan.later.bills.length} further out · ${money(plan.later.total)}</summary><div class="fold-body list">${plan.later.bills.map((item) => renderObligationRow({ ...item, paid: false }, transactions, bills)).join('')}</div></details>` : ''}
-  </section>`;
+function assignmentRecords(upcoming, incomeStreams, bills) {
+  const plan = planPaycheckCoverage(dedupeUpcoming(upcoming, bills), incomeStreams, { asOf: todayIso() });
+  const records = [];
+  for (const bill of plan.dueNow.bills) records.push({ bill, label: 'Needs money already in the account' });
+  for (const group of plan.groups) {
+    for (const bill of group.bills) records.push({ bill, label: `${dateLabel(group.paycheckDate)} paycheck` });
+  }
+  for (const bill of plan.later.bills) records.push({ bill, label: 'Paycheck assignment later' });
+  return records;
 }
 
-function renderPaymentSetup(bills, recurring) {
-  if (!bills.length) return '';
-  const rows = bills.map((bill) => {
-    const prefs = billPreferences(bill);
-    const stream = matchingRecurringStream(bill, recurring);
-    const amountMode = prefs.amountMode ?? (stream ? (stream.fixedPrice === false ? 'variable' : 'fixed') : null);
-    return `<div class="bill-pref-row" data-bill-pref-row="${esc(bill.id)}">
-      <div class="bill-pref-title">${esc(bill.providerName)}</div>
-      <div class="bill-pref-line"><span class="bill-pref-label">How it gets paid</span><span class="bill-pref-buttons">
-        <button type="button" class="${prefs.paymentMode === 'auto' ? 'active' : ''}" data-bill-pref="paymentMode" data-bill-id="${esc(bill.id)}" data-value="auto">Automatic</button>
-        <button type="button" class="${prefs.paymentMode === 'manual' ? 'active' : ''}" data-bill-pref="paymentMode" data-bill-id="${esc(bill.id)}" data-value="manual">We pay it</button></span></div>
-      <div class="bill-pref-line"><span class="bill-pref-label">Amount</span><span class="bill-pref-buttons">
-        <button type="button" class="${amountMode === 'fixed' ? 'active' : ''}" data-bill-pref="amountMode" data-bill-id="${esc(bill.id)}" data-value="fixed">Fixed</button>
-        <button type="button" class="${amountMode === 'variable' ? 'active' : ''}" data-bill-pref="amountMode" data-bill-id="${esc(bill.id)}" data-value="variable">Varies</button></span></div>
-    </div>`;
-  }).join('');
-  return `<details class="fold"><summary>Bill settings</summary><div class="fold-body"><div class="prose-sm" style="margin-bottom:6px">Automatic/manual and fixed/variable are shared for the household.</div>${rows}</div></details>`;
+function assignmentFor(item, records) {
+  return records.find((record) => obligationMatch(item, record.bill))?.label ?? null;
+}
+
+function renderObligationRow(item, transactions, bills, assignments) {
+  const amount = item.paid ? item.paidAmount : item.amountDue;
+  const primaryDate = item.paid ? `Paid ${dateLabel(item.paidDate ?? item.dueDate)}` : `Due ${dateLabel(item.dueDate)}`;
+  const assignment = item.paid ? null : assignmentFor(item, assignments);
+  const detail = [primaryDate, assignment, item.category ?? 'Other'].filter(Boolean).join(' · ');
+  return `
+    <div class="row bill-center-row ${item.paid ? 'paid' : ''}">
+      ${avatar(item.providerName, transactions)}
+      <div class="row-body">
+        <div class="row-title">${esc(item.providerName)}${statusChips(item)}</div>
+        <div class="row-sub">${esc(detail)}</div>
+      </div>
+      <div class="row-end">
+        <div class="row-amount">${money(amount)}</div>
+        <div class="row-amount-sub">${item.paid ? 'paid' : item.amountVaries ? 'estimate' : 'due'}</div>
+        <button type="button" class="bill-row-edit" data-bill-edit="${esc(item.id)}">Edit</button>
+      </div>
+    </div>
+    ${renderEditForm(item, bills)}`;
+}
+
+function renderCalendar(monthData) {
+  const [year, monthNumber] = monthData.month.split('-').map(Number);
+  const firstWeekday = new Date(year, monthNumber - 1, 1).getDay();
+  const days = new Date(year, monthNumber, 0).getDate();
+  const byDay = new Map();
+  for (const item of monthData.rows) {
+    const date = item.dueDate ?? item.paidDate;
+    if (!date || date.slice(0, 7) !== monthData.month) continue;
+    const day = Number(date.slice(8, 10));
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(item);
+  }
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push('<div></div>');
+  for (let day = 1; day <= days; day += 1) {
+    const items = byDay.get(day) ?? [];
+    const iso = `${monthData.month}-${String(day).padStart(2, '0')}`;
+    const dots = items.slice(0, 3).map((item) => `<i class="bill-day-dot ${item.paid ? 'paid' : ''}"></i>`).join('');
+    cells.push(`<div class="bill-day ${items.length ? 'has-items' : ''} ${iso === todayIso() ? 'today' : ''}" title="${esc(items.map((x) => x.providerName).join(', '))}">
+      <span class="bill-day-num">${day}</span>
+      ${items.length ? `<span class="bill-day-dots">${dots}</span>${items.length > 3 ? `<span class="bill-day-count">+${items.length - 3}</span>` : ''}` : ''}
+    </div>`);
+  }
+
+  return `<div class="bill-calendar">
+    <div class="bill-calendar-weekdays">${['S','M','T','W','T','F','S'].map((d) => `<span>${d}</span>`).join('')}</div>
+    <div class="bill-calendar-grid">${cells.join('')}</div>
+  </div>`;
+}
+
+function renderMonth(monthData, transactions, bills, assignments) {
+  const rows = [...monthData.rows].sort((a, b) =>
+    String(a.dueDate ?? a.paidDate).localeCompare(String(b.dueDate ?? b.paidDate))
+      || a.providerName.localeCompare(b.providerName),
+  );
+  const list = rows.length
+    ? `<div class="list">${rows.map((item) => renderObligationRow(item, transactions, bills, assignments)).join('')}</div>`
+    : '<div class="empty"><div class="empty-title">No bills or subscriptions for this month</div><div class="empty-body">Add one if the bank has not seen it yet.</div></div>';
+  const paidCount = rows.filter((item) => item.paid).length;
+  const dueCount = rows.length - paidCount;
+
+  return `
+    <div class="bill-toolbar">
+      <div class="bill-month-nav">
+        <button class="bill-icon-btn" type="button" data-bill-month-step="-1" aria-label="Previous month">‹</button>
+        <strong>${monthLabel(monthData.month)}</strong>
+        <button class="bill-icon-btn" type="button" data-bill-month-step="1" aria-label="Next month">›</button>
+      </div>
+      <div class="bill-toolbar-actions">
+        <button class="bill-text-btn" type="button" data-bill-sync ${syncBusy ? 'disabled' : ''}>${syncBusy ? 'Syncing…' : 'Sync'}</button>
+        <button class="bill-text-btn" type="button" data-bill-add>${addingBill ? 'Close' : '+ Add'}</button>
+      </div>
+    </div>
+    ${notice ? `<div class="bill-notice">${esc(notice)}</div>` : ''}
+    ${renderAddForm()}
+    <div class="bill-month-meta"><span>${paidCount} paid</span><span>${dueCount} coming up</span></div>
+    ${renderCalendar(monthData)}
+    <section class="section"><div class="section-head"><div><div class="section-title">Bills & subscriptions</div><div class="section-sub">Paid and upcoming, in date order. Automatic items are marked auto.</div></div></div>${list}</section>`;
 }
 
 function renderCenter(host, data) {
@@ -328,22 +424,49 @@ function renderCenter(host, data) {
     transactions: data.transactions,
     asOf: todayIso(),
   });
-  const isCurrent = selectedMonth === currentMonth();
+  const assignments = assignmentRecords(upcoming, data.incomeStreams, data.bills);
 
-  host.innerHTML = `
-    ${renderMonth(monthData, data.transactions, data.bills, !isCurrent)}
-    ${isCurrent ? renderPaycheckPlan(upcoming, data.incomeStreams, data.transactions, data.bills) : ''}
-    ${renderPaymentSetup(data.bills, data.recurring)}
-  `;
+  host.innerHTML = renderMonth(monthData, data.transactions, data.bills, assignments);
 
   host.querySelectorAll('[data-bill-month-step]').forEach((button) => button.addEventListener('click', () => {
     selectedMonth = moveMonth(selectedMonth, Number(button.dataset.billMonthStep));
     editingKey = null;
+    notice = null;
     renderCenter(host, data);
   }));
 
+  host.querySelector('[data-bill-add]')?.addEventListener('click', () => {
+    addingBill = !addingBill;
+    editingKey = null;
+    renderCenter(host, data);
+  });
+
+  host.querySelector('[data-bill-add-cancel]')?.addEventListener('click', () => {
+    addingBill = false;
+    renderCenter(host, data);
+  });
+
+  host.querySelector('[data-bill-sync]')?.addEventListener('click', async () => {
+    if (syncBusy) return;
+    syncBusy = true;
+    notice = null;
+    renderCenter(host, data);
+    try {
+      const result = await requestTransactionSync();
+      const changed = (result.synced ?? []).reduce((sum, item) => sum + Number(item.added ?? 0) + Number(item.modified ?? 0), 0);
+      notice = changed ? `Bank sync finished — ${changed} transaction${changed === 1 ? '' : 's'} changed.` : 'Bank sync finished. Nothing new yet.';
+      data = await loadData(true);
+    } catch (error) {
+      notice = error.message || 'Could not sync accounts.';
+    } finally {
+      syncBusy = false;
+      renderCenter(host, data);
+    }
+  });
+
   host.querySelectorAll('[data-bill-edit]').forEach((button) => button.addEventListener('click', () => {
     editingKey = button.dataset.billEdit;
+    addingBill = false;
     renderCenter(host, data);
   }));
 
@@ -352,41 +475,98 @@ function renderCenter(host, data) {
     renderCenter(host, data);
   }));
 
-  host.querySelectorAll('[data-bill-edit-form]').forEach((form) => form.addEventListener('submit', async (event) => {
+  host.querySelectorAll('[data-bill-add-form]').forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const save = form.querySelector('button[type="submit"]');
     save.disabled = true;
     const fields = new FormData(form);
-    const details = {
-      providerName: fields.get('providerName'),
-      amountDue: fields.get('amountDue'),
-      dueDate: fields.get('dueDate'),
-      category: fields.get('category'),
-    };
     try {
-      if (form.dataset.trackedId) await updateBillDetails(form.dataset.trackedId, details);
-      else await createBill({ ...details, source: 'manual' });
-      editingKey = null;
+      const id = await createBill({
+        providerName: fields.get('providerName'),
+        amountDue: Number(fields.get('amountDue')),
+        dueDate: fields.get('dueDate'),
+        category: fields.get('category'),
+        source: 'manual',
+      });
+      const paymentMode = fields.get('paymentMode');
+      const amountMode = fields.get('amountMode');
+      if (paymentMode || amountMode) {
+        await updateBillPreferences(id, {
+          ...(paymentMode ? { paymentMode } : {}),
+          ...(amountMode ? { amountMode } : {}),
+        });
+      }
+      addingBill = false;
+      notice = 'Bill added.';
       renderCenter(host, await loadData(true));
     } catch (error) {
       save.disabled = false;
       if (!form.querySelector('.field-hint.error')) {
-        form.insertAdjacentHTML('beforeend', `<div class="field-hint error" style="color:var(--negative);margin-top:8px">${esc(error.message || 'Could not save that bill.')}</div>`);
+        form.insertAdjacentHTML('beforeend', `<div class="field-hint error" style="color:var(--negative);margin-top:8px">${esc(error.message || 'Could not add that bill.')}</div>`);
       }
     }
   }));
 
-  host.querySelectorAll('[data-bill-pref]').forEach((button) => button.addEventListener('click', async () => {
-    button.disabled = true;
-    try {
-      await updateBillPreferences(button.dataset.billId, { [button.dataset.billPref]: button.dataset.value });
-      renderCenter(host, await loadData(true));
-    } catch (error) {
-      button.disabled = false;
-      const row = button.closest('[data-bill-pref-row]');
-      if (row && !row.querySelector('.field-hint')) row.insertAdjacentHTML('beforeend', `<div class="field-hint" style="color:var(--negative);margin-top:6px">${esc(error.message || 'Could not save that setting.')}</div>`);
-    }
-  }));
+  host.querySelectorAll('[data-bill-edit-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const save = form.querySelector('button[type="submit"]');
+      save.disabled = true;
+      const fields = new FormData(form);
+      const details = {
+        providerName: fields.get('providerName'),
+        amountDue: fields.get('amountDue'),
+        dueDate: fields.get('dueDate'),
+        category: fields.get('category'),
+      };
+      try {
+        const id = form.dataset.trackedId
+          ? (await updateBillDetails(form.dataset.trackedId, details), form.dataset.trackedId)
+          : await createBill({ ...details, amountDue: Number(details.amountDue), source: 'manual' });
+        const paymentMode = fields.get('paymentMode');
+        const amountMode = fields.get('amountMode');
+        if (paymentMode || amountMode) {
+          await updateBillPreferences(id, {
+            ...(paymentMode ? { paymentMode } : {}),
+            ...(amountMode ? { amountMode } : {}),
+          });
+        }
+        editingKey = null;
+        notice = 'Bill updated.';
+        renderCenter(host, await loadData(true));
+      } catch (error) {
+        save.disabled = false;
+        if (!form.querySelector('.field-hint.error')) {
+          form.insertAdjacentHTML('beforeend', `<div class="field-hint error" style="color:var(--negative);margin-top:8px">${esc(error.message || 'Could not save that bill.')}</div>`);
+        }
+      }
+    });
+
+    form.querySelector('[data-bill-delete]')?.addEventListener('click', async () => {
+      const fields = new FormData(form);
+      const name = String(fields.get('providerName') || 'this bill');
+      if (!window.confirm(`Delete ${name} from Bills? It will stop being projected from bank history until you add it again.`)) return;
+      const button = form.querySelector('[data-bill-delete]');
+      button.disabled = true;
+      try {
+        await suppressBill({
+          id: form.dataset.trackedId || null,
+          providerName: fields.get('providerName'),
+          amountDue: Number(fields.get('amountDue')),
+          dueDate: fields.get('dueDate'),
+          category: fields.get('category'),
+        });
+        editingKey = null;
+        notice = `${name} removed from Bills.`;
+        renderCenter(host, await loadData(true));
+      } catch (error) {
+        button.disabled = false;
+        if (!form.querySelector('.field-hint.error')) {
+          form.insertAdjacentHTML('beforeend', `<div class="field-hint error" style="color:var(--negative);margin-top:8px">${esc(error.message || 'Could not delete that bill.')}</div>`);
+        }
+      }
+    });
+  });
 }
 
 /** Called after app.js renders the Bills view. Safe to call repeatedly. */
@@ -396,21 +576,25 @@ export async function enhanceBillsView() {
   const seg = main?.querySelector('.seg');
   if (!main || !seg) return;
   ensureStyle();
-  hideLegacyTop(main);
-  if (main.querySelector('[data-bill-center]')) return;
+  const existing = main.querySelector('[data-bill-center]');
+  if (existing) {
+    hideLegacy(main, existing);
+    return;
+  }
 
   const host = document.createElement('div');
   host.dataset.billCenter = '1';
-  host.innerHTML = '<div class="bill-center-loading">Putting this month and the next paychecks together…</div>';
+  host.innerHTML = '<div class="bill-center-loading">Checking bills and subscriptions…</div>';
   seg.insertAdjacentElement('afterend', host);
+  hideLegacy(main, host);
   mounting = true;
   try {
     const data = await loadData();
     if (!host.isConnected || !isBillsView()) return;
     renderCenter(host, data);
-    hideLegacyTop(main);
+    hideLegacy(main, host);
   } catch (error) {
-    if (host.isConnected) host.innerHTML = `<div class="banner banner-warn"><div class="banner-body"><strong>Could not build the bill summary.</strong><div>${esc(error.message || 'Try reloading the app.')}</div></div></div>`;
+    if (host.isConnected) host.innerHTML = `<div class="banner banner-warn"><div class="banner-body"><strong>Could not build Bills.</strong><div>${esc(error.message || 'Try reloading the app.')}</div></div></div>`;
   } finally {
     mounting = false;
   }

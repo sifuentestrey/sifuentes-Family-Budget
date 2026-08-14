@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v38';
+const CACHE_VERSION = 'v39';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -26,6 +26,7 @@ const SHELL_ASSETS = [
   './redesign.css',
   './budget-clarity.js',
   './bills-center.js',
+  './refresh-transactions.js',
   './manifest.webmanifest',
   './vendor/open-props.min.css',
   './vendor/open-props-normalize.min.css',

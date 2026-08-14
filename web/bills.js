@@ -9,6 +9,7 @@
 import { supabase, FUNCTIONS_URL } from './supabase-client.js';
 import { rowToBill, billToRow } from '../src/ingestion/bill-row-mapping.js';
 import { slugify } from '../src/domain/bill.js';
+import { providersMatch } from '../src/domain/provider-match.js';
 import { findDuplicateBill, shouldUpdateExisting } from '../src/ingestion/dedupe.js';
 
 export async function listBills() {
@@ -35,6 +36,27 @@ export async function listBillsForCenter() {
     .order('due_date');
   if (error) throw error;
   return (data ?? []).map(rowToBill);
+}
+
+/**
+ * Provider-level "stop tracking" markers created when the household deletes a
+ * bank-detected obligation. Transactions are never deleted — only the Bills
+ * projection is suppressed. Old ignored false positives do NOT count here;
+ * the explicit planning flag is what makes this a durable user decision.
+ */
+export async function listBillSuppressions() {
+  const { data, error } = await supabase
+    .from('bills')
+    .select('id, provider_name, provider_key, raw')
+    .eq('status', 'ignored');
+  if (error) throw error;
+  return (data ?? [])
+    .filter((row) => row.raw?.planning?.suppressedRecurring === true)
+    .map((row) => ({
+      id: row.id,
+      providerName: row.provider_name,
+      providerKey: row.provider_key,
+    }));
 }
 
 export async function listBillsNeedingReview() {
@@ -97,9 +119,6 @@ export async function updateBillDetails(id, {
  * preferences. `raw` is already the provider-agnostic JSON payload on a bill,
  * so a tiny namespaced object is the safest place for "autopay vs we pay it"
  * and "fixed vs variable" until those concepts need first-class columns.
- *
- * These are shared database values, not localStorage: both people in the
- * household see the same answer on their phones.
  */
 export async function updateBillPreferences(id, patch = {}) {
   const { data, error: readError } = await supabase
@@ -130,6 +149,115 @@ export async function updateBillPreferences(id, patch = {}) {
   if (error) throw error;
 }
 
+async function currentHouseholdId() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const { data, error } = await supabase
+    .from('household_members')
+    .select('household_id')
+    .eq('user_id', session.user.id)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Not in a household');
+  return data.household_id;
+}
+
+function suppressedRaw(raw, value) {
+  const base = raw && typeof raw === 'object' ? raw : {};
+  const planning = base.planning && typeof base.planning === 'object' ? base.planning : {};
+  return {
+    ...base,
+    planning: {
+      ...planning,
+      suppressedRecurring: value,
+      ...(value ? { suppressedAt: new Date().toISOString() } : {}),
+    },
+  };
+}
+
+/**
+ * Delete an obligation from the Bills product without deleting bank history.
+ *
+ * For a tracked bill this soft-deletes the row and marks its provider as a
+ * user-suppressed recurring stream. For a bank-only subscription it reuses an
+ * existing ignored row when possible or creates a tiny ignored marker. Future
+ * auto-detection is then filtered by the explicit marker, so an ended payoff or
+ * cancelled subscription does not pop back in on the next refresh.
+ */
+export async function suppressBill({
+  id = null, providerName, amountDue = 0, dueDate, category = 'Other',
+}) {
+  const name = String(providerName ?? '').trim();
+  if (!name) throw new Error('Bill name is required');
+
+  if (id) {
+    const { data, error: readError } = await supabase
+      .from('bills')
+      .select('id, raw')
+      .eq('id', id)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (data) {
+      const { error } = await supabase
+        .from('bills')
+        .update({
+          status: 'ignored',
+          needs_review: false,
+          raw: suppressedRaw(data.raw, true),
+        })
+        .eq('id', data.id);
+      if (error) throw error;
+      return data.id;
+    }
+  }
+
+  const householdId = await currentHouseholdId();
+  const providerKey = slugify(name) || 'manual-entry';
+  const { data: existing, error: existingError } = await supabase
+    .from('bills')
+    .select('id, provider_name, raw')
+    .eq('household_id', householdId)
+    .eq('status', 'ignored');
+  if (existingError) throw existingError;
+
+  const marker = (existing ?? []).find((row) => providersMatch(row.provider_name, name));
+  if (marker) {
+    const { error } = await supabase
+      .from('bills')
+      .update({ raw: suppressedRaw(marker.raw, true), needs_review: false })
+      .eq('id', marker.id);
+    if (error) throw error;
+    return marker.id;
+  }
+
+  const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(String(dueDate ?? ''))
+    ? dueDate
+    : new Date().toISOString().slice(0, 10);
+  const amount = Number(amountDue);
+  const { data, error } = await supabase
+    .from('bills')
+    .insert({
+      household_id: householdId,
+      provider_name: name,
+      provider_key: providerKey,
+      category: category || 'Other',
+      amount_due: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+      currency: 'USD',
+      due_date: safeDate,
+      status: 'ignored',
+      source: 'manual',
+      confidence: 1,
+      needs_review: false,
+      detected_at: new Date().toISOString(),
+      raw: suppressedRaw(null, true),
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
 /**
  * Extract provider/amount/due-date/category from pasted bill text — a
  * screenshot transcript, a portal page, an email body for a provider Gmail
@@ -156,33 +284,14 @@ export async function parseBillText(text) {
  * spotted in their transactions (`source: 'bank'`). Always confirmed, always
  * full confidence: a household confirming a number themselves needs no review
  * queue, unlike a low-confidence automated parse.
- *
- * Checked against every existing bill for the household — any source, not
- * just other manual entries — before inserting. The same bill Gmail already
- * parsed and a household now types in by hand (or the reverse order) must
- * update one row, not sit alongside it as a second, uncoordinated "bill".
- * A manual entry wins that merge (see dedupe.js's shouldUpdateExisting) —
- * a human confirming a number outranks any automated parse — unless the
- * existing bill is already paid, in which case nothing is touched and the
- * caller is told why rather than silently doing nothing.
  */
 export async function createBill({ providerName, amountDue, dueDate, category, source = 'manual' }) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not signed in');
-
-  const { data: membership, error: membershipError } = await supabase
-    .from('household_members')
-    .select('household_id')
-    .eq('user_id', session.user.id)
-    .limit(1)
-    .maybeSingle();
-  if (membershipError) throw membershipError;
-  if (!membership) throw new Error('Not in a household');
-
+  const householdId = await currentHouseholdId();
+  const cleanName = providerName.trim();
   const candidate = {
-    householdId: membership.household_id,
-    providerName: providerName.trim(),
-    providerKey: slugify(providerName.trim()) || 'manual-entry',
+    householdId,
+    providerName: cleanName,
+    providerKey: slugify(cleanName) || 'manual-entry',
     category: category || 'Other',
     amountDue,
     dueDate,
@@ -196,10 +305,13 @@ export async function createBill({ providerName, amountDue, dueDate, category, s
   const { data: existingRows, error: existingError } = await supabase
     .from('bills')
     .select('*')
-    .eq('household_id', membership.household_id);
+    .eq('household_id', householdId);
   if (existingError) throw existingError;
 
-  const verdict = findDuplicateBill(candidate, (existingRows ?? []).map(rowToBill));
+  const existingBills = (existingRows ?? []).map(rowToBill);
+  const verdict = findDuplicateBill(candidate, existingBills);
+  let savedId;
+
   if (verdict.isDuplicate) {
     const decision = shouldUpdateExisting(verdict.existing, candidate);
     if (!decision.update) {
@@ -208,15 +320,37 @@ export async function createBill({ providerName, amountDue, dueDate, category, s
         + `(${decision.reason}) — not adding a duplicate.`,
       );
     }
-    const row = billToRow({ ...verdict.existing, ...candidate, id: verdict.existing.id });
+    const row = billToRow({
+      ...verdict.existing,
+      ...candidate,
+      id: verdict.existing.id,
+      raw: suppressedRaw(verdict.existing.raw, false),
+    });
     const { error } = await supabase.from('bills').update(row).eq('id', verdict.existing.id);
     if (error) throw error;
-    return verdict.existing.id;
+    savedId = verdict.existing.id;
+  } else {
+    const row = billToRow(candidate);
+    delete row.id;
+    const { data, error } = await supabase.from('bills').insert(row).select('id').single();
+    if (error) throw error;
+    savedId = data.id;
   }
 
-  const row = billToRow(candidate);
-  delete row.id;
-  const { data, error } = await supabase.from('bills').insert(row).select('id').single();
-  if (error) throw error;
-  return data.id;
+  // Adding a provider back is an explicit reversal of an earlier delete.
+  // Clear any provider-level suppression marker after the new bill is safely
+  // saved, otherwise the Bills center would hide the user's own new entry.
+  const suppressions = (existingRows ?? []).filter((row) =>
+    row.status === 'ignored'
+      && row.raw?.planning?.suppressedRecurring === true
+      && providersMatch(row.provider_name, cleanName),
+  );
+  for (const row of suppressions) {
+    await supabase
+      .from('bills')
+      .update({ raw: suppressedRaw(row.raw, false) })
+      .eq('id', row.id);
+  }
+
+  return savedId;
 }

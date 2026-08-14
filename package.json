@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Household budget with automatic bank sync and layered categorization",
   "scripts": {
-    "test": "node --test 'tests/*.test.mjs' && npm run check:shared",
+    "test": "npm run check:syntax && node --test tests/*.test.mjs tests/*.test.js && npm run check:shared",
+    "check:syntax": "node scripts/check-js-syntax.mjs",
     "fixtures": "node fixtures/generate.mjs > fixtures/sample-plaid.json",
     "demo": "node scripts/demo.mjs",
     "plan": "node scripts/plan.mjs",

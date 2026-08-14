@@ -1,18 +1,10 @@
 /**
- * Daily transaction sync.
+ * Transaction sync.
  *
- * Runs on a schedule (pg_cron), pulls deltas from Plaid, and writes categorized
- * transactions into Postgres. No human involvement in the normal path.
- *
- * Security notes:
- *   - Plaid credentials come from environment secrets and never leave this
- *     function. The browser never sees a token.
- *   - Access tokens are read from Supabase Vault by reference. Storing them in
- *     a regular column would put them in every backup and every PostgREST
- *     response that forgot to exclude the column.
- *   - Runs with the service role, so RLS is bypassed here by design. Every
- *     write therefore sets household_id explicitly — that column is the only
- *     thing standing between two households' data.
+ * Runs hourly from pg_cron and can also be triggered by a signed-in household
+ * member from the app. Both callers use the same sync path; the difference is
+ * scope. Cron may sync every household, while a user's JWT may only sync rows
+ * belonging to households RLS says that user belongs to.
  */
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
@@ -22,22 +14,26 @@ import { detectIncomeStreams, markIncome } from '../_shared/income.js';
 import { rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
 import { findPayingTransaction } from '../_shared/domain/bill-payment-match.js';
 
-// Trimmed at the point of use: a pasted value routinely carries an invisible
-// trailing newline, and requiring a human to retype a credential by hand to
-// dodge that is a worse fix than not caring about whitespace.
 const PLAID_ENV = (Deno.env.get('PLAID_ENV') ?? 'production').trim().toLowerCase();
 const PLAID_HOST = `https://${PLAID_ENV}.plaid.com`;
 
 /**
- * How far back to re-examine on every run.
+ * Income detection requires three occurrences. Thirty days can contain only two
+ * biweekly paychecks, causing a valid income stream to disappear depending on
+ * which day the sync runs. Four months gives every normal payroll cadence enough
+ * evidence while still keeping hourly reprocessing comfortably bounded.
  *
- * /transactions/sync is cursor-based and returns only deltas, so this is not
- * about fetching. It bounds the window we re-run transfer detection over: a
- * card payment's two sides can post days apart, and if the second side arrives
- * after we've already processed the first, the pair only becomes visible when
- * both are in scope together.
+ * Transfer detection also benefits from the wider history; Plaid itself is
+ * still cursor-based, so this does not refetch 120 days from the bank.
  */
-const REPROCESS_WINDOW_DAYS = 30;
+const REPROCESS_WINDOW_DAYS = 120;
+const STALE_SYNC_MINUTES = 90;
+
+const cors = {
+  'Access-Control-Allow-Origin': Deno.env.get('APP_ORIGIN') ?? '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
 
 interface PlaidTransaction {
   transaction_id: string;
@@ -48,6 +44,8 @@ interface PlaidTransaction {
   merchant_name?: string | null;
   original_description?: string | null;
   personal_finance_category?: { primary: string; detailed: string } | null;
+  logo_url?: string | null;
+  website?: string | null;
   pending: boolean;
 }
 
@@ -59,14 +57,16 @@ function plaidHeaders() {
   };
 }
 
-/**
- * Pull all pending deltas for one Item.
- *
- * Plaid returns pages until has_more is false. The cursor must only be
- * persisted after the whole page set is successfully written — advancing it
- * early would permanently skip transactions on a mid-loop failure, and nothing
- * would ever surface the gap.
- */
+function mapAccountType(type: string, subtype: string | null) {
+  if (type === 'credit') return 'credit';
+  if (type === 'loan') return 'loan';
+  if (type === 'depository') {
+    if (subtype === 'savings' || subtype === 'money market' || subtype === 'cd') return 'savings';
+    return 'checking';
+  }
+  return 'other';
+}
+
 async function fetchDeltas(accessToken: string, cursor: string | null) {
   const added: PlaidTransaction[] = [];
   const modified: PlaidTransaction[] = [];
@@ -105,52 +105,105 @@ async function fetchDeltas(accessToken: string, cursor: string | null) {
   return { added, modified, removed, nextCursor };
 }
 
+/**
+ * Refresh balances and the account roster before mapping transaction deltas.
+ *
+ * Previously accounts were only written during initial Plaid Link. That left
+ * balances stale forever and, worse, meant a newly visible account under an
+ * existing Item had no local account_id. The sync then filtered its transaction
+ * out and advanced the cursor, permanently losing that delta. Upserting the
+ * account roster first makes the mapping complete before the cursor can move.
+ */
+async function refreshAccounts(supabase: any, item: any, accessToken: string) {
+  const response = await fetch(`${PLAID_HOST}/accounts/get`, {
+    method: 'POST',
+    headers: plaidHeaders(),
+    body: JSON.stringify({ access_token: accessToken }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error_code ?? `Plaid accounts HTTP ${response.status}`);
+    // @ts-expect-error attach for caller
+    error.plaidCode = body.error_code;
+    throw error;
+  }
+
+  const rows = (body.accounts ?? []).map((account: any) => ({
+    household_id: item.household_id,
+    item_id: item.id,
+    plaid_account_id: account.account_id,
+    nickname: account.name ?? account.official_name ?? 'Account',
+    type: mapAccountType(account.type, account.subtype),
+    mask: account.mask ? String(account.mask).slice(-4) : null,
+    institution_name: item.institution_name ?? null,
+    current_balance: account.balances?.current ?? null,
+    available_balance: account.balances?.available ?? null,
+    credit_limit: account.balances?.limit ?? null,
+    is_active: true,
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (rows.length) {
+    const { error } = await supabase
+      .from('accounts')
+      .upsert(rows, { onConflict: 'plaid_account_id' });
+    if (error) throw new Error(`account refresh failed: ${error.message}`);
+  }
+
+  const { data: accounts, error: accountError } = await supabase
+    .from('accounts')
+    .select('id, plaid_account_id')
+    .eq('item_id', item.id)
+    .eq('is_active', true);
+  if (accountError) throw new Error(`account map failed: ${accountError.message}`);
+  return new Map((accounts ?? []).map((a: any) => [a.plaid_account_id, a.id]));
+}
+
 async function syncItem(supabase: any, item: any) {
-  const { data: logRow } = await supabase
+  const { data: logRow, error: logError } = await supabase
     .from('sync_log')
     .insert({ household_id: item.household_id, item_id: item.id, status: 'running' })
     .select('id')
     .single();
+  if (logError || !logRow) throw new Error(`could not create sync log: ${logError?.message ?? 'unknown error'}`);
 
   try {
-    // Token by reference — never stored in a queryable column.
     const { data: secret, error: vaultError } = await supabase.rpc('read_vault_secret', {
       secret_name: item.token_ref,
     });
     if (vaultError) throw new Error(`vault read failed: ${vaultError.message}`);
 
     const { added, modified, removed, nextCursor } = await fetchDeltas(secret, item.cursor);
+    const accountMap = await refreshAccounts(supabase, item, secret);
 
-    // Map Plaid account ids to our rows.
-    const { data: accounts } = await supabase
-      .from('accounts')
-      .select('id, plaid_account_id')
-      .eq('item_id', item.id);
-    const accountMap = new Map(accounts.map((a: any) => [a.plaid_account_id, a.id]));
+    const changed = [...added, ...modified];
+    const unknownAccountIds = [...new Set(changed
+      .filter((transaction) => !accountMap.has(transaction.account_id))
+      .map((transaction) => transaction.account_id))];
+    if (unknownAccountIds.length) {
+      // Do not advance the Plaid cursor when a delta cannot be mapped. Leaving
+      // the cursor untouched guarantees the transaction is retried next sync.
+      throw new Error(`account map incomplete for ${unknownAccountIds.length} Plaid account(s)`);
+    }
 
-    const incoming = [...added, ...modified]
-      .filter((t) => accountMap.has(t.account_id))
-      .map((t) => {
-        // category and plaidCategory aren't transactions columns — category_id
-        // is, and reprocessWindow() fills it in immediately after this insert
-        // by re-deriving it from categorizeBatch. Upserting either as-is
-        // fails outright: Postgrest rejects unknown columns in the payload,
-        // so every real sync's very first insert has always errored before
-        // reaching reprocessWindow at all.
-        const { category: _category, plaidCategory: _plaidCategory, ...row } = normalizePlaidTransaction(
-          t,
-          accountMap.get(t.account_id),
-        );
-        return { ...row, household_id: item.household_id };
-      });
+    const incoming = changed.map((t) => {
+      const { category: _category, plaidCategory: _plaidCategory, ...row } = normalizePlaidTransaction(
+        t,
+        accountMap.get(t.account_id),
+      );
+      return { ...row, household_id: item.household_id };
+    });
 
     if (removed.length) {
-      await supabase.from('transactions').delete().in('plaid_transaction_id', removed);
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('household_id', item.household_id)
+        .in('plaid_transaction_id', removed);
+      if (error) throw new Error(`remove failed: ${error.message}`);
     }
 
     if (incoming.length) {
-      // Upsert on the Plaid id makes re-runs idempotent. onConflict ignoreDuplicates
-      // is deliberately NOT used: modified transactions must actually update.
       const { error } = await supabase
         .from('transactions')
         .upsert(incoming, { onConflict: 'plaid_transaction_id' });
@@ -159,11 +212,11 @@ async function syncItem(supabase: any, item: any) {
 
     await reprocessWindow(supabase, item.household_id);
 
-    // Only now is it safe to advance the cursor.
-    await supabase
+    const { error: cursorError } = await supabase
       .from('items')
       .update({ cursor: nextCursor, status: 'good', status_detail: null, updated_at: new Date().toISOString() })
       .eq('id', item.id);
+    if (cursorError) throw new Error(`cursor update failed: ${cursorError.message}`);
 
     await supabase
       .from('sync_log')
@@ -178,9 +231,6 @@ async function syncItem(supabase: any, item: any) {
 
     return { added: added.length, modified: modified.length, removed: removed.length };
   } catch (error: any) {
-    // ITEM_LOGIN_REQUIRED means the bank revoked consent. Not a bug — banks
-    // force periodic re-auth. Mark it so the UI can prompt, because a silently
-    // stale account is worse than a visibly broken one.
     const needsReauth = error.plaidCode === 'ITEM_LOGIN_REQUIRED';
     await supabase
       .from('items')
@@ -200,30 +250,27 @@ async function syncItem(supabase: any, item: any) {
   }
 }
 
-/**
- * Re-run transfer detection, income detection, and categorization over a recent
- * window.
- *
- * Must span all accounts in the household: a transfer pair has one side in
- * checking and the other on a card, so per-item processing can never see both.
- * This is why detection runs here rather than inside the per-item fetch.
- */
 async function reprocessWindow(supabase: any, householdId: string) {
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - REPROCESS_WINDOW_DAYS);
 
-  const { data: rows } = await supabase
+  const { data: rows, error: rowError } = await supabase
     .from('transactions')
     .select('*')
     .eq('household_id', householdId)
-    .gte('posted_date', since.toISOString().slice(0, 10));
+    .gte('posted_date', since.toISOString().slice(0, 10))
+    .order('posted_date', { ascending: true });
+  if (rowError) throw new Error(`reprocess load failed: ${rowError.message}`);
+  if (!rows?.length) {
+    await replaceIncomeStreams(supabase, householdId, []);
+    return;
+  }
 
-  if (!rows?.length) return;
-
-  const { data: rules } = await supabase
+  const { data: rules, error: ruleError } = await supabase
     .from('rules')
     .select('pattern, is_learned, categories(name)')
     .eq('household_id', householdId);
+  if (ruleError) throw new Error(`rule load failed: ${ruleError.message}`);
 
   const learned = buildLearnedIndex(
     (rules ?? []).map((r: any) => ({
@@ -241,19 +288,20 @@ async function reprocessWindow(supabase: any, householdId: string) {
   processed = markIncome(processed, streams);
   processed = categorizeBatch(processed, { learned, householdRules });
 
-  const { data: categories } = await supabase
+  const { data: categories, error: categoryError } = await supabase
     .from('categories')
     .select('id, name')
     .eq('household_id', householdId);
+  if (categoryError) throw new Error(`category load failed: ${categoryError.message}`);
   const categoryIds = new Map((categories ?? []).map((c: any) => [c.name, c.id]));
 
-  // Write back only what changed, so we don't churn every row every night.
   const updates = processed
     .filter((t: any, i: number) => {
       const before = rows[i];
       return (
         t.is_transfer !== before.is_transfer ||
         t.is_income !== before.is_income ||
+        t.transfer_pair_id !== before.transfer_pair_id ||
         t.categorized_by !== before.categorized_by ||
         (categoryIds.get(t.category) ?? null) !== before.category_id
       );
@@ -268,40 +316,25 @@ async function reprocessWindow(supabase: any, householdId: string) {
     }));
 
   for (const update of updates) {
-    await supabase.from('transactions').update(update).eq('id', update.id);
+    const { error } = await supabase.from('transactions').update(update).eq('id', update.id);
+    if (error) throw new Error(`transaction reprocess failed: ${error.message}`);
   }
 
-  await persistIncomeStreams(supabase, householdId, streams);
+  await replaceIncomeStreams(supabase, householdId, streams);
   await reconcileBills(supabase, householdId, processed);
 }
 
-/**
- * Mark a bill paid once a matching bank transaction shows up, instead of
- * leaving it in "upcoming" forever after the household already paid it
- * through the connected account. The other half of matching bills across
- * sources — dedupe.js already reconciles email vs. manual entry; this
- * reconciles either of those against what the bank actually shows.
- *
- * Conservative by construction (see findPayingTransaction): an ambiguous
- * match marks nothing rather than guessing which bill a transaction paid.
- */
 async function reconcileBills(supabase: any, householdId: string, transactions: any[]) {
-  const { data: billRows } = await supabase
+  const { data: billRows, error: billError } = await supabase
     .from('bills')
     .select('*')
     .eq('household_id', householdId)
     .neq('status', 'paid')
     .neq('status', 'ignored');
+  if (billError) throw new Error(`bill reconciliation load failed: ${billError.message}`);
   if (!billRows?.length) return;
 
-  // Two bills with a near-identical amount due around the same time (rent and
-  // a similarly priced insurance premium, say) could otherwise both match the
-  // one transaction that actually paid only one of them — each bill searches
-  // independently, so nothing stops it from claiming a transaction an earlier
-  // bill in this same pass already claimed. Once claimed, a transaction is
-  // removed from the pool for the rest of this run.
   let pool = transactions;
-
   for (const row of billRows) {
     const bill = rowToBill(row);
     const match = findPayingTransaction(bill, pool);
@@ -318,34 +351,36 @@ async function reconcileBills(supabase: any, householdId: string, transactions: 
       .eq('id', bill.id)
       .neq('status', 'paid');
     if (error) throw new Error(`could not mark bill ${bill.id} paid: ${error.message}`);
-
     pool = pool.filter((t: any) => t.id !== match.id);
   }
 }
 
-async function persistIncomeStreams(supabase: any, householdId: string, streams: any[]) {
-  for (const stream of streams) {
-    await supabase.from('income_streams').upsert(
-      {
-        household_id: householdId,
-        account_id: stream.account_id,
-        payee: stream.payee,
-        cadence: stream.cadence,
-        typical_amount: stream.typical_amount,
-        last_seen: stream.last_seen,
-        next_expected: stream.next_expected,
-      },
-      { onConflict: 'household_id,account_id,payee' },
-    );
-  }
+/**
+ * The income_streams table is a materialized answer, not an append-only log.
+ * Replace the household's answer each sync so an employer that stops paying or
+ * a stream that no longer qualifies cannot live there forever.
+ */
+async function replaceIncomeStreams(supabase: any, householdId: string, streams: any[]) {
+  const { error: deleteError } = await supabase
+    .from('income_streams')
+    .delete()
+    .eq('household_id', householdId);
+  if (deleteError) throw new Error(`could not reconcile income streams: ${deleteError.message}`);
+  if (!streams.length) return;
+
+  const rows = streams.map((stream) => ({
+    household_id: householdId,
+    account_id: stream.account_id,
+    payee: stream.payee,
+    cadence: stream.cadence,
+    typical_amount: stream.typical_amount,
+    last_seen: stream.last_seen,
+    next_expected: stream.next_expected,
+  }));
+  const { error } = await supabase.from('income_streams').insert(rows);
+  if (error) throw new Error(`could not store income streams: ${error.message}`);
 }
 
-/**
- * Compare without leaking length or position through timing.
- *
- * Overkill for a 256-bit random secret that nobody can feasibly guess a prefix
- * of, but it costs nothing and removes the need to think about it again.
- */
 function secretsMatch(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -353,61 +388,110 @@ function secretsMatch(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/**
- * The token the caller must present.
- *
- * Vault is the source of truth; the environment variable is only a fallback for
- * a deployment that still sets one. Returns null when neither is configured,
- * and the caller MUST treat that as a refusal.
- *
- * This function previously compared against `Bearer ${Deno.env.get(...)}`
- * directly. With the variable unset that template produced the literal string
- * "Bearer undefined", which anyone could send — verified returning 200 against
- * the live deployment. Missing configuration now fails closed instead of
- * silently becoming a password that is printed in this file.
- */
 async function expectedSecret(supabase: SupabaseClient): Promise<string | null> {
   const fromEnv = Deno.env.get('SYNC_SECRET');
-  if (fromEnv) return fromEnv;
+  if (fromEnv) return fromEnv.trim();
 
   const { data, error } = await supabase.rpc('read_vault_secret', {
     secret_name: 'sync_secret',
   });
   if (error || typeof data !== 'string' || data.length === 0) return null;
-  return data;
+  return data.trim();
+}
+
+/**
+ * Return the household scope this caller may sync.
+ * null means cron/all households; an array means signed-in user scope.
+ */
+async function authorizedHouseholds(
+  req: Request,
+  admin: SupabaseClient,
+): Promise<{ households: string[] | null; ok: boolean }> {
+  const presented = req.headers.get('Authorization') ?? '';
+  const expected = await expectedSecret(admin);
+
+  if (expected && secretsMatch(presented, `Bearer ${expected}`)) {
+    return { households: null, ok: true };
+  }
+
+  if (!expected && !presented.startsWith('Bearer ')) return { households: [], ok: false };
+  if (!presented.startsWith('Bearer ')) return { households: [], ok: false };
+
+  const userClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: presented } } },
+  );
+  const { data: { user }, error } = await userClient.auth.getUser();
+  if (error || !user) return { households: [], ok: false };
+
+  const { data: memberships, error: membershipError } = await userClient
+    .from('household_members')
+    .select('household_id');
+  if (membershipError) return { households: [], ok: false };
+  return {
+    households: [...new Set((memberships ?? []).map((m: any) => m.household_id))],
+    ok: true,
+  };
+}
+
+async function closeStaleSyncLogs(admin: SupabaseClient, households: string[] | null) {
+  const cutoff = new Date(Date.now() - STALE_SYNC_MINUTES * 60_000).toISOString();
+  let query = admin
+    .from('sync_log')
+    .update({
+      status: 'error',
+      finished_at: new Date().toISOString(),
+      error_message: 'Previous sync ended without completion; closed by the next sync.',
+    })
+    .eq('status', 'running')
+    .lt('started_at', cutoff);
+  if (households !== null) {
+    if (!households.length) return;
+    query = query.in('household_id', households);
+  }
+  await query;
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: { ...cors, 'Content-Type': 'application/json' },
+  });
 }
 
 Deno.serve(async (req) => {
-  const supabase = createClient(
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+
+  const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Only the scheduler or an authenticated household member may trigger a sync.
-  const expected = await expectedSecret(supabase);
-  const presented = req.headers.get('Authorization') ?? '';
-  if (!expected || !secretsMatch(presented, `Bearer ${expected}`)) {
-    return new Response('unauthorized', { status: 401 });
-  }
+  const { households, ok } = await authorizedHouseholds(req, admin);
+  if (!ok) return json({ error: 'unauthorized' }, 401);
+  if (households !== null && households.length === 0) return json({ synced: [] });
 
-  const { data: items, error } = await supabase
+  await closeStaleSyncLogs(admin, households);
+
+  let itemQuery = admin
     .from('items')
     .select('*')
-    .in('status', ['good', 'error']); // skip login_required until the user re-auths
+    .in('status', ['good', 'error']);
+  if (households !== null) itemQuery = itemQuery.in('household_id', households);
 
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  const { data: items, error } = await itemQuery;
+  if (error) return json({ error: error.message }, 500);
 
   const results = [];
   for (const item of items ?? []) {
     try {
-      results.push({ item: item.institution_name, ...(await syncItem(supabase, item)) });
+      results.push({ item: item.institution_name, ...(await syncItem(admin, item)) });
     } catch (e: any) {
-      // One failing institution must not stop the others.
       results.push({ item: item.institution_name, error: e.message });
     }
   }
 
-  return new Response(JSON.stringify({ synced: results }, null, 2), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return json({ synced: results });
 });

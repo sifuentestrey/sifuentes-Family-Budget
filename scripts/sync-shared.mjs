@@ -42,6 +42,7 @@ const RULES = [
 // no runtime benefit.
 const BROWSER_ONLY = new Set([
   'engine/bill-center.js',
+  'engine/reliable-subscriptions.js',
 ]);
 
 // Single files, named explicitly rather than by directory, so files that
