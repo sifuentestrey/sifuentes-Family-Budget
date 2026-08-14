@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v35';
+const CACHE_VERSION = 'v36';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -46,6 +46,7 @@ const SHELL_ASSETS = [
   '../src/engine/guidance.js',
   '../src/engine/child-transition.js',
   '../src/engine/subscriptions.js',
+  '../src/engine/reliable-subscriptions.js',
   '../src/engine/forecast.js',
   '../src/engine/alerts.js',
   '../src/engine/bill-center.js',
