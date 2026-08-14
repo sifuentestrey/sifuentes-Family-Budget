@@ -13,10 +13,6 @@
  */
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-// npm: here, not a bare specifier — this is the one piece pdf-parser.js
-// deliberately doesn't import itself (see that file's own comment): Node
-// tests reach unpdf as a bare specifier via node_modules, Deno reaches the
-// same package through its npm compat layer instead.
 import { extractText, getDocumentProxy } from 'npm:unpdf';
 import { createGmailProvider } from '../_shared/providers/gmail-email-provider.js';
 import { ingestBillsFromEmail } from '../_shared/ingestion/email-ingestion.js';
@@ -24,10 +20,8 @@ import { createPdfParser } from '../_shared/ingestion/pdf-parser.js';
 import { syncBills } from '../_shared/sync/sync-engine.js';
 import { billToRow, rowToBill } from '../_shared/ingestion/bill-row-mapping.js';
 
-// First sync for a newly connected household has no last_synced_at to work
-// from. 90 days catches a handful of monthly-cadence bills without pulling a
-// whole mailbox history.
 const INITIAL_LOOKBACK_DAYS = 90;
+const STALE_RUN_MINUTES = 90;
 
 async function extractPdfText(bytes: Uint8Array): Promise<string> {
   const pdf = await getDocumentProxy(bytes);
@@ -46,11 +40,11 @@ function secretsMatch(a: string, b: string): boolean {
 
 async function expectedSecret(supabase: SupabaseClient): Promise<string | null> {
   const fromEnv = Deno.env.get('SYNC_SECRET');
-  if (fromEnv) return fromEnv;
+  if (fromEnv) return fromEnv.trim();
 
   const { data, error } = await supabase.rpc('read_vault_secret', { secret_name: 'sync_secret' });
   if (error || typeof data !== 'string' || data.length === 0) return null;
-  return data;
+  return data.trim();
 }
 
 async function refreshAccessToken(refreshToken: string, clientId: string, clientSecret: string) {
@@ -103,9 +97,6 @@ function createPostgresStore(admin: SupabaseClient, connectionId: string) {
         .select('id')
         .single();
       if (error) throw new Error(`could not record sync run: ${error.message}`);
-      // sync-engine.js never reassigns the object recordRun returns — it
-      // awaits and discards — so the db id has to ride along on the same
-      // object reference for completeRun to find it again.
       run._dbId = data.id;
       return run;
     },
@@ -143,6 +134,26 @@ function createPostgresStore(admin: SupabaseClient, connectionId: string) {
   };
 }
 
+/**
+ * A process timeout can kill the function after recordRun() but before the
+ * finally/completeRun path executes. Close those abandoned audit rows on the
+ * next healthy invocation so the UI never says a three-day-old sync is still
+ * running.
+ */
+async function closeStaleRuns(admin: SupabaseClient) {
+  const cutoff = new Date(Date.now() - STALE_RUN_MINUTES * 60_000).toISOString();
+  await admin
+    .from('sync_runs')
+    .update({
+      status: 'error',
+      completed_at: new Date().toISOString(),
+      errors: [{ stage: 'sync', message: 'Previous sync ended without completion; closed by the next run.' }],
+    })
+    .eq('kind', 'bills')
+    .eq('status', 'running')
+    .lt('started_at', cutoff);
+}
+
 Deno.serve(async (req) => {
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -154,6 +165,8 @@ Deno.serve(async (req) => {
   if (!expected || !secretsMatch(presented, `Bearer ${expected}`)) {
     return new Response('unauthorized', { status: 401 });
   }
+
+  await closeStaleRuns(admin);
 
   const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
   const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET')?.trim();
@@ -179,8 +192,6 @@ Deno.serve(async (req) => {
           return data as string;
         });
 
-      // Fetched once per household per run and reused across every message
-      // fetch in this sync — one refresh, not one per API call.
       let accessToken: string | null = null;
       const getAccessToken = async () => {
         if (!accessToken) accessToken = await refreshAccessToken(refreshToken, clientId, clientSecret);
@@ -194,9 +205,6 @@ Deno.serve(async (req) => {
         ? new Date(connection.last_synced_at).toISOString().slice(0, 10)
         : new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
 
-      // syncBills() only threads (provider, opts) through to the ingester —
-      // pdfParser rides along via closure rather than a new syncBills option,
-      // so the already-tested sync-engine.js contract doesn't need to change.
       const emailIngester = (p: any, opts: any) => ingestBillsFromEmail(p, { ...opts, pdfParser });
 
       const run = await syncBills({
@@ -212,9 +220,6 @@ Deno.serve(async (req) => {
 
       results.push({ householdId: connection.household_id, status: run.status, itemsCreated: run.itemsCreated, errors: run.errors });
     } catch (error: any) {
-      // Distinguish "the refresh token no longer works" from any other
-      // failure — that specific case needs the household to reconnect, and
-      // the connect UI reads `status` to say so instead of a generic error.
       const needsReauth = error.code === 'invalid_grant';
       await admin
         .from('provider_connections')
