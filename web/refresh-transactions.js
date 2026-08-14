@@ -25,7 +25,8 @@ export async function requestTransactionSync() {
   let result = {};
   try { result = text ? JSON.parse(text) : {}; } catch { /* server error text below */ }
   if (!res.ok) {
-    throw new Error(result.message ?? result.error ?? text || 'Could not sync accounts.');
+    const message = result.message ?? result.error ?? text;
+    throw new Error(message || 'Could not sync accounts.');
   }
   return result;
 }
