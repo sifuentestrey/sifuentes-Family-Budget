@@ -10,6 +10,7 @@ const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.me
 test('normal npm test includes both .test.mjs and .test.js regressions', () => {
   assert.match(packageJson.scripts.test, /tests\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.test, /tests\/\*\.test\.js/);
+  assert.match(packageJson.scripts.test, /check:syntax/);
 });
 
 test('server reprocess window is long enough to see three biweekly paychecks', () => {
@@ -24,6 +25,15 @@ test('signed-in refresh path is household scoped rather than scheduler-only', ()
   assert.match(syncTransactions, /from\('household_members'\)/);
   assert.match(syncTransactions, /itemQuery\s*=\s*itemQuery\.in\('household_id', households\)/);
   assert.match(syncTransactions, /req\.method === 'OPTIONS'/, 'browser refresh needs CORS preflight support');
+});
+
+test('account roster and balances refresh before transaction deltas are mapped', () => {
+  assert.match(syncTransactions, /accounts\/get/);
+  assert.match(syncTransactions, /current_balance:/);
+  assert.match(syncTransactions, /available_balance:/);
+  assert.match(syncTransactions, /const accountMap = await refreshAccounts/);
+  assert.match(syncTransactions, /unknownAccountIds/);
+  assert.match(syncTransactions, /Do not advance the Plaid cursor/);
 });
 
 test('income streams are reconciled, not only appended forever', () => {
