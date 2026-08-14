@@ -17,6 +17,26 @@ export async function listBills() {
   return (data ?? []).map(rowToBill);
 }
 
+/**
+ * Bills center history includes paid rows as well as open ones.
+ *
+ * The ordinary list intentionally reads `active_bills` so settled obligations
+ * disappear from "what do we still owe?". The monthly Bills center answers a
+ * different question — "what was paid this month?" — so it needs the original
+ * rows too. Ignored and needs-review records are excluded because neither is a
+ * household-confirmed obligation yet.
+ */
+export async function listBillsForCenter() {
+  const { data, error } = await supabase
+    .from('bills')
+    .select('*')
+    .eq('needs_review', false)
+    .neq('status', 'ignored')
+    .order('due_date');
+  if (error) throw error;
+  return (data ?? []).map(rowToBill);
+}
+
 export async function listBillsNeedingReview() {
   const { data, error } = await supabase
     .from('bills')
