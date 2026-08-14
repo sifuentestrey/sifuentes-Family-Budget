@@ -72,20 +72,12 @@ const PFC_TRANSFER_DETAILED = new Set([
 ]);
 
 export function isPlaidTransfer(txn) {
-  // Nested in memory, two flat columns once read back from the database.
   const pfc = txn?.plaidCategory
     ?? (txn?.pfc_primary || txn?.pfc_detailed
       ? { primary: txn.pfc_primary ?? null, detailed: txn.pfc_detailed ?? null }
       : null);
   if (!pfc) return false;
-
-  // Outflows only. A deposit Plaid labels TRANSFER_IN is very often a paycheck
-  // routed through a payroll provider, and marking that a transfer would erase
-  // the household's income — the single worst thing this file could do. The
-  // deposit side of a genuine transfer is already caught by pairing against
-  // its outflow, so nothing is lost by declining to guess here.
   if (!(txn.amount > 0)) return false;
-
   if (pfc.detailed && PFC_TRANSFER_DETAILED.has(pfc.detailed)) return true;
   return Boolean(pfc.primary && PFC_TRANSFER_PRIMARIES.has(pfc.primary));
 }
@@ -104,6 +96,12 @@ function looksLikeTransfer(txn) {
  * Candidates are sorted by date distance so the nearest counterpart wins — with
  * several identical amounts in flight, the closest pair is the right one.
  *
+ * `transfer_pair_id` is a Postgres foreign key to transactions.id (UUID). Plaid
+ * transaction IDs are external strings and must never be written there. Pure
+ * in-memory fixtures often do not have database UUIDs yet; those pairs are still
+ * flagged as transfers, but their pair id remains null until the rows exist in
+ * storage.
+ *
  * @param {Array<object>} transactions - must span all accounts to pair correctly
  * @param {object} [opts]
  * @param {number} [opts.windowDays=4]
@@ -114,7 +112,6 @@ export function detectTransfers(transactions, opts = {}) {
   const result = transactions.map((t) => ({ ...t }));
   const paired = new Set();
 
-  // Index outflows (positive = money out) by rounded absolute amount.
   const byAmount = new Map();
   for (let i = 0; i < result.length; i++) {
     const key = Math.abs(result[i].amount).toFixed(2);
@@ -125,7 +122,6 @@ export function detectTransfers(transactions, opts = {}) {
   for (let i = 0; i < result.length; i++) {
     if (paired.has(i)) continue;
     const txn = result[i];
-    // Only start from the outflow side, so each pair is considered once.
     if (txn.amount <= 0) continue;
 
     const candidates = (byAmount.get(Math.abs(txn.amount).toFixed(2)) || [])
@@ -133,8 +129,8 @@ export function detectTransfers(transactions, opts = {}) {
         if (j === i || paired.has(j)) return false;
         const other = result[j];
         return (
-          other.amount < 0 &&                                   // opposite direction
-          other.account_id !== txn.account_id &&                // different accounts
+          other.amount < 0 &&
+          other.account_id !== txn.account_id &&
           Math.abs(Math.abs(other.amount) - txn.amount) < AMOUNT_EPSILON &&
           daysBetween(txn.posted_date, other.posted_date) <= windowDays
         );
@@ -149,15 +145,13 @@ export function detectTransfers(transactions, opts = {}) {
       const j = candidates[0];
       result[i].is_transfer = true;
       result[j].is_transfer = true;
-      result[i].transfer_pair_id = result[j].plaid_transaction_id ?? j;
-      result[j].transfer_pair_id = result[i].plaid_transaction_id ?? i;
+      result[i].transfer_pair_id = result[j].id ?? null;
+      result[j].transfer_pair_id = result[i].id ?? null;
       paired.add(i);
       paired.add(j);
     }
   }
 
-  // Unpaired but obviously a transfer — the counterpart account isn't linked.
-  // Flagging these still keeps them out of spending, which is the point.
   for (let i = 0; i < result.length; i++) {
     if (!result[i].is_transfer && looksLikeTransfer(result[i])) {
       result[i].is_transfer = true;
@@ -167,13 +161,6 @@ export function detectTransfers(transactions, opts = {}) {
   return result;
 }
 
-/**
- * Sum spending, applying every exclusion that matters.
- *
- * Kept here rather than inline at call sites so there is exactly one definition
- * of "spending" in the codebase. Divergent definitions across views is how a
- * dashboard ends up disagreeing with its own detail page.
- */
 export function totalSpending(transactions) {
   const parentIds = new Set(
     transactions.map((t) => t.parent_transaction_id).filter(Boolean),
