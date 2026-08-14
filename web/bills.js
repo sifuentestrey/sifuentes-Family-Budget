@@ -17,6 +17,26 @@ export async function listBills() {
   return (data ?? []).map(rowToBill);
 }
 
+/**
+ * Bills center history includes paid rows as well as open ones.
+ *
+ * The ordinary list intentionally reads `active_bills` so settled obligations
+ * disappear from "what do we still owe?". The monthly Bills center answers a
+ * different question — "what was paid this month?" — so it needs the original
+ * rows too. Ignored and needs-review records are excluded because neither is a
+ * household-confirmed obligation yet.
+ */
+export async function listBillsForCenter() {
+  const { data, error } = await supabase
+    .from('bills')
+    .select('*')
+    .eq('needs_review', false)
+    .neq('status', 'ignored')
+    .order('due_date');
+  if (error) throw error;
+  return (data ?? []).map(rowToBill);
+}
+
 export async function listBillsNeedingReview() {
   const { data, error } = await supabase
     .from('bills')
@@ -36,6 +56,44 @@ export async function confirmBill(id) {
 /** Reject a false positive — a payment receipt or a promo that slipped through classification. */
 export async function dismissBill(id) {
   const { error } = await supabase.from('bills').update({ status: 'ignored', needs_review: false }).eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Store the household's planning facts without adding schema just for UI
+ * preferences. `raw` is already the provider-agnostic JSON payload on a bill,
+ * so a tiny namespaced object is the safest place for "autopay vs we pay it"
+ * and "fixed vs variable" until those concepts need first-class columns.
+ *
+ * These are shared database values, not localStorage: both people in the
+ * household see the same answer on their phones.
+ */
+export async function updateBillPreferences(id, patch = {}) {
+  const { data, error: readError } = await supabase
+    .from('bills')
+    .select('raw')
+    .eq('id', id)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!data) throw new Error('Bill not found');
+
+  const currentRaw = data.raw && typeof data.raw === 'object' ? data.raw : {};
+  const currentPlanning = currentRaw.planning && typeof currentRaw.planning === 'object'
+    ? currentRaw.planning
+    : {};
+
+  const planning = { ...currentPlanning };
+  if (patch.paymentMode === 'auto' || patch.paymentMode === 'manual') {
+    planning.paymentMode = patch.paymentMode;
+  }
+  if (patch.amountMode === 'fixed' || patch.amountMode === 'variable') {
+    planning.amountMode = patch.amountMode;
+  }
+
+  const { error } = await supabase
+    .from('bills')
+    .update({ raw: { ...currentRaw, planning } })
+    .eq('id', id);
   if (error) throw error;
 }
 

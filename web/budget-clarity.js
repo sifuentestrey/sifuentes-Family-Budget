@@ -2,6 +2,12 @@
   const app = document.getElementById('app');
   if (!app) return;
 
+  let billsCenterPromise = null;
+  const loadBillsCenter = () => {
+    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js');
+    return billsCenterPromise;
+  };
+
   const ensureStyle = () => {
     if (document.getElementById('budget-clarity-style')) return;
     const style = document.createElement('style');
@@ -107,7 +113,7 @@
 
     if (billsActive) {
       setText(headerTitle, 'Bills');
-      setText(headerSub, 'What is due and which paycheck should cover it.');
+      setText(headerSub, 'What is paid, what is still due, and which paycheck covers it.');
 
       renameSection(
         'Which check covers what',
@@ -133,6 +139,13 @@
         if (icon) addBill.appendChild(icon);
         addBill.appendChild(document.createTextNode('Add bill'));
       }
+
+      // Replace the old "total here / paycheck list there / subscriptions in
+      // More" mental merge with one operational summary. Import lazily so this
+      // extra data work happens only when Bills is actually open.
+      loadBillsCenter()
+        .then((module) => module.enhanceBillsView())
+        .catch(() => { /* The original Bills view remains usable on failure. */ });
     }
 
     if (monthlyActive) {
