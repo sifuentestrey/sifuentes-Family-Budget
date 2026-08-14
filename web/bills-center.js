@@ -2,7 +2,12 @@
  * Bills center: one place for what must be paid, what cleared, and which
  * paycheck covers what remains.
  */
-import { listBillsForCenter, updateBillPreferences } from './bills.js';
+import {
+  createBill,
+  listBillsForCenter,
+  updateBillDetails,
+  updateBillPreferences,
+} from './bills.js';
 import { listTransactions } from './connect.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscriptions.js';
@@ -13,6 +18,7 @@ import {
   buildBillMonth,
   buildUpcomingObligations,
   matchingRecurringStream,
+  obligationProvidersMatch,
 } from '../src/engine/bill-center.js';
 import { providersMatch } from '../src/domain/provider-match.js';
 import { domainForPayee, logoSources } from '../src/engine/merchant-domain.js';
@@ -20,6 +26,7 @@ import { domainForPayee, logoSources } from '../src/engine/merchant-domain.js';
 let selectedMonth = new Date().toISOString().slice(0, 7);
 let dataPromise = null;
 let mounting = false;
+let editingKey = null;
 
 const money = (n) => Number(n || 0).toLocaleString('en-US', {
   style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -40,6 +47,7 @@ function moveMonth(month, delta) {
   return d.toISOString().slice(0, 7);
 }
 function todayIso() { return new Date().toISOString().slice(0, 10); }
+function currentMonth() { return todayIso().slice(0, 7); }
 function isBillsView() { return Boolean(document.querySelector('main .seg-btn[data-view="bills"].active')); }
 
 function ensureStyle() {
@@ -56,10 +64,19 @@ function ensureStyle() {
     [data-bill-center] .bill-center-group{margin-top:14px}
     [data-bill-center] .bill-center-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 4px 7px}
     [data-bill-center] .bill-center-group-head strong{font-size:14px}
-    [data-bill-center] .bill-center-row.paid{opacity:.78}
+    [data-bill-center] .bill-center-row.paid{opacity:.8}
     [data-bill-center] .bill-center-row .row-title .chip{margin-left:6px}
     [data-bill-center] .bill-center-row .row-end{min-width:88px}
     [data-bill-center] .bill-center-loading{padding:22px 10px;text-align:center;color:var(--muted)}
+    [data-bill-center] .bill-row-edit{border:0;background:transparent;color:var(--accent);font:inherit;font-size:12px;font-weight:700;padding:4px 0 0;cursor:pointer}
+    [data-bill-center] .bill-edit-card{margin:0 0 8px;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2,rgba(255,255,255,.05))}
+    [data-bill-center] .bill-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+    [data-bill-center] .bill-edit-grid label:first-child,[data-bill-center] .bill-edit-grid label:last-child{grid-column:1/-1}
+    [data-bill-center] .bill-edit-grid label{font-size:11px;color:var(--muted);display:grid;gap:5px}
+    [data-bill-center] .bill-edit-grid input{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);padding:10px;font:inherit;font-size:14px}
+    [data-bill-center] .bill-edit-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+    [data-bill-center] .bill-edit-actions button{border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text);padding:8px 12px;font:inherit;font-weight:700;cursor:pointer}
+    [data-bill-center] .bill-edit-actions button[type="submit"]{background:var(--text);color:var(--surface);border-color:var(--text)}
     [data-bill-center] .bill-pref-row{padding:12px 0;border-top:1px solid var(--border,rgba(255,255,255,.08))}
     [data-bill-center] .bill-pref-row:first-child{border-top:0}
     [data-bill-center] .bill-pref-title{font-weight:700;margin-bottom:7px}
@@ -68,6 +85,7 @@ function ensureStyle() {
     [data-bill-center] .bill-pref-buttons{display:flex;gap:6px}
     [data-bill-center] .bill-pref-buttons button{border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--muted);padding:5px 9px;font:inherit;font-size:12px;cursor:pointer}
     [data-bill-center] .bill-pref-buttons button.active{color:var(--text);border-color:var(--accent);background:var(--accent-soft,rgba(80,130,255,.12))}
+    @media(max-width:520px){[data-bill-center] .bill-edit-grid{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
 }
@@ -88,13 +106,10 @@ function dedupeTrackedBills(bills) {
       existing.dueDate === bill.dueDate
       && Math.abs(existing.amountDue - bill.amountDue) < 0.01
       && existing.category === bill.category
-      && (providersMatch(existing.providerName, bill.providerName)
-        || existing.providerName.split(/\s+/)[0]?.toLowerCase() === bill.providerName.split(/\s+/)[0]?.toLowerCase()),
+      && obligationProvidersMatch(existing.providerName, bill.providerName),
     );
     if (!duplicate) out.push(bill);
-    else if (bill.providerName.length < duplicate.providerName.length) {
-      out[out.indexOf(duplicate)] = bill;
-    }
+    else if (bill.providerName.length < duplicate.providerName.length) out[out.indexOf(duplicate)] = bill;
   }
   return out;
 }
@@ -104,9 +119,6 @@ async function loadData(force = false) {
   if (!dataPromise) {
     dataPromise = Promise.all([listBillsForCenter(), listTransactions()]).then(([rawBills, transactions]) => {
       const recurringAnalysis = analyzeSubscriptions(transactions);
-      // Bills can vary in amount, so keep the broad recurring detector for
-      // mortgage/utilities/insurance. Subscriptions use the stricter detector:
-      // shopping bursts are not obligations and provider aliases are merged.
       const recurring = [
         ...(recurringAnalysis.bills ?? []),
         ...buildReliableSubscriptionStreams(transactions),
@@ -140,7 +152,7 @@ function verifiedBillDomain(name) {
 
 function logoForPayee(name, transactions) {
   if (!showLogos() || !name) return [];
-  const matches = (transactions ?? []).filter((t) => providersMatch(t.payee, name));
+  const matches = (transactions ?? []).filter((t) => providersMatch(t.payee, name) || obligationProvidersMatch(t.payee, name));
   const plaidLogo = matches.find((t) => t.logo_url)?.logo_url ?? null;
   const website = matches.find((t) => t.merchant_website)?.merchant_website ?? null;
   const matchedName = matches[0]?.payee ?? name;
@@ -175,31 +187,65 @@ function statusChips(item) {
   return chips.join('');
 }
 
-function renderObligationRow(item, transactions) {
+function trackedBillFor(item, bills) {
+  if (item.trackedBillId) {
+    const exact = bills.find((bill) => bill.id === item.trackedBillId);
+    if (exact) return exact;
+  }
+  const exactId = bills.find((bill) => bill.id === item.id);
+  if (exactId) return exactId;
+  return bills.find((bill) => obligationProvidersMatch(bill.providerName, item.providerName)) ?? null;
+}
+
+function renderEditForm(item, bills) {
+  if (editingKey !== item.id) return '';
+  const tracked = trackedBillFor(item, bills);
+  const source = tracked ?? item;
+  return `
+    <form class="bill-edit-card" data-bill-edit-form data-item-id="${esc(item.id)}" data-tracked-id="${esc(tracked?.id ?? '')}">
+      <div class="bill-edit-grid">
+        <label>Bill name<input name="providerName" required value="${esc(source.providerName)}" /></label>
+        <label>Amount<input name="amountDue" type="number" inputmode="decimal" min="0" step="0.01" required value="${esc(Number(source.amountDue || 0).toFixed(2))}" /></label>
+        <label>Due date<input name="dueDate" type="date" required value="${esc(source.dueDate)}" /></label>
+        <label>Category<input name="category" required value="${esc(source.category ?? 'Other')}" /></label>
+      </div>
+      ${tracked ? '' : '<div class="field-hint" style="margin-top:8px">Saving turns this bank-detected item into a bill you control.</div>'}
+      <div class="bill-edit-actions">
+        <button type="button" data-bill-edit-cancel>Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>`;
+}
+
+function renderObligationRow(item, transactions, bills) {
   const amount = item.paid ? item.paidAmount : item.amountDue;
   const primaryDate = item.paid ? `Paid ${dateLabel(item.paidDate ?? item.dueDate)}` : `Due ${dateLabel(item.dueDate)}`;
+  const merged = item.occurrenceCount > 1 ? ` · ${item.occurrenceCount} charges` : '';
   return `
     <div class="row bill-center-row ${item.paid ? 'paid' : ''}">
       ${avatar(item.providerName, transactions)}
       <div class="row-body">
         <div class="row-title">${esc(item.providerName)}${statusChips(item)}</div>
-        <div class="row-sub">${primaryDate} · ${esc(item.category ?? 'Other')}</div>
+        <div class="row-sub">${primaryDate}${merged} · ${esc(item.category ?? 'Other')}</div>
       </div>
       <div class="row-end">
         <div class="row-amount">${money(amount)}</div>
         <div class="row-amount-sub">${item.paid ? 'paid' : item.amountVaries ? 'estimate' : 'due'}</div>
+        <button type="button" class="bill-row-edit" data-bill-edit="${esc(item.id)}">Edit</button>
       </div>
-    </div>`;
+    </div>
+    ${renderEditForm(item, bills)}`;
 }
 
-function renderMonth(monthData, transactions) {
+function renderMonth(monthData, transactions, bills, showDue) {
   const due = monthData.rows.filter((r) => !r.paid);
   const paid = monthData.rows.filter((r) => r.paid);
   const t = monthData.totals;
   const pct = t.total > 0 ? Math.min(100, Math.round((t.paid / t.total) * 100)) : 0;
   const list = (items) => items.length
-    ? `<div class="list">${items.map((item) => renderObligationRow(item, transactions)).join('')}</div>`
+    ? `<div class="list">${items.map((item) => renderObligationRow(item, transactions, bills)).join('')}</div>`
     : '<div class="empty"><div class="empty-title">Nothing here</div></div>';
+  const paidOpen = paid.some((item) => item.id === editingKey) ? ' open' : '';
 
   return `
     <div class="bill-center-month">
@@ -214,21 +260,39 @@ function renderMonth(monthData, transactions) {
       <div class="bill-progress"><i style="width:${pct}%"></i></div>
       <div class="hero-foot"><span><b>${t.paidCount}</b> paid</span><span><b>${t.remainingCount}</b> still due</span></div>
     </div>
-    <section class="section"><div class="section-head"><div><div class="section-title">Still due</div><div class="section-sub">Everything that still needs money this month.</div></div></div>${list(due)}</section>
-    <section class="section"><div class="section-head"><div><div class="section-title">Paid</div><div class="section-sub">Bills and subscriptions that already cleared.</div></div></div>${list(paid)}</section>`;
+    ${showDue ? `<section class="section"><div class="section-head"><div><div class="section-title">Expected this month</div><div class="section-sub">Unpaid items for the month you selected.</div></div></div>${list(due)}</section>` : ''}
+    ${paid.length ? `<details class="fold bill-paid-history"${paidOpen}><summary>${paid.length} paid this month · ${money(t.paid)}</summary><div class="fold-body">${list(paid)}</div></details>` : ''}`;
 }
 
-function renderPaycheckPlan(upcoming, incomeStreams, transactions) {
-  const plan = planPaycheckCoverage(upcoming, incomeStreams, { asOf: todayIso() });
+function dedupeUpcoming(items, bills) {
+  const out = [];
+  for (const item of items) {
+    const index = out.findIndex((existing) => obligationProvidersMatch(existing.providerName, item.providerName));
+    if (index < 0) {
+      out.push(item);
+      continue;
+    }
+
+    const existingTracked = trackedBillFor(out[index], bills);
+    const incomingTracked = trackedBillFor(item, bills);
+    if (!existingTracked && incomingTracked) out[index] = item;
+    else if (!existingTracked && !incomingTracked && item.dueDate < out[index].dueDate) out[index] = item;
+  }
+  return out;
+}
+
+function renderPaycheckPlan(upcoming, incomeStreams, transactions, bills) {
+  const uniqueUpcoming = dedupeUpcoming(upcoming, bills);
+  const plan = planPaycheckCoverage(uniqueUpcoming, incomeStreams, { asOf: todayIso() });
   const groups = plan.groups.filter((g) => g.bills.length).slice(0, 4);
   const group = (label, items, total) => `
     <div class="bill-center-group"><div class="bill-center-group-head"><strong>${label}</strong><span>${money(total)}</span></div>
-      <div class="list">${items.map((item) => renderObligationRow({ ...item, paid: false }, transactions)).join('')}</div></div>`;
+      <div class="list">${items.map((item) => renderObligationRow({ ...item, paid: false }, transactions, bills)).join('')}</div></div>`;
   if (!plan.dueNow.bills.length && !groups.length && !plan.later.bills.length) return '';
-  return `<section class="section"><div class="section-head"><div><div class="section-title">Next paychecks</div><div class="section-sub">Only unpaid obligations are assigned to a check.</div></div></div>
+  return `<section class="section"><div class="section-head"><div><div class="section-title">Next paychecks</div><div class="section-sub">One row per bill. Tap Edit whenever the bank gets something wrong.</div></div></div>
     ${plan.dueNow.bills.length ? group(incomeStreams.length ? 'Needs money already in the account' : 'Paycheck pattern still learning', plan.dueNow.bills, plan.dueNow.total) : ''}
     ${groups.map((g) => group(`${dateLabel(g.paycheckDate)} paycheck`, g.bills, g.total)).join('')}
-    ${plan.later.bills.length ? `<details class="fold"><summary>${plan.later.bills.length} further out · ${money(plan.later.total)}</summary><div class="fold-body list">${plan.later.bills.map((item) => renderObligationRow({ ...item, paid: false }, transactions)).join('')}</div></details>` : ''}
+    ${plan.later.bills.length ? `<details class="fold"><summary>${plan.later.bills.length} further out · ${money(plan.later.total)}</summary><div class="fold-body list">${plan.later.bills.map((item) => renderObligationRow({ ...item, paid: false }, transactions, bills)).join('')}</div></details>` : ''}
   </section>`;
 }
 
@@ -248,18 +312,70 @@ function renderPaymentSetup(bills, recurring) {
         <button type="button" class="${amountMode === 'variable' ? 'active' : ''}" data-bill-pref="amountMode" data-bill-id="${esc(bill.id)}" data-value="variable">Varies</button></span></div>
     </div>`;
   }).join('');
-  return `<details class="fold"><summary>How these bills get paid</summary><div class="fold-body"><div class="prose-sm" style="margin-bottom:6px">Set this once for the household.</div>${rows}</div></details>`;
+  return `<details class="fold"><summary>Bill settings</summary><div class="fold-body"><div class="prose-sm" style="margin-bottom:6px">Automatic/manual and fixed/variable are shared for the household.</div>${rows}</div></details>`;
 }
 
 function renderCenter(host, data) {
-  const monthData = buildBillMonth({ bills: data.bills, recurring: data.recurring, transactions: data.transactions, month: selectedMonth });
-  const upcoming = buildUpcomingObligations({ bills: data.bills, recurring: data.recurring, transactions: data.transactions, asOf: todayIso() });
-  host.innerHTML = `${renderMonth(monthData, data.transactions)}${renderPaycheckPlan(upcoming, data.incomeStreams, data.transactions)}${renderPaymentSetup(data.bills, data.recurring)}`;
+  const monthData = buildBillMonth({
+    bills: data.bills,
+    recurring: data.recurring,
+    transactions: data.transactions,
+    month: selectedMonth,
+  });
+  const upcoming = buildUpcomingObligations({
+    bills: data.bills,
+    recurring: data.recurring,
+    transactions: data.transactions,
+    asOf: todayIso(),
+  });
+  const isCurrent = selectedMonth === currentMonth();
+
+  host.innerHTML = `
+    ${renderMonth(monthData, data.transactions, data.bills, !isCurrent)}
+    ${isCurrent ? renderPaycheckPlan(upcoming, data.incomeStreams, data.transactions, data.bills) : ''}
+    ${renderPaymentSetup(data.bills, data.recurring)}
+  `;
 
   host.querySelectorAll('[data-bill-month-step]').forEach((button) => button.addEventListener('click', () => {
     selectedMonth = moveMonth(selectedMonth, Number(button.dataset.billMonthStep));
+    editingKey = null;
     renderCenter(host, data);
   }));
+
+  host.querySelectorAll('[data-bill-edit]').forEach((button) => button.addEventListener('click', () => {
+    editingKey = button.dataset.billEdit;
+    renderCenter(host, data);
+  }));
+
+  host.querySelectorAll('[data-bill-edit-cancel]').forEach((button) => button.addEventListener('click', () => {
+    editingKey = null;
+    renderCenter(host, data);
+  }));
+
+  host.querySelectorAll('[data-bill-edit-form]').forEach((form) => form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const save = form.querySelector('button[type="submit"]');
+    save.disabled = true;
+    const fields = new FormData(form);
+    const details = {
+      providerName: fields.get('providerName'),
+      amountDue: fields.get('amountDue'),
+      dueDate: fields.get('dueDate'),
+      category: fields.get('category'),
+    };
+    try {
+      if (form.dataset.trackedId) await updateBillDetails(form.dataset.trackedId, details);
+      else await createBill({ ...details, source: 'manual' });
+      editingKey = null;
+      renderCenter(host, await loadData(true));
+    } catch (error) {
+      save.disabled = false;
+      if (!form.querySelector('.field-hint.error')) {
+        form.insertAdjacentHTML('beforeend', `<div class="field-hint error" style="color:var(--negative);margin-top:8px">${esc(error.message || 'Could not save that bill.')}</div>`);
+      }
+    }
+  }));
+
   host.querySelectorAll('[data-bill-pref]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try {
