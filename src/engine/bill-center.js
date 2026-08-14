@@ -119,6 +119,26 @@ function paymentForTrackedBill(bill, transactions, amountVaries) {
     ?? (amountVaries ? findVariablePayment(bill, transactions) : null);
 }
 
+function settledPayment(bill) {
+  if (bill.status !== 'paid') return null;
+  return {
+    posted_date: String(bill.paidAt ?? bill.dueDate).slice(0, 10),
+    amount: round(bill.paidAmount ?? bill.amountDue),
+  };
+}
+
+/** Move a recurring date forward until it reaches the selected month. */
+function firstOccurrenceInOrAfterMonth(stream, month) {
+  let due = stream.next_expected;
+  let guard = 0;
+  while (due && monthOf(due) < month && guard++ < 120) {
+    const next = projectNext(due, stream.cadence);
+    if (!next || next <= due) return null;
+    due = next;
+  }
+  return due;
+}
+
 /**
  * What was paid, and what is still due, in one calendar month.
  *
@@ -151,15 +171,15 @@ export function buildBillMonth({
       .filter(({ row, index }) => !consumed.has(index) && providersMatch(row.providerName, bill.providerName))
       .sort((a, b) => dayDistance(a.row.paidDate, bill.dueDate) - dayDistance(b.row.paidDate, bill.dueDate));
 
-    let payment = null;
-    if (candidateIndexes.length && dayDistance(candidateIndexes[0].row.paidDate, bill.dueDate) <= 20) {
+    let payment = settledPayment(bill);
+    if (!payment && candidateIndexes.length && dayDistance(candidateIndexes[0].row.paidDate, bill.dueDate) <= 20) {
       const selected = candidateIndexes[0];
       consumed.add(selected.index);
       payment = {
         posted_date: selected.row.paidDate,
         amount: selected.row.paidAmount,
       };
-    } else {
+    } else if (!payment) {
       payment = paymentForTrackedBill(bill, transactions, meta.amountVaries);
     }
 
@@ -173,8 +193,8 @@ export function buildBillMonth({
       paidDate: payment?.posted_date ?? null,
       amountDue: round(bill.amountDue),
       paidAmount: payment ? round(payment.amount) : 0,
-      paid: Boolean(payment) || bill.status === 'paid',
-      expected: !payment && bill.status !== 'paid',
+      paid: Boolean(payment),
+      expected: !payment,
       ...meta,
     });
   }
@@ -187,9 +207,10 @@ export function buildBillMonth({
 
   // Add recurring obligations that are expected later in the selected month.
   // Walk interval cadences so a weekly subscription can have more than one
-  // remaining occurrence rather than only the next one.
+  // remaining occurrence rather than only the next one. The first loop also
+  // lets the month arrows look beyond the immediate next occurrence.
   for (const stream of recurring) {
-    let due = stream.next_expected;
+    let due = firstOccurrenceInOrAfterMonth(stream, month);
     let guard = 0;
     while (due && monthOf(due) === month && guard++ < 8) {
       const trackedSameProvider = trackedThisMonth.some(
