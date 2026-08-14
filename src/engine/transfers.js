@@ -101,6 +101,12 @@ function looksLikeTransfer(txn) {
  * Candidates are sorted by date distance so the nearest counterpart wins — with
  * several identical amounts in flight, the closest pair is the right one.
  *
+ * `transfer_pair_id` is a Postgres foreign key to transactions.id (UUID). Plaid
+ * transaction IDs are external strings and must never be written there. Pure
+ * in-memory fixtures often do not have database UUIDs yet; those pairs are still
+ * flagged as transfers, but their pair id remains null until the rows exist in
+ * storage.
+ *
  * @param {Array<object>} transactions - must span all accounts to pair correctly
  * @param {object} [opts]
  * @param {number} [opts.windowDays=4]
@@ -130,8 +136,8 @@ export function detectTransfers(transactions, opts = {}) {
         if (j === i || paired.has(j)) return false;
         const other = result[j];
         return (
-          other.amount < 0 &&                                   // opposite direction
-          other.account_id !== txn.account_id &&                // different accounts
+          other.amount < 0 &&
+          other.account_id !== txn.account_id &&
           Math.abs(Math.abs(other.amount) - txn.amount) < AMOUNT_EPSILON &&
           daysBetween(txn.posted_date, other.posted_date) <= windowDays
         );
@@ -146,8 +152,8 @@ export function detectTransfers(transactions, opts = {}) {
       const j = candidates[0];
       result[i].is_transfer = true;
       result[j].is_transfer = true;
-      result[i].transfer_pair_id = result[j].plaid_transaction_id ?? j;
-      result[j].transfer_pair_id = result[i].plaid_transaction_id ?? i;
+      result[i].transfer_pair_id = result[j].id ?? null;
+      result[j].transfer_pair_id = result[i].id ?? null;
       paired.add(i);
       paired.add(j);
     }
