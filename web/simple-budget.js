@@ -1,4 +1,4 @@
-import { buildAdaptiveBudget, VARIABLE_ESSENTIAL_CATEGORIES } from '../src/engine/adaptive-budget.js';
+import { buildAdaptiveBudget } from '../src/engine/adaptive-budget.js';
 
 let selectedMonth = null;
 let editingCategory = null;
@@ -78,8 +78,7 @@ function budgetViewActive() {
   return Boolean(document.querySelector('main .seg-btn[data-view="budget"].active'));
 }
 
-async function loadData(force = false) {
-  if (force) dataPromise = null;
+async function loadData() {
   if (!dataPromise) {
     dataPromise = Promise.all([
       import('./connect.js'),
@@ -216,13 +215,10 @@ function render(host, data) {
 
 function mount(data) {
   const main = document.querySelector('main');
-  if (!main || !budgetViewActive()) return;
-  let host = main.querySelector('[data-simple-budget]');
-  if (!host) {
-    host = document.createElement('div');
-    host.dataset.simpleBudget = '1';
-    main.appendChild(host);
-  }
+  if (!main || !budgetViewActive() || main.querySelector('[data-simple-budget]')) return;
+  const host = document.createElement('div');
+  host.dataset.simpleBudget = '1';
+  main.appendChild(host);
   for (const child of [...main.children]) {
     if (child === host) continue;
     child.hidden = true;
@@ -231,7 +227,7 @@ function mount(data) {
 }
 
 async function run() {
-  if (running || !budgetViewActive()) return;
+  if (running || !budgetViewActive() || document.querySelector('main [data-simple-budget]')) return;
   running = true;
   try {
     ensureStyle();
