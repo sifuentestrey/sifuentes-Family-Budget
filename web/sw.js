@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v31';
+const CACHE_VERSION = 'v32';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -24,6 +24,7 @@ const SHELL_ASSETS = [
   './index.html',
   './app.js',
   './redesign.css',
+  './budget-clarity.js',
   './manifest.webmanifest',
   './vendor/open-props.min.css',
   './vendor/open-props-normalize.min.css',
@@ -120,10 +121,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   // The original HTML intentionally stays untouched in the repo so the visual
-  // refresh is a reversible presentation layer rather than a risky rewrite of
-  // the app shell. Navigation responses get the stylesheet inserted here.
-  // Returning installed-PWA users pick up the new design on the first reload
-  // after this service worker activates; all later launches are cached normally.
+  // refresh and small UX clarity layer remain reversible presentation changes
+  // rather than a risky rewrite of the application shell.
   const isDocument = request.mode === 'navigate' || url.pathname.endsWith('/index.html');
   if (isDocument) {
     event.respondWith(shellDocument(request));
@@ -146,19 +145,22 @@ async function shellDocument(request) {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('text/html')) return response;
 
-  const html = await response.text();
-  if (html.includes('redesign.css')) {
-    return new Response(html, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
+  let refreshed = await response.text();
+
+  if (!refreshed.includes('redesign.css')) {
+    refreshed = refreshed.replace(
+      '</head>',
+      '  <link rel="stylesheet" href="./redesign.css" />\n</head>',
+    );
   }
 
-  const refreshed = html.replace(
-    '</head>',
-    '  <link rel="stylesheet" href="./redesign.css" />\n</head>',
-  );
+  if (!refreshed.includes('budget-clarity.js')) {
+    refreshed = refreshed.replace(
+      '</body>',
+      '  <script src="./budget-clarity.js"></script>\n</body>',
+    );
+  }
+
   const headers = new Headers(response.headers);
   headers.delete('content-length');
 
