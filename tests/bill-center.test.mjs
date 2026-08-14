@@ -137,6 +137,46 @@ test('an unpaid tracked bill remains in the month and in paycheck planning', () 
   assert.equal(upcoming[0].amountDue, 569.42);
 });
 
+test('a bill explicitly marked paid keeps its paid amount even without recurring history', () => {
+  const water = bill({
+    providerName: 'County Water',
+    amountDue: 121.70,
+    dueDate: '2026-08-04',
+    status: 'paid',
+    paidAt: '2026-08-02T15:30:00Z',
+    paidAmount: 126.42,
+  });
+
+  const august = buildBillMonth({ bills: [water], month: '2026-08' });
+  assert.equal(august.rows.length, 1);
+  assert.equal(august.rows[0].paid, true);
+  assert.equal(august.rows[0].paidDate, '2026-08-02');
+  assert.equal(august.rows[0].paidAmount, 126.42);
+  assert.equal(august.totals.paid, 126.42);
+  assert.equal(august.totals.remaining, 0);
+});
+
+test('month navigation projects recurring obligations beyond the immediate next month', () => {
+  const google = stream({
+    payee: 'Google',
+    category: 'Subscriptions',
+    kind: 'subscription',
+    fixedPrice: true,
+    last_amount: 3.19,
+    typical_amount: 3.19,
+    amounts: [3.19, 3.19],
+    dates: ['2026-06-15', '2026-07-15'],
+    last_seen: '2026-07-15',
+    next_expected: '2026-08-15',
+  });
+
+  const october = buildBillMonth({ recurring: [google], month: '2026-10' });
+  assert.equal(october.rows.length, 1);
+  assert.equal(october.rows[0].paid, false);
+  assert.equal(october.rows[0].dueDate, '2026-10-15');
+  assert.equal(october.totals.remaining, 3.19);
+});
+
 test('shared bill preferences preserve auto/manual and fixed/variable choices', () => {
   const configured = bill({
     raw: { planning: { paymentMode: 'manual', amountMode: 'variable' } },
