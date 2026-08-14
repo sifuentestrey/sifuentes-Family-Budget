@@ -13,9 +13,9 @@
  * The same applies to checking -> savings moves, which are saving, not spending.
  *
  * Detection is deliberately conservative. Equal and opposite amounts across
- * accounts are only a candidate pair; at least one side also needs transfer
- * evidence. Otherwise two unrelated $10 person-to-person payments can get
- * paired simply because their amounts happen to match.
+ * accounts are only a candidate pair; they need transfer evidence or a very
+ * narrow same-day fallback. Otherwise two unrelated person-to-person payments
+ * can get paired simply because their amounts happen to match.
  */
 
 import { isSplitParent } from './split.js';
@@ -23,6 +23,8 @@ import { isSplitParent } from './split.js';
 const DEFAULT_WINDOW_DAYS = 4;
 /** Tolerance for amount matching, in dollars. Transfers are exact; this guards float noise. */
 const AMOUNT_EPSILON = 0.005;
+/** Same-day unlabeled pairs below this are too easy to confuse with P2P activity. */
+const UNLABELED_SAME_DAY_MIN = 50;
 
 function daysBetween(a, b) {
   const ms = Math.abs(new Date(a).getTime() - new Date(b).getTime());
@@ -88,13 +90,26 @@ export function isPlaidTransfer(txn) {
 }
 
 function transferText(txn) {
-  return `${txn?.payee ?? ''} ${txn?.raw_description ?? ''}`.toLowerCase();
+  return `${txn?.payee ?? ''} ${txn?.raw_description ?? ''}`.toLowerCase().trim();
 }
 
 export function hasTransferEvidence(txn) {
   if (isPlaidTransfer(txn)) return true;
   const text = transferText(txn);
+  // Some providers/fixtures literally return only "Transfer". That is strong
+  // enough when it is the whole descriptor, but we deliberately do not match
+  // arbitrary phrases containing the word.
+  if (/^transfer(?:\s+transfer)?$/.test(text)) return true;
   return TRANSFER_HINTS.some((hint) => text.includes(hint));
+}
+
+function hasPairEvidence(outflow, inflow) {
+  if (hasTransferEvidence(outflow) || hasTransferEvidence(inflow)) return true;
+  // A large equal-and-opposite movement on the exact same posting day across
+  // owned linked accounts is strong enough even when a provider omitted labels.
+  // Keeping this same-day and >= $50 avoids the live $10 P2P false-pair case.
+  return daysBetween(outflow.posted_date, inflow.posted_date) === 0
+    && Math.abs(Number(outflow.amount)) >= UNLABELED_SAME_DAY_MIN;
 }
 
 /**
@@ -102,8 +117,9 @@ export function hasTransferEvidence(txn) {
  *
  * Matching is greedy and one-to-one. Each candidate must have equal magnitude,
  * be in a different account, land within the date window, AND have transfer
- * evidence on at least one side. This prevents unrelated person-to-person
- * inflows/outflows from canceling each other out of spending.
+ * evidence on at least one side (or meet the strict same-day fallback). This
+ * prevents unrelated person-to-person inflows/outflows from canceling each
+ * other out of spending.
  *
  * `transfer_pair_id` is a Postgres foreign key to transactions.id (UUID). Plaid
  * transaction IDs are external strings and must never be written there. Pure
@@ -153,7 +169,7 @@ export function detectTransfers(transactions, opts = {}) {
           other.account_id !== txn.account_id &&
           Math.abs(Math.abs(other.amount) - txn.amount) < AMOUNT_EPSILON &&
           daysBetween(txn.posted_date, other.posted_date) <= windowDays &&
-          (hasTransferEvidence(txn) || hasTransferEvidence(other))
+          hasPairEvidence(txn, other)
         );
       })
       .sort(
