@@ -11,7 +11,7 @@
  * app stays small and this can be removed without touching the core shell.
  */
 
-import { listBills, updateBillPreferences } from './bills.js';
+import { listBillsForCenter, updateBillPreferences } from './bills.js';
 import { listTransactions } from './connect.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { detectIncomeStreams } from '../src/engine/income.js';
@@ -88,13 +88,14 @@ function ensureStyle() {
       display:block; height:100%; border-radius:inherit; background:var(--positive);
     }
     [data-bill-center] .bill-center-group { margin-top:14px; }
+    [data-bill-center] .bill-center-group:first-child { margin-top:0; }
     [data-bill-center] .bill-center-group-head {
       display:flex; align-items:baseline; justify-content:space-between; gap:12px;
       padding:0 4px 7px;
     }
     [data-bill-center] .bill-center-group-head strong { font-size:14px; }
     [data-bill-center] .bill-center-group-total { font-weight:700; }
-    [data-bill-center] .bill-center-row.paid { opacity:.78; }
+    [data-bill-center] .bill-center-row.paid { opacity:.74; }
     [data-bill-center] .bill-center-row .row-title .chip { margin-left:6px; }
     [data-bill-center] .bill-center-row .row-end { min-width:88px; }
     [data-bill-center] .bill-center-setup .bill-pref-row {
@@ -139,7 +140,7 @@ function hideLegacyTop(main) {
 async function loadData(force = false) {
   if (force) dataPromise = null;
   if (!dataPromise) {
-    dataPromise = Promise.all([listBills(), listTransactions()]).then(([bills, transactions]) => {
+    dataPromise = Promise.all([listBillsForCenter(), listTransactions()]).then(([bills, transactions]) => {
       const recurringAnalysis = analyzeSubscriptions(transactions);
       const recurring = [
         ...(recurringAnalysis.bills ?? []),
@@ -197,8 +198,23 @@ function renderObligationRow(item) {
   `;
 }
 
+function billGroup(label, amount, rows) {
+  if (!rows.length) return '';
+  return `
+    <div class="bill-center-group">
+      <div class="bill-center-group-head">
+        <strong>${label}</strong>
+        <span class="bill-center-group-total">${money(amount)}</span>
+      </div>
+      <div class="list">${rows.map(renderObligationRow).join('')}</div>
+    </div>
+  `;
+}
+
 function renderMonth(monthData) {
   const { rows, totals } = monthData;
+  const dueRows = rows.filter((row) => !row.paid);
+  const paidRows = rows.filter((row) => row.paid);
   const pct = totals.total > 0 ? Math.min(100, Math.round((totals.paid / totals.total) * 100)) : 0;
 
   return `
@@ -228,12 +244,13 @@ function renderMonth(monthData) {
       <div class="section-head">
         <div>
           <div class="section-title">This month</div>
-          <div class="section-sub">Bills, subscriptions and recurring payments — paid and unpaid together.</div>
+          <div class="section-sub">Everything recurring that has to be covered — including subscriptions.</div>
         </div>
       </div>
-      ${rows.length
-        ? `<div class="list">${rows.map(renderObligationRow).join('')}</div>`
-        : `<div class="empty"><div class="empty-title">Nothing recurring here yet</div><div class="empty-body">No paid or expected recurring obligations were found for this month.</div></div>`}
+      ${rows.length ? `
+        ${billGroup('Still due', totals.remaining, dueRows)}
+        ${billGroup('Paid', totals.paid, paidRows)}
+      ` : `<div class="empty"><div class="empty-title">Nothing recurring here yet</div><div class="empty-body">No paid or expected recurring obligations were found for this month.</div></div>`}
     </section>
   `;
 }
@@ -259,7 +276,7 @@ function renderPaycheckPlan(upcoming, incomeStreams) {
       <div class="section-head">
         <div>
           <div class="section-title">Next paychecks</div>
-          <div class="section-sub">Each unpaid obligation goes with the latest paycheck before its due date.</div>
+          <div class="section-sub">Only unpaid items — assigned to the latest paycheck before each due date.</div>
         </div>
       </div>
 
@@ -324,10 +341,10 @@ function renderPaymentSetup(bills, recurring) {
 
   return `
     <details class="fold bill-center-setup">
-      <summary>Automatic vs bills you pay yourself</summary>
+      <summary>How these bills get paid</summary>
       <div class="fold-body">
         <div class="prose-sm" style="margin-bottom:6px;">
-          Set this once and both phones use it. Variable amounts can also be learned from the bank history.
+          Set automatic vs. “we pay it” once and both phones use it. Variable amounts can also be learned from the bank history.
         </div>
         ${rows}
       </div>
