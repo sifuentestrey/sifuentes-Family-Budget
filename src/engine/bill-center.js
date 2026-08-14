@@ -19,6 +19,7 @@
 import { findPayingTransaction } from '../domain/bill-payment-match.js';
 import { providersMatch } from '../domain/provider-match.js';
 import { projectNext } from './cadence.js';
+import { payeeStem } from './similar-payee.js';
 
 const round = (n) => Math.round(Number(n || 0) * 100) / 100;
 const monthOf = (date) => String(date ?? '').slice(0, 7);
@@ -26,6 +27,20 @@ const monthOf = (date) => String(date ?? '').slice(0, 7);
 function dayDistance(a, b) {
   if (!a || !b) return Infinity;
   return Math.abs((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+}
+
+/**
+ * Bill-provider matching is intentionally a little more forgiving than the
+ * generic provider matcher. ACH loan descriptors are often much longer than
+ * the household-facing name: "Advancial Auto Loan" vs
+ * "Advancial Fed Cu DES:Loan Pymt ...". Their distinctive first token is the
+ * same provider, and treating them as unrelated creates a duplicate bill.
+ */
+export function obligationProvidersMatch(a, b) {
+  if (providersMatch(a, b)) return true;
+  const stemA = payeeStem(a);
+  const stemB = payeeStem(b);
+  return Boolean(stemA && stemB && stemA === stemB);
 }
 
 /** Shared preferences are stored in the bill's existing JSON payload. */
@@ -42,7 +57,7 @@ export function billPreferences(bill) {
 }
 
 export function matchingRecurringStream(bill, recurring = []) {
-  return recurring.find((stream) => providersMatch(stream.payee, bill.providerName)) ?? null;
+  return recurring.find((stream) => obligationProvidersMatch(stream.payee, bill.providerName)) ?? null;
 }
 
 function streamMeta(stream) {
@@ -70,31 +85,38 @@ function trackedMeta(bill, stream) {
 }
 
 function recurringOccurrences(stream, month) {
-  const rows = [];
   const meta = streamMeta(stream);
   const dates = stream.dates ?? [];
   const amounts = stream.amounts ?? [];
+  const byDate = new Map();
 
+  // A bank feed can contain two same-provider charges on the same day. On the
+  // Bills screen that should read as one provider row with the amount that
+  // actually left the account, not as two visually duplicated bills.
   for (let i = 0; i < dates.length; i += 1) {
     if (monthOf(dates[i]) !== month) continue;
     const amount = round(amounts[i] ?? stream.last_amount ?? stream.typical_amount);
-    rows.push({
-      id: `recurring:${stream.account_id ?? 'acct'}:${stream.payee}:${dates[i]}:${i}`,
-      trackedBillId: null,
-      providerName: stream.payee,
-      category: stream.category ?? 'Other',
-      source: 'bank',
-      dueDate: dates[i],
-      paidDate: dates[i],
-      amountDue: amount,
-      paidAmount: amount,
-      paid: true,
-      expected: false,
-      ...meta,
-    });
+    const existing = byDate.get(dates[i]) ?? { amount: 0, count: 0 };
+    existing.amount = round(existing.amount + amount);
+    existing.count += 1;
+    byDate.set(dates[i], existing);
   }
 
-  return rows;
+  return [...byDate.entries()].map(([date, occurrence]) => ({
+    id: `recurring:${stream.account_id ?? 'acct'}:${stream.payee}:${date}`,
+    trackedBillId: null,
+    providerName: stream.payee,
+    category: stream.category ?? 'Other',
+    source: 'bank',
+    dueDate: date,
+    paidDate: date,
+    amountDue: occurrence.amount,
+    paidAmount: occurrence.amount,
+    paid: true,
+    expected: false,
+    occurrenceCount: occurrence.count,
+    ...meta,
+  }));
 }
 
 /**
@@ -109,7 +131,7 @@ function findVariablePayment(bill, transactions) {
   const candidates = (transactions ?? []).filter((t) =>
     !t.is_transfer && !t.is_income && !t.pending && t.amount > 0
       && monthOf(t.posted_date) === monthOf(bill.dueDate)
-      && providersMatch(t.payee, bill.providerName),
+      && obligationProvidersMatch(t.payee, bill.providerName),
   );
   return candidates.length === 1 ? candidates[0] : null;
 }
@@ -168,7 +190,7 @@ export function buildBillMonth({
     // date is the only sensible candidate.
     const candidateIndexes = actual
       .map((row, index) => ({ row, index }))
-      .filter(({ row, index }) => !consumed.has(index) && providersMatch(row.providerName, bill.providerName))
+      .filter(({ row, index }) => !consumed.has(index) && obligationProvidersMatch(row.providerName, bill.providerName))
       .sort((a, b) => dayDistance(a.row.paidDate, bill.dueDate) - dayDistance(b.row.paidDate, bill.dueDate));
 
     let payment = settledPayment(bill);
@@ -217,10 +239,10 @@ export function buildBillMonth({
     let guard = 0;
     while (due && monthOf(due) === month && guard++ < 8) {
       const trackedSameProvider = trackedThisMonth.some(
-        (bill) => providersMatch(bill.providerName, stream.payee) && dayDistance(bill.dueDate, due) <= 20,
+        (bill) => obligationProvidersMatch(bill.providerName, stream.payee) && dayDistance(bill.dueDate, due) <= 20,
       );
       const alreadyActual = actual.some(
-        (row) => providersMatch(row.providerName, stream.payee) && row.paidDate === due,
+        (row) => obligationProvidersMatch(row.providerName, stream.payee) && row.paidDate === due,
       );
 
       if (!trackedSameProvider && !alreadyActual) {
@@ -303,7 +325,7 @@ export function buildUpcomingObligations({
     if (!dueDate || dueDate < today) continue;
 
     const represented = openTracked.some(
-      (bill) => providersMatch(bill.providerName, stream.payee) && dayDistance(bill.dueDate, dueDate) <= 20,
+      (bill) => obligationProvidersMatch(bill.providerName, stream.payee) && dayDistance(bill.dueDate, dueDate) <= 20,
     );
     if (represented) continue;
 
