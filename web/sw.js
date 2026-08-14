@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v30';
+const CACHE_VERSION = 'v31';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -23,6 +23,7 @@ const SHELL_ASSETS = [
   './',
   './index.html',
   './app.js',
+  './redesign.css',
   './manifest.webmanifest',
   './vendor/open-props.min.css',
   './vendor/open-props-normalize.min.css',
@@ -118,6 +119,17 @@ self.addEventListener('fetch', (event) => {
   // worth making for a slightly faster load.
   if (url.origin !== self.location.origin) return;
 
+  // The original HTML intentionally stays untouched in the repo so the visual
+  // refresh is a reversible presentation layer rather than a risky rewrite of
+  // the app shell. Navigation responses get the stylesheet inserted here.
+  // Returning installed-PWA users pick up the new design on the first reload
+  // after this service worker activates; all later launches are cached normally.
+  const isDocument = request.mode === 'navigate' || url.pathname.endsWith('/index.html');
+  if (isDocument) {
+    event.respondWith(shellDocument(request));
+    return;
+  }
+
   const isData = url.pathname.includes('/fixtures/') || url.pathname.endsWith('.json');
 
   if (isData) {
@@ -126,6 +138,36 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(request));
   }
 });
+
+async function shellDocument(request) {
+  const response = await cacheFirst(request);
+  if (!response?.ok) return response;
+
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('text/html')) return response;
+
+  const html = await response.text();
+  if (html.includes('redesign.css')) {
+    return new Response(html, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  const refreshed = html.replace(
+    '</head>',
+    '  <link rel="stylesheet" href="./redesign.css" />\n</head>',
+  );
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+
+  return new Response(refreshed, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 async function cacheFirst(request) {
   const cached = await caches.match(request);
