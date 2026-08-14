@@ -74,8 +74,7 @@ function ensureStyle() {
   document.head.appendChild(style);
 }
 
-async function loadData(force = false) {
-  if (force) dataPromise = null;
+async function loadData() {
   if (!dataPromise) {
     dataPromise = Promise.all([
       import('./connect.js'), import('./bills.js'), import('./budget-targets.js'),
@@ -232,13 +231,10 @@ function render(host, data) {
 
 function mount(data) {
   const main = document.querySelector('main');
-  if (!main || !dashboardActive()) return;
-  let host = main.querySelector('[data-simple-home]');
-  if (!host) {
-    host = document.createElement('div');
-    host.dataset.simpleHome = '1';
-    main.appendChild(host);
-  }
+  if (!main || !dashboardActive() || main.querySelector('[data-simple-home]')) return;
+  const host = document.createElement('div');
+  host.dataset.simpleHome = '1';
+  main.appendChild(host);
   for (const child of [...main.children]) {
     if (child !== host) child.hidden = true;
   }
@@ -246,11 +242,15 @@ function mount(data) {
 }
 
 async function run() {
-  if (running || !dashboardActive()) return;
+  if (!dashboardActive()) {
+    dataPromise = null;
+    return;
+  }
+  if (running || document.querySelector('main [data-simple-home]')) return;
   running = true;
   try {
     ensureStyle();
-    const data = await loadData(true);
+    const data = await loadData();
     if (data && dashboardActive()) mount(data);
   } catch {
     // If live data cannot load, the original dashboard remains underneath.
