@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v43';
+const CACHE_VERSION = 'v44';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -26,6 +26,7 @@ const SHELL_ASSETS = [
   './redesign.css',
   './budget-clarity.js',
   './simple-finance-shell.js',
+  './core-tab-router.js',
   './simple-home.js',
   './simple-budget.js',
   './money-plan-ui.js',
@@ -175,6 +176,16 @@ async function shellDocument(request) {
     refreshed = refreshed.replace(
       '</body>',
       '  <script type="module" src="./money-plan-ui.js"></script>\n</body>',
+    );
+  }
+
+  // Loaded last among the classic routing scripts. It owns bottom-tab taps at
+  // the capture boundary so presentation enhancers cannot reinterpret a tab's
+  // data-view attribute before app.js handles it.
+  if (!refreshed.includes('core-tab-router.js')) {
+    refreshed = refreshed.replace(
+      '</body>',
+      '  <script src="./core-tab-router.js"></script>\n</body>',
     );
   }
 
