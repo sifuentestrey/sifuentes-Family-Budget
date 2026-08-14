@@ -57,6 +57,16 @@ function plaidHeaders() {
   };
 }
 
+function mapAccountType(type: string, subtype: string | null) {
+  if (type === 'credit') return 'credit';
+  if (type === 'loan') return 'loan';
+  if (type === 'depository') {
+    if (subtype === 'savings' || subtype === 'money market' || subtype === 'cd') return 'savings';
+    return 'checking';
+  }
+  return 'other';
+}
+
 async function fetchDeltas(accessToken: string, cursor: string | null) {
   const added: PlaidTransaction[] = [];
   const modified: PlaidTransaction[] = [];
@@ -95,6 +105,60 @@ async function fetchDeltas(accessToken: string, cursor: string | null) {
   return { added, modified, removed, nextCursor };
 }
 
+/**
+ * Refresh balances and the account roster before mapping transaction deltas.
+ *
+ * Previously accounts were only written during initial Plaid Link. That left
+ * balances stale forever and, worse, meant a newly visible account under an
+ * existing Item had no local account_id. The sync then filtered its transaction
+ * out and advanced the cursor, permanently losing that delta. Upserting the
+ * account roster first makes the mapping complete before the cursor can move.
+ */
+async function refreshAccounts(supabase: any, item: any, accessToken: string) {
+  const response = await fetch(`${PLAID_HOST}/accounts/get`, {
+    method: 'POST',
+    headers: plaidHeaders(),
+    body: JSON.stringify({ access_token: accessToken }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error_code ?? `Plaid accounts HTTP ${response.status}`);
+    // @ts-expect-error attach for caller
+    error.plaidCode = body.error_code;
+    throw error;
+  }
+
+  const rows = (body.accounts ?? []).map((account: any) => ({
+    household_id: item.household_id,
+    item_id: item.id,
+    plaid_account_id: account.account_id,
+    nickname: account.name ?? account.official_name ?? 'Account',
+    type: mapAccountType(account.type, account.subtype),
+    mask: account.mask ? String(account.mask).slice(-4) : null,
+    institution_name: item.institution_name ?? null,
+    current_balance: account.balances?.current ?? null,
+    available_balance: account.balances?.available ?? null,
+    credit_limit: account.balances?.limit ?? null,
+    is_active: true,
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (rows.length) {
+    const { error } = await supabase
+      .from('accounts')
+      .upsert(rows, { onConflict: 'plaid_account_id' });
+    if (error) throw new Error(`account refresh failed: ${error.message}`);
+  }
+
+  const { data: accounts, error: accountError } = await supabase
+    .from('accounts')
+    .select('id, plaid_account_id')
+    .eq('item_id', item.id)
+    .eq('is_active', true);
+  if (accountError) throw new Error(`account map failed: ${accountError.message}`);
+  return new Map((accounts ?? []).map((a: any) => [a.plaid_account_id, a.id]));
+}
+
 async function syncItem(supabase: any, item: any) {
   const { data: logRow, error: logError } = await supabase
     .from('sync_log')
@@ -110,23 +174,25 @@ async function syncItem(supabase: any, item: any) {
     if (vaultError) throw new Error(`vault read failed: ${vaultError.message}`);
 
     const { added, modified, removed, nextCursor } = await fetchDeltas(secret, item.cursor);
+    const accountMap = await refreshAccounts(supabase, item, secret);
 
-    const { data: accounts, error: accountError } = await supabase
-      .from('accounts')
-      .select('id, plaid_account_id')
-      .eq('item_id', item.id);
-    if (accountError) throw new Error(`account map failed: ${accountError.message}`);
-    const accountMap = new Map((accounts ?? []).map((a: any) => [a.plaid_account_id, a.id]));
+    const changed = [...added, ...modified];
+    const unknownAccountIds = [...new Set(changed
+      .filter((transaction) => !accountMap.has(transaction.account_id))
+      .map((transaction) => transaction.account_id))];
+    if (unknownAccountIds.length) {
+      // Do not advance the Plaid cursor when a delta cannot be mapped. Leaving
+      // the cursor untouched guarantees the transaction is retried next sync.
+      throw new Error(`account map incomplete for ${unknownAccountIds.length} Plaid account(s)`);
+    }
 
-    const incoming = [...added, ...modified]
-      .filter((t) => accountMap.has(t.account_id))
-      .map((t) => {
-        const { category: _category, plaidCategory: _plaidCategory, ...row } = normalizePlaidTransaction(
-          t,
-          accountMap.get(t.account_id),
-        );
-        return { ...row, household_id: item.household_id };
-      });
+    const incoming = changed.map((t) => {
+      const { category: _category, plaidCategory: _plaidCategory, ...row } = normalizePlaidTransaction(
+        t,
+        accountMap.get(t.account_id),
+      );
+      return { ...row, household_id: item.household_id };
+    });
 
     if (removed.length) {
       const { error } = await supabase
@@ -348,8 +414,6 @@ async function authorizedHouseholds(
     return { households: null, ok: true };
   }
 
-  // Preserve fail-closed behavior when the scheduler secret is missing: a
-  // request with no actual bearer credential is never treated as cron.
   if (!expected && !presented.startsWith('Bearer ')) return { households: [], ok: false };
   if (!presented.startsWith('Bearer ')) return { households: [], ok: false };
 
