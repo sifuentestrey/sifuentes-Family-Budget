@@ -71,8 +71,7 @@ function dedupeUpcoming(items) {
   return out;
 }
 
-async function loadData(force = false) {
-  if (force) dataPromise = null;
+async function loadData() {
   if (!dataPromise) {
     dataPromise = Promise.all([
       import('./connect.js'), import('./bills.js'), import('./budget-targets.js'),
@@ -158,24 +157,25 @@ function render(host, data) {
 
 function mount(data) {
   const center = document.querySelector('[data-bill-center]');
-  if (!center || !planActive()) return;
-  let host = center.querySelector('[data-money-plan-summary]');
-  if (!host) {
-    host = document.createElement('div');
-    host.dataset.moneyPlanSummary = '1';
-    const calendar = center.querySelector('.bill-calendar');
-    if (calendar) center.insertBefore(host, calendar);
-    else center.prepend(host);
-  }
+  if (!center || !planActive() || center.querySelector('[data-money-plan-summary]')) return;
+  const host = document.createElement('div');
+  host.dataset.moneyPlanSummary = '1';
+  const calendar = center.querySelector('.bill-calendar');
+  if (calendar) center.insertBefore(host, calendar);
+  else center.prepend(host);
   render(host, data);
 }
 
 async function run() {
-  if (running || !planActive()) return;
+  if (!planActive()) {
+    dataPromise = null;
+    return;
+  }
+  if (running || document.querySelector('[data-bill-center] [data-money-plan-summary]')) return;
   running = true;
   try {
     ensureStyle();
-    const data = await loadData(true);
+    const data = await loadData();
     if (data && planActive()) mount(data);
   } catch {
     // The Plan calendar/list remains usable if the summary cannot load.
