@@ -10,6 +10,8 @@
  * against Postgres, an in-memory store in tests, or nothing at all.
  */
 
+import { providersMatch } from '../domain/provider-match.js';
+
 const round = (n) => Math.round(n * 100) / 100;
 
 /**
@@ -70,6 +72,22 @@ function finish(run, status) {
 }
 
 /**
+ * A Delete/stop-tracking choice is household truth, not a weak parser hint.
+ * The ignored marker intentionally survives across monthly cycles, so a new
+ * Gmail statement from the same provider cannot resurrect an ended payoff or
+ * cancelled subscription. Only the explicit user add flow clears this flag.
+ */
+export function isUserSuppressedBill(candidate, existingBills = []) {
+  const candidateProvider = candidate?.providerName || candidate?.providerKey || '';
+  if (!candidateProvider) return false;
+  return existingBills.some((existing) =>
+    existing.status === 'ignored'
+      && existing.raw?.planning?.suppressedRecurring === true
+      && providersMatch(existing.providerName || existing.providerKey || '', candidateProvider),
+  );
+}
+
+/**
  * Sync bills from a bill provider or an email provider.
  *
  * @param {object} options
@@ -98,7 +116,6 @@ export async function syncBills(options) {
     let needsReview = [];
 
     if (provider.info.kind === 'email') {
-      // Email providers hand back messages; the ingester turns them into bills.
       const ingest = await options.emailIngester(provider, {
         householdId,
         since: options.since,
@@ -112,8 +129,6 @@ export async function syncBills(options) {
       needsReview = ingest.needsReview;
       run.errors.push(...ingest.errors.map((e) => ({ stage: e.stage, message: e.message })));
     } else {
-      // Bill providers hand back bills directly — authoritative, so they skip
-      // parsing entirely and only need duplicate checking.
       const { bills } = await provider.getBills({ since: options.since });
       run.itemsFound = bills.length;
 
@@ -123,22 +138,29 @@ export async function syncBills(options) {
       duplicates = partition.duplicates;
     }
 
+    // A new billing cycle is not a duplicate of last month's ignored marker,
+    // so duplicate detection alone cannot enforce a durable Delete. Apply the
+    // provider-level suppression after parsing but before any insert/update.
+    const beforeSuppression = accepted.length + needsReview.length;
+    accepted = accepted.filter((bill) => !isUserSuppressedBill(bill, existing));
+    needsReview = needsReview.filter((bill) => !isUserSuppressedBill(bill, existing));
+    run.itemsSkipped += beforeSuppression - accepted.length - needsReview.length;
+
     run.duplicatesDetected = duplicates.length;
 
-    // A duplicate is not always noise — a PDF or an API record may carry better
-    // information than the email that arrived first.
     const updates = [];
     if (duplicates.length && store.updateBills) {
       const { shouldUpdateExisting } = await import('../ingestion/dedupe.js');
       for (const dup of duplicates) {
+        if (isUserSuppressedBill(dup.candidate, existing)) {
+          run.itemsSkipped++;
+          continue;
+        }
         const verdict = shouldUpdateExisting(dup.existing, dup.candidate);
         if (verdict.update) updates.push({ existing: dup.existing, candidate: dup.candidate });
       }
     }
 
-    // Bills needing review are stored too — they are real information, and
-    // dropping them would silently hide a bill the household owes. Their status
-    // marks them so nothing budgets against them until confirmed.
     const toSave = [
       ...accepted,
       ...needsReview.map((b) => ({ ...b, status: 'detected', needsReview: true })),
@@ -180,8 +202,6 @@ export async function syncPayroll(options) {
     const entries = await provider.getTimecard(period);
     run.itemsFound = entries.length;
 
-    // Time entries are upserted on (profile, date): re-importing a timecard must
-    // correct a day, never append a second copy of it.
     const { created, updated } = await store.saveTimeEntries(entries);
     run.itemsCreated = created;
     run.itemsUpdated = updated;
@@ -280,8 +300,6 @@ export function summarizeSyncState(runs, staleAfterHours = 26) {
     providers: entries.sort((a, b) => a.provider.localeCompare(b.provider)),
     anyStale: entries.some((e) => e.stale),
     anyErrors: entries.some((e) => e.status === 'error' || e.status === 'partial'),
-    // Explicit so the UI can say "nothing is actually connected yet" rather
-    // than implying data is flowing from fixtures.
     liveProviders: entries.filter((e) => e.isLive).length,
     mockProviders: entries.filter((e) => !e.isLive).length,
   };
