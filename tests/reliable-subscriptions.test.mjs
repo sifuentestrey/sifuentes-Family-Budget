@@ -79,7 +79,7 @@ test('Apple products at different prices do not turn one monthly service into se
   assert.equal(streams[0].next_expected, '2026-09-10');
 });
 
-test('same-day Google charges count as one billing date, not a semi-monthly cadence', () => {
+test('same-day Google charges count once for cadence but every dollar remains in cash history', () => {
   const streams = buildReliableSubscriptionStreams([
     txn('2026-04-23', 'Google', 3.19, 'Subscriptions', 'GOOGLE RECURRING'),
     txn('2026-05-26', 'Google', 3.19, 'Subscriptions', 'GOOGLE RECURRING'),
@@ -89,7 +89,9 @@ test('same-day Google charges count as one billing date, not a semi-monthly cade
 
   assert.equal(streams.length, 1);
   assert.equal(streams[0].cadence, 'monthly');
-  assert.deepEqual(streams[0].dates, ['2026-04-23', '2026-05-26', '2026-06-25']);
+  assert.equal(streams[0].cadence_observations, 3);
+  assert.deepEqual(streams[0].dates, ['2026-04-23', '2026-05-26', '2026-05-26', '2026-06-25']);
+  assert.deepEqual(streams[0].amounts, [3.19, 3.19, 3.19, 3.19]);
   assert.equal(streams[0].last_amount, 3.19);
 });
 
