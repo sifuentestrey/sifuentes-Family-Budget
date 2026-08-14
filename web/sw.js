@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v44';
+const CACHE_VERSION = 'v45';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -25,11 +25,6 @@ const SHELL_ASSETS = [
   './app.js',
   './redesign.css',
   './budget-clarity.js',
-  './simple-finance-shell.js',
-  './core-tab-router.js',
-  './simple-home.js',
-  './simple-budget.js',
-  './money-plan-ui.js',
   './bills-center.js',
   './payday-calendar.js',
   './payday-events.js',
@@ -58,8 +53,6 @@ const SHELL_ASSETS = [
   '../src/engine/forecast.js',
   '../src/engine/alerts.js',
   '../src/engine/bill-center.js',
-  '../src/engine/adaptive-budget.js',
-  '../src/engine/money-plan-summary.js',
   '../src/domain/payroll.js',
   '../src/payroll/pay-calculator.js',
   '../src/payroll/forecast.js',
@@ -144,48 +137,10 @@ async function shellDocument(request) {
     );
   }
 
-  if (!refreshed.includes('simple-finance-shell.js')) {
-    refreshed = refreshed.replace(
-      '</body>',
-      '  <script src="./simple-finance-shell.js"></script>\n</body>',
-    );
-  }
-
   if (!refreshed.includes('payday-calendar.js')) {
     refreshed = refreshed.replace(
       '</body>',
       '  <script type="module" src="./payday-calendar.js"></script>\n</body>',
-    );
-  }
-
-  if (!refreshed.includes('simple-home.js')) {
-    refreshed = refreshed.replace(
-      '</body>',
-      '  <script type="module" src="./simple-home.js"></script>\n</body>',
-    );
-  }
-
-  if (!refreshed.includes('simple-budget.js')) {
-    refreshed = refreshed.replace(
-      '</body>',
-      '  <script type="module" src="./simple-budget.js"></script>\n</body>',
-    );
-  }
-
-  if (!refreshed.includes('money-plan-ui.js')) {
-    refreshed = refreshed.replace(
-      '</body>',
-      '  <script type="module" src="./money-plan-ui.js"></script>\n</body>',
-    );
-  }
-
-  // Loaded last among the classic routing scripts. It owns bottom-tab taps at
-  // the capture boundary so presentation enhancers cannot reinterpret a tab's
-  // data-view attribute before app.js handles it.
-  if (!refreshed.includes('core-tab-router.js')) {
-    refreshed = refreshed.replace(
-      '</body>',
-      '  <script src="./core-tab-router.js"></script>\n</body>',
     );
   }
 
