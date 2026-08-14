@@ -16,7 +16,7 @@
  * one stream even when the bank changes the merchant label.
  */
 import { inferCadence, median, projectNext } from './cadence.js';
-import { providersMatch } from '../domain/provider-match.js';
+import { payeeStem } from './similar-payee.js';
 
 const FALLBACK_CATEGORIES = new Set(['Entertainment', 'Fitness', 'Hobbies']);
 const RECURRING_WORDS = /\b(recurring|recur|subscription|autopay|auto\s*pay)\b/i;
@@ -43,20 +43,18 @@ function samePrice(a, b) {
   return Math.abs(left - right) / base <= PRICE_TOLERANCE;
 }
 
+function aliasKey(payee) {
+  return payeeStem(payee) ?? String(payee ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function groupAliases(transactions) {
-  const groups = [];
+  const groups = new Map();
   for (const txn of transactions) {
-    let group = groups.find((g) =>
-      g.account_id === txn.account_id && g.names.some((name) => providersMatch(name, txn.payee)),
-    );
-    if (!group) {
-      group = { account_id: txn.account_id, names: [], items: [] };
-      groups.push(group);
-    }
-    if (!group.names.includes(txn.payee)) group.names.push(txn.payee);
-    group.items.push(txn);
+    const key = `${txn.account_id}::${aliasKey(txn.payee)}`;
+    if (!groups.has(key)) groups.set(key, { account_id: txn.account_id, items: [] });
+    groups.get(key).items.push(txn);
   }
-  return groups;
+  return [...groups.values()];
 }
 
 function bestFixedCluster(items) {
@@ -73,17 +71,12 @@ function bestFixedCluster(items) {
 
   return clusters
     .filter((c) => c.items.length >= 3)
-    .map((c) => ({
-      ...c,
-      cadence: inferCadence(c.items.map((t) => t.posted_date)),
-    }))
+    .map((c) => ({ ...c, cadence: inferCadence(c.items.map((t) => t.posted_date)) }))
     .filter((c) => c.cadence !== 'irregular')
     .sort((a, b) => b.items.length - a.items.length)[0] ?? null;
 }
 
 function displayName(items) {
-  // Prefer the more specific label when the bank alternates between a parent
-  // company and the actual service, e.g. Microsoft vs Microsoft Xbox.
   return [...new Set(items.map((t) => t.payee).filter(Boolean))]
     .sort((a, b) => b.length - a.length)[0] ?? 'Subscription';
 }
@@ -95,14 +88,11 @@ function fixedPrice(amounts) {
   return amounts.every((a) => Math.abs(a - mid) / mid <= PRICE_TOLERANCE);
 }
 
-/**
- * @returns Array of recurring-stream objects compatible with bill-center.js.
- */
+/** @returns recurring-stream objects compatible with bill-center.js. */
 export function buildReliableSubscriptionStreams(transactions = []) {
-  const groups = groupAliases(outflows(transactions));
   const streams = [];
 
-  for (const group of groups) {
+  for (const group of groupAliases(outflows(transactions))) {
     const strong = group.items.filter(strongEvidence);
     let chosen = null;
     let cadence = 'irregular';
