@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v41';
+const CACHE_VERSION = 'v42';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -26,6 +26,8 @@ const SHELL_ASSETS = [
   './redesign.css',
   './budget-clarity.js',
   './bills-center.js',
+  './payday-calendar.js',
+  './payday-events.js',
   './refresh-transactions.js',
   './manifest.webmanifest',
   './vendor/open-props.min.css',
@@ -132,6 +134,13 @@ async function shellDocument(request) {
     refreshed = refreshed.replace(
       '</body>',
       '  <script src="./budget-clarity.js"></script>\n</body>',
+    );
+  }
+
+  if (!refreshed.includes('payday-calendar.js')) {
+    refreshed = refreshed.replace(
+      '</body>',
+      '  <script type="module" src="./payday-calendar.js"></script>\n</body>',
     );
   }
 
