@@ -51,7 +51,6 @@ test('cleanPayee strips processor, store, and location noise', () => {
 });
 
 test('cleanPayee resolves processor-owned merchants rather than parsing refs', () => {
-  // The reference code is not a merchant name.
   assert.equal(cleanPayee('AMZN Mktp US*RT4G59DK3'), 'Amazon');
 });
 
@@ -60,8 +59,6 @@ test('cleanPayee prefers Plaid merchant_name when present', () => {
 });
 
 test('cleanPayee is stable across formatting variants', () => {
-  // Stability is what keeps learned rules matching. If these diverge, a user's
-  // corrections silently stop applying.
   const a = cleanPayee('SAFEWAY #1234 SAN FRANCISCO CA');
   const b = cleanPayee('SAFEWAY #9876 OAKLAND CA');
   assert.equal(payeeKey(a), payeeKey(b));
@@ -84,7 +81,11 @@ test('credit card payment is paired and flagged on both sides', () => {
 
   assert.ok(outflow.is_transfer, 'checking side must be flagged');
   assert.ok(inflow.is_transfer, 'card side must be flagged');
-  assert.ok(outflow.transfer_pair_id, 'pair must be linked');
+  // Synthetic pre-storage fixtures have no Postgres transaction UUIDs yet.
+  // The transfer relationship is still detected, but we must not put a Plaid
+  // external id into the UUID foreign-key field.
+  assert.equal(outflow.transfer_pair_id, null);
+  assert.equal(inflow.transfer_pair_id, null);
 });
 
 test('card payment is excluded from spending', () => {
@@ -109,22 +110,22 @@ test('unpaired transfer is caught by keyword when counterpart is unlinked', () =
 });
 
 test('transfer pairing is one-to-one', () => {
-  // Two identical $1,450 payments in the same window must produce two distinct
-  // pairs, not a four-way tangle.
+  // Use database-shaped UUID ids here because transfer_pair_id is a FK to
+  // transactions.id, not to Plaid's external transaction id.
   const txns = [
-    { plaid_transaction_id: 'a', account_id: 'chk', posted_date: '2026-07-05', amount: 500, payee: 'X', raw_description: '' },
-    { plaid_transaction_id: 'b', account_id: 'chk', posted_date: '2026-07-06', amount: 500, payee: 'X', raw_description: '' },
-    { plaid_transaction_id: 'c', account_id: 'crd', posted_date: '2026-07-05', amount: -500, payee: 'Y', raw_description: '' },
-    { plaid_transaction_id: 'd', account_id: 'crd', posted_date: '2026-07-06', amount: -500, payee: 'Y', raw_description: '' },
+    { id: '11111111-1111-4111-8111-111111111111', plaid_transaction_id: 'a', account_id: 'chk', posted_date: '2026-07-05', amount: 500, payee: 'X', raw_description: '' },
+    { id: '22222222-2222-4222-8222-222222222222', plaid_transaction_id: 'b', account_id: 'chk', posted_date: '2026-07-06', amount: 500, payee: 'X', raw_description: '' },
+    { id: '33333333-3333-4333-8333-333333333333', plaid_transaction_id: 'c', account_id: 'crd', posted_date: '2026-07-05', amount: -500, payee: 'Y', raw_description: '' },
+    { id: '44444444-4444-4444-8444-444444444444', plaid_transaction_id: 'd', account_id: 'crd', posted_date: '2026-07-06', amount: -500, payee: 'Y', raw_description: '' },
   ];
   const out = detectTransfers(txns);
   assert.ok(out.every((t) => t.is_transfer), 'all four should pair up');
-  const pairs = new Set(out.map((t) => [t.plaid_transaction_id, t.transfer_pair_id].sort().join('-')));
-  assert.equal(pairs.size, 2, 'exactly two distinct pairs');
+  const links = new Set(out.map((t) => [t.id, t.transfer_pair_id].sort().join('-')));
+  assert.equal(links.size, 2, 'exactly two distinct pairs');
+  assert.ok(out.every((t) => txns.some((candidate) => candidate.id === t.transfer_pair_id)));
 });
 
 test('same-account opposite amounts are not a transfer', () => {
-  // A refund from the same merchant on the same card is not a transfer.
   const txns = [
     { plaid_transaction_id: 'a', account_id: 'crd', posted_date: '2026-07-05', amount: 75, payee: 'Store', raw_description: '' },
     { plaid_transaction_id: 'b', account_id: 'crd', posted_date: '2026-07-06', amount: -75, payee: 'Store', raw_description: '' },
@@ -138,12 +139,10 @@ test('same-account opposite amounts are not a transfer', () => {
 // ---------------------------------------------------------------------------
 
 test('inferCadence separates biweekly from semi-monthly', () => {
-  // Biweekly: consistent 14-day gaps.
   assert.equal(
     inferCadence(['2026-07-03', '2026-07-17', '2026-07-31', '2026-08-14']),
     'biweekly',
   );
-  // Semi-monthly: 1st and 15th, gaps alternating ~14 and ~16.
   assert.equal(
     inferCadence(['2026-06-01', '2026-06-15', '2026-07-01', '2026-07-15', '2026-08-01']),
     'semimonthly',
@@ -158,13 +157,7 @@ test('both earners detected with correct cadences', () => {
   const semi = streams.find((s) => s.cadence === 'semimonthly');
   assert.ok(biweekly, 'biweekly earner detected');
   assert.ok(semi, 'semi-monthly earner detected');
-
-  // The stable earner's amount is exact every time.
   assert.equal(semi.typical_amount, 1912.4);
-
-  // The call-shift earner's amount varies, so only the median is meaningful.
-  // Asserting an exact figure here would re-encode the stable-income
-  // assumption this whole change exists to remove.
   assert.ok(
     biweekly.typical_amount > 1900 && biweekly.typical_amount < 2500,
     `median ${biweekly.typical_amount} should sit mid-range`,
@@ -172,19 +165,12 @@ test('both earners detected with correct cadences', () => {
 });
 
 test('cadence detection survives varying amounts', () => {
-  // The point of separating cadence from amount: call shifts change what you
-  // are paid, never when. If amount variance leaked into cadence inference,
-  // a variable earner would be misclassified as irregular and drop out of
-  // every projection.
   const { streams } = runPipeline();
   const biweekly = streams.find((s) => s.cadence === 'biweekly');
   assert.equal(biweekly.occurrences, 8, 'all eight varying paychecks in one stream');
 });
 
 test('three-paycheck month is projected correctly', () => {
-  // July 2026 gives the biweekly earner deposits on the 3rd, 17th and 31st.
-  // A budget assuming "biweekly = 2x/month" under-counts July by a full check —
-  // the error that makes two-earner budgets drift every month.
   const { streams } = runPipeline();
   const biweekly = streams.filter((s) => s.cadence === 'biweekly');
   const july = projectMonthlyIncome(biweekly, 2026, 7);
@@ -207,7 +193,6 @@ test('income is not counted as negative spending', () => {
   const paychecks = txns.filter((t) => t.is_income);
   assert.ok(paychecks.length > 0);
   assert.ok(paychecks.every((t) => t.amount < 0));
-  // totalSpending must ignore them entirely.
   assert.ok(totalSpending(txns) > 0);
 });
 
@@ -227,7 +212,6 @@ test('transfers are never counted as income', () => {
 // ---------------------------------------------------------------------------
 
 test('learned rules outrank every automated layer', () => {
-  // Costco defaults to Groceries via seed rules. A learned rule must win.
   const base = runPipeline();
   const costcoBefore = base.txns.find((t) => t.payee === 'Costco');
   assert.equal(costcoBefore.category, 'Groceries');
@@ -321,8 +305,6 @@ test('split children replace the parent in totals, never double-count', () => {
 });
 
 test('pipeline is idempotent', () => {
-  // Re-running must produce identical results — the sync function re-processes
-  // an overlapping window on every run.
   const first = runPipeline();
   const second = runPipeline();
   assert.equal(first.txns.length, second.txns.length);
@@ -334,16 +316,10 @@ test('pipeline is idempotent', () => {
 
 test('spending total excludes transfers and income together', () => {
   const { txns } = runPipeline();
-  // Exclude pending from the naive total too, so the only variable under test
-  // is transfer handling.
   const naive = txns
     .filter((t) => t.amount > 0 && !t.pending)
     .reduce((s, t) => s + t.amount, 0);
   const correct = totalSpending(txns);
-
-  // The gap is exactly the transfers: 1450 + 1102.35 + 800 + 640.18 = 3992.53.
-  // That is what a tool without transfer detection would over-report — here,
-  // more than the household's entire monthly grocery and dining spend combined.
   assert.equal(Number((naive - correct).toFixed(2)), 3992.53);
 });
 
@@ -352,10 +328,6 @@ test('spending total excludes transfers and income together', () => {
 // ---------------------------------------------------------------------------
 
 test('money moved to a brokerage is a transfer, not spending', () => {
-  // The case that prompted this: a Fidelity transfer with no linked
-  // counterpart account, no transfer keyword in the payee, and so it landed
-  // in the spending total — and was then given a category by whatever layer
-  // guessed hardest. It showed up filed under Dining Out.
   const rows = detectTransfers([
     {
       plaid_transaction_id: 'inv1', account_id: 'a1', posted_date: '2026-08-03',
@@ -379,8 +351,6 @@ test('a credit card payment is a transfer even when Plaid calls it a loan paymen
 });
 
 test('a real loan payment is still spending', () => {
-  // A car loan, a student loan and a mortgage are money genuinely leaving the
-  // household. Sweeping all of LOAN_PAYMENTS into transfers would hide them.
   const rows = detectTransfers([
     {
       plaid_transaction_id: 'car1', account_id: 'a1', posted_date: '2026-08-05',
@@ -393,8 +363,6 @@ test('a real loan payment is still spending', () => {
 });
 
 test('a deposit Plaid calls a transfer is left alone, so income survives', () => {
-  // Payroll from some providers arrives tagged TRANSFER_IN. Marking that a
-  // transfer would erase the household's income.
   const rows = detectTransfers([
     {
       plaid_transaction_id: 'dep1', account_id: 'a1', posted_date: '2026-08-05',
@@ -406,19 +374,12 @@ test('a deposit Plaid calls a transfer is left alone, so income survives', () =>
 });
 
 test('a loan payment no longer defaults every loan to a car payment', () => {
-  // The primary-level map sent a mortgage, a student loan and a credit card
-  // payment all to 'Car Payment'.
   assert.equal(PFC_PRIMARY_MAP.LOAN_PAYMENTS, undefined);
   assert.equal(PFC_DETAILED_MAP.LOAN_PAYMENTS_CAR_PAYMENT, 'Car Payment');
   assert.equal(PFC_DETAILED_MAP.LOAN_PAYMENTS_MORTGAGE_PAYMENT, 'Rent/Mortgage');
 });
 
 test("Plaid's category survives the round trip through the database", () => {
-  // The bug this guards: plaidCategory is not a column, so the sync strips it
-  // before the upsert — and everything downstream re-reads the row from the
-  // database. Without the flat columns, Plaid's opinion was gone by the time
-  // any layer looked for it, which silently disabled the whole plaid_pfc
-  // categorization layer server-side.
   const normalized = normalizePlaidTransaction({
     transaction_id: 't1', date: '2026-08-01', amount: 42, name: 'SOME SHOP',
     personal_finance_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' },
@@ -427,7 +388,6 @@ test("Plaid's category survives the round trip through the database", () => {
   assert.equal(normalized.pfc_primary, 'FOOD_AND_DRINK');
   assert.equal(normalized.pfc_detailed, 'FOOD_AND_DRINK_GROCERIES');
 
-  // A row as it comes back from the database: flat columns, no plaidCategory.
   const fromDb = { payee: 'SOME SHOP', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: 'FOOD_AND_DRINK_GROCERIES' };
   assert.deepEqual(plaidCategoryOf(fromDb), { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' });
 
