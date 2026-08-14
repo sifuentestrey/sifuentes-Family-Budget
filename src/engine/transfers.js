@@ -111,9 +111,11 @@ export function hasTransferEvidence(txn) {
  * flagged as transfers, but their pair id remains null until the rows exist in
  * storage.
  *
- * Reprocessing starts from a clean transfer state. This is important because
- * detection rules evolve: an old false-positive must be able to become ordinary
- * spending again rather than retaining its previous flag forever.
+ * Reprocessing starts stale positives from a clean transfer state. Transactions
+ * that never had a transfer verdict keep their original shape, which avoids
+ * changing unrelated engine contracts from `undefined` to `false`. Database
+ * rows that were previously marked `true`, however, are explicitly reset so an
+ * old false-positive can heal when the rules improve.
  *
  * @param {Array<object>} transactions - must span all accounts to pair correctly
  * @param {object} [opts]
@@ -122,7 +124,11 @@ export function hasTransferEvidence(txn) {
  */
 export function detectTransfers(transactions, opts = {}) {
   const windowDays = opts.windowDays ?? DEFAULT_WINDOW_DAYS;
-  const result = transactions.map((t) => ({ ...t, is_transfer: false, transfer_pair_id: null }));
+  const result = transactions.map((t) => {
+    const copy = { ...t, transfer_pair_id: null };
+    if (t.is_transfer === true) copy.is_transfer = false;
+    return copy;
+  });
   const paired = new Set();
 
   const byAmount = new Map();
