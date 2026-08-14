@@ -5,8 +5,8 @@
  * Cadence inference and date projection.
  *
  * Extracted so both `income.js` and `recurring.js` can use it without importing
- * each other. Paychecks and subscriptions share this logic entirely — the only
- * thing that differs between them is which direction of money is being grouped.
+ * each other. Paychecks and recurring charges share this logic entirely — the
+ * only thing that differs between them is which direction of money is grouped.
  *
  * Deliberately amount-agnostic: it looks only at dates. Call-shift work changes
  * what you are paid, never when, so amount variance must not leak into cadence
@@ -19,7 +19,14 @@ const CADENCE_PROFILES = [
   { cadence: 'weekly', days: 7, tolerance: 2 },
   { cadence: 'biweekly', days: 14, tolerance: 3 },
   { cadence: 'semimonthly', days: 15.2, tolerance: 3 },
-  { cadence: 'monthly', days: 30.4, tolerance: 4 },
+  // Bills paid a few days early/late can produce 34-35 day gaps even though
+  // they are plainly monthly. A 7-day tolerance is still far away from the
+  // biweekly/semi-monthly profiles and stops ordinary payment drift from
+  // dropping a mortgage out of recurring detection.
+  { cadence: 'monthly', days: 30.4, tolerance: 7 },
+  // Quarterly obligations are common (insurance, HOA, taxes). Three-month
+  // spacing varies with month length, so this needs a wider calendar tolerance.
+  { cadence: 'quarterly', days: 91.3, tolerance: 10 },
 ];
 
 export function median(values) {
@@ -36,6 +43,23 @@ export function daysBetween(a, b) {
 export function addDays(date, days) {
   const d = new Date(date);
   d.setUTCDate(d.getUTCDate() + Math.round(days));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Add calendar months while preserving the day when possible.
+ *
+ * `monthly = add 30 days` drifts: Aug 3 + 30 becomes Sep 2, then Oct 2, and a
+ * bill slowly walks away from the provider's real cycle. Calendar-month math
+ * keeps Aug 3 -> Sep 3. End-of-month dates clamp naturally (Jan 31 -> Feb 28).
+ */
+export function addMonths(date, months) {
+  const d = new Date(`${date}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
   return d.toISOString().slice(0, 10);
 }
 
@@ -89,14 +113,17 @@ export function inferCadence(dates) {
 
 /**
  * Project the next expected occurrence.
- * Semi-monthly is projected to the next 1st or 15th rather than by adding days,
- * since those dates are fixed regardless of the previous gap.
+ *
+ * Calendar cadences advance by calendar months, not fixed day counts, so they
+ * do not drift across the year. Semi-monthly is projected to the next 1st or
+ * 15th because those dates are fixed regardless of the previous gap.
  */
 export function projectNext(lastDate, cadence) {
   switch (cadence) {
     case 'weekly': return addDays(lastDate, 7);
     case 'biweekly': return addDays(lastDate, 14);
-    case 'monthly': return addDays(lastDate, 30);
+    case 'monthly': return addMonths(lastDate, 1);
+    case 'quarterly': return addMonths(lastDate, 3);
     case 'semimonthly': {
       const d = new Date(lastDate);
       const day = d.getUTCDate();
