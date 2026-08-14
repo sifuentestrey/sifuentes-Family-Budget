@@ -2,9 +2,9 @@
  * Income detection from deposits.
  *
  * Bank feeds carry the net deposit only — gross pay, taxes, and deductions live
- * on the pay stub, which this build deliberately does not fetch (Plaid's payroll
- * product is billed per pull). So income here means "money that reliably arrives",
- * which is exactly what cash-flow planning needs.
+ * on the pay stub, which this build deliberately does not fetch automatically.
+ * So income here means "money that reliably arrives", which is exactly what
+ * cash-flow planning needs.
  *
  * The cadence work matters more than it looks. A biweekly earner is paid 26
  * times a year, so two months out of twelve contain three paychecks. Budgets
@@ -25,6 +25,21 @@ export { inferCadence, projectNext } from './cadence.js';
 const MIN_OCCURRENCES = 3;
 
 /**
+ * A repeating $4-$8 deposit is technically recurring income, but it is not a
+ * paycheck and must never create a payday in the bills planner. The household
+ * has exactly this shape in its bank history: a weekly micro-deposit whose raw
+ * description contains "payroll". Name alone is not enough evidence.
+ *
+ * $100 is deliberately a guardrail, not a model of anyone's salary. It rejects
+ * micro-deposits/rewards/verification credits while remaining far below a real
+ * paycheck for the use case this app is built around.
+ */
+export const MIN_TYPICAL_INCOME = 100;
+
+/** Cadences that plausibly represent household pay. */
+const PAYCHECK_CADENCES = new Set(['weekly', 'biweekly', 'semimonthly', 'monthly']);
+
+/**
  * Detect recurring income streams.
  *
  * @param {Array<object>} transactions - all accounts; deposits are amount < 0
@@ -32,27 +47,32 @@ const MIN_OCCURRENCES = 3;
  */
 export function detectIncomeStreams(transactions) {
   // Delegates to the generic recurring detector. Detecting a paycheck every
-  // two weeks and a subscription every month is the same problem, and keeping
-  // one implementation means the two cannot drift apart in what counts as a
-  // stream.
-  //
-  // Income keeps the stricter 3-occurrence threshold: a false subscription is
-  // a mild annoyance in a list, while a false paycheck would corrupt the floor
-  // that every bill is planned against.
+  // two weeks and a recurring charge every month is the same date problem, but
+  // income then applies stricter guardrails because a false paycheck corrupts
+  // every bill-to-paycheck assignment downstream.
   return detectRecurringStreams(transactions, {
     direction: 'inflow',
     minOccurrences: MIN_OCCURRENCES,
     requireCadence: true,
-  });
+  }).filter((stream) =>
+    PAYCHECK_CADENCES.has(stream.cadence)
+      && Number(stream.typical_amount ?? 0) >= MIN_TYPICAL_INCOME,
+  );
 }
 
-/** Flag transactions belonging to a detected stream as income. */
+/**
+ * Flag transactions belonging to a detected stream as income.
+ *
+ * Explicitly resets other inflows to false. A stream can stop qualifying after
+ * more history arrives; leaving an old `is_income: true` bit behind would make
+ * a micro-deposit survive forever even after the detector correctly rejected it.
+ */
 export function markIncome(transactions, streams) {
   const keys = new Set(streams.map((s) => `${s.account_id}::${payeeKey(s.payee)}`));
   return transactions.map((txn) => {
     if (txn.amount >= 0 || txn.is_transfer) return txn;
     const key = `${txn.account_id}::${payeeKey(txn.payee)}`;
-    return keys.has(key) ? { ...txn, is_income: true } : txn;
+    return { ...txn, is_income: keys.has(key) };
   });
 }
 

@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v32';
+const CACHE_VERSION = 'v33';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -31,7 +31,6 @@ const SHELL_ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
-  // Engine modules the app imports directly.
   '../src/engine/normalize.js',
   '../src/engine/us-cities.js',
   '../src/engine/seed-rules.js',
@@ -48,49 +47,26 @@ const SHELL_ASSETS = [
   '../src/engine/subscriptions.js',
   '../src/engine/forecast.js',
   '../src/engine/alerts.js',
-  // Payroll: shift logging computes its forecast client-side, so these must be
-  // cached alongside the engines or the Shifts view breaks offline.
   '../src/domain/payroll.js',
   '../src/payroll/pay-calculator.js',
   '../src/payroll/forecast.js',
-  // Bills: app.js imports daysUntilDue statically (not lazily, unlike
-  // connect.js/shifts.js/bills.js themselves), so it's required to parse at
-  // all, the same reason the payroll modules above are here.
   '../src/domain/bill.js',
-  // Safe-to-spend: app.js imports calculateSafeToSpend statically, so without
-  // this the module 404s offline and app.js fails to parse — taking the whole
-  // app down, not just the safe-to-spend headline.
   '../src/engine/budget/safe-to-spend.js',
   '../src/engine/budget/monthly-budget.js',
-  // The month split into bills and everything after them: imported
-  // statically by app.js, and it reaches into domain/bill-payment-match.js.
   '../src/engine/month-in-full.js',
-  // Splitting a charge, and the shared "is this a split parent" rule every
-  // total depends on. Imported statically by app.js.
   '../src/engine/split.js',
-  // The year view, imported statically by app.js.
   '../src/engine/year-in-review.js',
-  // Bills-by-paycheck: same reason as the modules above — imported statically.
   '../src/engine/bill-paycheck-plan.js',
-  // Bill suggestions from recurring charges: imported statically by app.js and
-  // reaches into domain/provider-match.js, so both have to be here or the
-  // Bills tab 404s offline.
   '../src/engine/bill-suggestions.js',
-  // Imported statically by app.js (avatars fall back to the payee stem to
-  // find a logo), so a miss here 404s and takes the whole app down offline.
   '../src/engine/similar-payee.js',
-  // Merchant logos: imported statically by app.js, same rule as above.
   '../src/engine/merchant-domain.js',
   '../src/domain/provider-match.js',
-  // Reached by month-in-full.js to tell which charge paid which tracked bill.
   '../src/domain/bill-payment-match.js',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) =>
-      // Individually, so one missing asset doesn't fail the whole install and
-      // leave the app with no service worker at all.
       Promise.allSettled(SHELL_ASSETS.map((url) => cache.add(url))),
     ).then(() => self.skipWaiting()),
   );
@@ -115,14 +91,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  // Never cache anything crossing to another origin — the Supabase API in
-  // particular. Cached financial data outside our control is not a tradeoff
-  // worth making for a slightly faster load.
   if (url.origin !== self.location.origin) return;
 
-  // The original HTML intentionally stays untouched in the repo so the visual
-  // refresh and small UX clarity layer remain reversible presentation changes
-  // rather than a risky rewrite of the application shell.
   const isDocument = request.mode === 'navigate' || url.pathname.endsWith('/index.html');
   if (isDocument) {
     event.respondWith(shellDocument(request));
@@ -183,8 +153,6 @@ async function cacheFirst(request) {
     }
     return response;
   } catch {
-    // Offline and never cached. Fall back to the shell so a deep link still
-    // opens the app rather than a browser error page.
     const shell = await caches.match('./index.html');
     if (shell) return shell;
     throw new Error('offline and no cached shell');
@@ -202,8 +170,6 @@ async function networkFirst(request) {
   } catch {
     const cached = await caches.match(request);
     if (cached) {
-      // Tag it so the UI can say the figures are from the last successful
-      // load rather than presenting them as current.
       const headers = new Headers(cached.headers);
       headers.set('X-From-Cache', 'true');
       return new Response(await cached.blob(), { status: 200, headers });
@@ -212,14 +178,6 @@ async function networkFirst(request) {
   }
 }
 
-/**
- * Push notifications.
- *
- * iOS delivers these only to a PWA installed via Safari's Add to Home Screen —
- * not to a Safari tab — and only on iOS 16.4 or later. Android has no such
- * restriction. Wired up here so the alerts engine has somewhere to send urgent
- * items once a push service is configured.
- */
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   let payload;
@@ -235,7 +193,6 @@ self.addEventListener('push', (event) => {
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
       tag: payload.tag ?? 'budget-alert',
-      // Alerts about money should not silently replace each other.
       renotify: true,
       data: { url: payload.url ?? './index.html' },
     }),
@@ -248,7 +205,6 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      // Focus an open window rather than stacking another copy.
       for (const client of clients) {
         if ('focus' in client) return client.focus();
       }

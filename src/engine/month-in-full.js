@@ -2,23 +2,20 @@
  * The month, in full: what went to bills, and where the rest went.
  *
  * "Where it went" as a flat list of categories answers the wrong question.
- * Rent, childcare and the power bill are not choices — they left the account
- * the moment they were due, and lumping them in with dining out makes both
- * numbers useless: the fixed half looks like overspending, and the part the
- * household can actually influence is buried under it.
+ * Mortgage, childcare and the power bill are recurring obligations; lumping
+ * them in with dining out makes both numbers useless. But a cancellable
+ * subscription is not the same thing as the mortgage just because it repeats.
  *
  * So the month splits in two:
  *
- *   bills - money that was always going out. A charge that paid a tracked
- *           bill, or one in a category that is committed by nature (rent,
- *           utilities, insurance, childcare, a car payment, a subscription).
- *   rest  - everything after those cleared. This is the half worth looking
- *           at, because it is the only half anybody can change next month.
+ *   bills - recurring household obligations: mortgage/rent, utilities,
+ *           insurance, childcare, car payments, taxes, etc. A tracked bill
+ *           always counts here; category inference is only the fallback.
+ *   rest  - everything else, including subscriptions and other choices.
  *
  * A tracked bill wins over a category guess, because it carries a real payee
  * and a real due date the household confirmed. Categories are the fallback
- * for the bills nobody has told the app about yet — which, before anyone
- * sets a single bill up, is all of them.
+ * for obligations nobody has told the app about yet.
  */
 
 import { bucketFor } from './expenses.js';
@@ -28,18 +25,15 @@ import { spendingOnly, monthOf } from './budget/monthly-budget.js';
 const round = (n) => Math.round(n * 100) / 100;
 
 /**
- * Categories that are a bill even when no bill record exists for them.
+ * Categories that may be mechanically "committed" but are not household bills.
  *
- * Derived from the bucket model rather than listed by hand, with two
- * deliberate exceptions:
- *
- *   Savings is committed but is not spending at all — it is money kept, and
- *   counting it as a bill would say the household spent its own savings.
- *
- *   Fitness is committed only because a gym charges the same amount monthly.
- *   It is a subscription anyone can cancel, so it belongs with the choices.
+ * Savings is money kept, not spent. Subscriptions/fitness/entertainment/hobbies
+ * are cancellable recurring choices and already have their own Recurring view.
+ * Keeping them out here makes "Bills" mean the same thing everywhere.
  */
-const NOT_A_BILL = new Set(['Savings', 'Fitness']);
+const NOT_A_BILL = new Set([
+  'Savings', 'Subscriptions', 'Fitness', 'Entertainment', 'Hobbies',
+]);
 
 export function isBillCategory(category, overrides = new Map()) {
   if (!category || NOT_A_BILL.has(category)) return false;

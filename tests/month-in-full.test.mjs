@@ -90,10 +90,21 @@ test('savings is not a bill — it is money kept, not money spent', () => {
   assert.equal(isBillCategory('Savings'), false);
 });
 
-test('a gym membership is a choice, not a bill', () => {
-  // Committed by the bucket model only because the amount never changes.
+test('subscriptions are choices, not household bills', () => {
   assert.equal(isBillCategory('Fitness'), false);
-  assert.equal(isBillCategory('Subscriptions'), true, 'a subscription does get charged like a bill');
+  assert.equal(isBillCategory('Subscriptions'), false);
+  assert.equal(isBillCategory('Entertainment'), false);
+  assert.equal(isBillCategory('Hobbies'), false);
+
+  const m = buildMonthInFull({
+    month: '2026-08',
+    transactions: [
+      txn({ payee: 'Google', category: 'Subscriptions', amount: 3.19 }),
+      txn({ payee: 'Mortgage', category: 'Rent/Mortgage', amount: 1846.81 }),
+    ],
+  });
+  assert.equal(m.bills.total, 1846.81);
+  assert.equal(m.rest.total, 3.19);
 });
 
 test('shares are of the month, and the rest is split by category', () => {

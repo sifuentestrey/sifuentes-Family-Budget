@@ -1,10 +1,9 @@
 /**
  * Bills proposed from the household's own recurring charges.
  *
- * The failure that matters most here is a false positive: offering "Trader
- * Joe's" as a bill teaches the household to ignore the list, and accepting one
- * puts a made-up obligation into safe-to-spend. So most of these tests are
- * about what must NOT be suggested.
+ * The failure that matters most here is a false positive: offering Google,
+ * Apple or Trader Joe's as a bill teaches the household to ignore the list,
+ * and accepting one puts a made-up obligation into the paycheck plan.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,8 +50,6 @@ test('a recurring utility charge is offered as a bill', () => {
 });
 
 test('the amount offered is the last charge, not the median', () => {
-  // After a price rise the median lags behind what will actually be charged,
-  // and a bill is a forecast of the next payment.
   const [s] = suggestBillsFromTransactions({ streams: [stream()], asOf });
   assert.equal(s.amountDue, 148);
 });
@@ -86,54 +83,50 @@ test('a frequently-visited merchant with a varying amount is not offered', () =>
     })],
     asOf,
   });
-  assert.equal(suggestions.length, 0, 'an unrecognized category with a varying amount is shopping');
+  assert.equal(suggestions.length, 0, 'shopping is not a bill');
 });
 
-test('a set-price charge in an unknown category is offered once it has a track record', () => {
-  const twice = suggestBillsFromTransactions({
+test('a steady unknown charge is still not promoted into Bills', () => {
+  const suggestions = suggestBillsFromTransactions({
     streams: [stream({
-      payee: 'Bright Storage', category: 'Uncategorized',
-      amounts: [89, 89], occurrences: 2, last_amount: 89,
+      payee: 'Mystery Service', category: 'Uncategorized',
+      amounts: [89, 89, 89, 89], occurrences: 4, last_amount: 89,
     })],
     asOf,
   });
-  assert.equal(twice.length, 0, 'two charges is not yet a track record');
-
-  const thrice = suggestBillsFromTransactions({
-    streams: [stream({
-      payee: 'Bright Storage', category: 'Uncategorized',
-      amounts: [89, 89, 89], occurrences: 3, last_amount: 89,
-    })],
-    asOf,
-  });
-  assert.equal(thrice.length, 1);
-  assert.equal(thrice[0].category, 'Other', 'an unmappable category falls back rather than inventing one');
+  assert.equal(suggestions.length, 0, 'stable price alone is not evidence of a household obligation');
 });
 
-test('suggestions are ordered by amount, biggest first', () => {
+test('subscriptions stay out of Bills even when perfectly recurring', () => {
   const suggestions = suggestBillsFromTransactions({
     streams: [
-      stream({ payee: 'Streamly', category: 'Subscriptions', last_amount: 15, amounts: [15, 15, 15] }),
+      stream({ payee: 'Google', category: 'Subscriptions', last_amount: 3.19, amounts: [3.19, 3.19, 3.19] }),
+      stream({ payee: 'Apple', category: 'Subscriptions', last_amount: 2.99, amounts: [2.99, 2.99, 2.99] }),
+    ],
+    asOf,
+  });
+  assert.deepEqual(suggestions, []);
+});
+
+test('suggestions are ordered by amount, biggest first, without subscriptions', () => {
+  const suggestions = suggestBillsFromTransactions({
+    streams: [
+      stream({ payee: 'Google', category: 'Subscriptions', last_amount: 15, amounts: [15, 15, 15] }),
       stream({ payee: 'First Mortgage', category: 'Rent/Mortgage', last_amount: 1900, amounts: [1900, 1900, 1900] }),
       stream({ payee: 'City Power', last_amount: 148 }),
     ],
     asOf,
   });
 
-  assert.deepEqual(suggestions.map((s) => s.providerName), ['First Mortgage', 'City Power', 'Streamly']);
+  assert.deepEqual(suggestions.map((s) => s.providerName), ['First Mortgage', 'City Power']);
 });
 
 test('a long-passed expected date is flagged as possibly stopped', () => {
-  // A next_expected that came and went weeks ago usually means the charge
-  // stopped — worth showing, worth not presenting as a confident upcoming bill.
   const [s] = suggestBillsFromTransactions({ streams: [stream()], asOf: '2026-09-01' });
   assert.equal(s.stale, true);
 });
 
 test('normal billing-date drift is not called a stopped charge', () => {
-  // Billing dates move a few days routinely — weekends, month lengths, a
-  // provider shifting its cycle. Flagging that would put a scary caveat on
-  // almost every healthy bill.
   const dueToday = suggestBillsFromTransactions({ streams: [stream()], asOf: '2026-08-03' });
   assert.equal(dueToday[0].stale, false, 'due today is not stopped');
 
@@ -141,13 +134,10 @@ test('normal billing-date drift is not called a stopped charge', () => {
   assert.equal(threeLate[0].stale, false, 'three days late is ordinary drift');
 });
 
-test('an expected date already passed rolls forward instead of creating an overdue bill', () => {
-  // Saving a past date makes a bill that is overdue the instant it exists —
-  // it lands in red on Home and in "due before your next check", for a charge
-  // nobody is actually behind on.
+test('an expected date already passed rolls forward by calendar month', () => {
   const [s] = suggestBillsFromTransactions({ streams: [stream()], asOf: '2026-08-20' });
   assert.ok(s.dueDate >= '2026-08-20', `rolled to ${s.dueDate}, which is still in the past`);
-  assert.equal(s.dueDate, '2026-09-02', 'one monthly cycle past the projected 2026-08-03');
+  assert.equal(s.dueDate, '2026-09-03', 'monthly projection preserves the day instead of adding 30 days');
 });
 
 test('a still-future expected date is left exactly as projected', () => {
@@ -155,10 +145,23 @@ test('a still-future expected date is left exactly as projected', () => {
   assert.equal(s.dueDate, '2026-08-03');
 });
 
-test('every billable cadence is one the detector can actually produce', () => {
-  // A cadence listed here that inferCadence never returns matches nothing and
-  // fails silently — the filter just quietly drops those streams forever.
-  const producible = new Set(['weekly', 'biweekly', 'semimonthly', 'monthly']);
+test('quarterly obligations are billable and roll by three calendar months', () => {
+  const [s] = suggestBillsFromTransactions({
+    streams: [stream({
+      payee: 'County HOA', category: 'Taxes', cadence: 'quarterly',
+      dates: ['2026-01-01', '2026-04-01', '2026-07-01'],
+      amounts: [300, 300, 300], last_amount: 300, typical_amount: 300,
+      last_seen: '2026-07-01', next_expected: '2026-10-01',
+    })],
+    asOf,
+  });
+  assert.equal(s.providerName, 'County HOA');
+  assert.equal(s.cadence, 'quarterly');
+  assert.equal(s.dueDate, '2026-10-01');
+});
+
+test('every billable cadence is one the detector can produce and project', () => {
+  const producible = new Set(['weekly', 'biweekly', 'semimonthly', 'monthly', 'quarterly']);
   for (const cadence of BILLABLE_CADENCES) {
     assert.ok(producible.has(cadence), `inferCadence never returns "${cadence}"`);
     assert.ok(
@@ -190,8 +193,6 @@ test('bill categories stay inside the list the bill form can actually show', () 
   assert.equal(toBillCategory('Something Invented'), 'Other');
   assert.equal(toBillCategory(null), 'Other');
 
-  // Every mapping must land somewhere the Add-a-bill dropdown can display,
-  // or a suggestion pre-fills a category that silently saves as something else.
   for (const name of SEED_CATEGORIES.map(([, label]) => label)) {
     assert.ok(
       BILL_CATEGORIES.includes(toBillCategory(name)),
@@ -201,8 +202,6 @@ test('bill categories stay inside the list the bill form can actually show', () 
 });
 
 test('the obligation categories are real categorizer labels', () => {
-  // A misspelt or invented label here fails silently — the category test just
-  // never matches and real bills quietly stop being offered.
   const real = new Set(SEED_CATEGORIES.map(([, label]) => label));
   for (const name of OBLIGATION_CATEGORIES) {
     assert.ok(real.has(name), `"${name}" is not a category the categorizer emits`);

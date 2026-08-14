@@ -21,6 +21,7 @@ const PER_YEAR = {
   biweekly: 26,
   semimonthly: 24,
   monthly: 12,
+  quarterly: 4,
   irregular: 0,
 };
 
@@ -111,12 +112,6 @@ export function detectPriceChange(amounts) {
     const change = (after - before) / before;
     if (Math.abs(change) < PRICE_INCREASE_THRESHOLD) continue;
 
-    // Both sides must be stable, not just the new one.
-    //
-    // Checking only forward misreads a one-off spike: in [10, 10, 25, 10, 10]
-    // the drop from 25 back to 10 "holds" for the rest of the series, so it
-    // reports a 60% price decrease when the actual price never moved. The prior
-    // level has to have been a real price too.
     const priorHeld = amounts
       .slice(0, i)
       .every((a) => Math.abs((a - before) / before) < PRICE_INCREASE_THRESHOLD);
@@ -138,13 +133,7 @@ export function detectPriceChange(amounts) {
   return null;
 }
 
-/**
- * Analyze subscriptions.
- *
- * @param {Array<object>} transactions
- * @param {object} [opts]
- * @param {number} [opts.forgottenDays=75] - no charge in this long looks dormant
- */
+/** Analyze subscriptions and recurring obligations. */
 export function analyzeSubscriptions(transactions, opts = {}) {
   const streams = detectRecurringStreams(transactions, { direction: 'outflow' });
 
@@ -152,25 +141,16 @@ export function analyzeSubscriptions(transactions, opts = {}) {
     const perYear = PER_YEAR[stream.cadence] ?? 0;
     const kind = classifyStream(stream.category);
     const fixedPrice = isFixedPrice(stream.amounts);
-
-    // Price-change detection only on set-price streams. On a grocery or fuel
-    // merchant every normal fluctuation would read as a price rise.
     const priceChange = fixedPrice ? detectPriceChange(stream.amounts) : null;
-
-    // Annualize on the CURRENT price, not the median. After an increase the
-    // median lags behind what the household will actually be charged.
     const annualCost = round(stream.last_amount * perYear);
 
     return {
       ...stream,
       kind,
       fixedPrice,
-      // Shown as the primary figure. "$15.99/mo" does not register as a
-      // decision; "$191.88/yr" does.
       annualCost,
       monthlyEquivalent: round(annualCost / 12),
       priceChange,
-      // Extra yearly cost the household absorbed without deciding to.
       annualImpactOfIncrease: priceChange
         ? round(priceChange.changeAmount * perYear)
         : 0,
@@ -181,20 +161,12 @@ export function analyzeSubscriptions(transactions, opts = {}) {
   const bills = analyzed.filter((s) => s.kind === 'bill');
 
   return {
-    // The cancellable list — what "subscriptions" should actually mean.
     subscriptions,
-    // Recurring obligations. Worth forecasting; not candidates for cancelling.
     bills,
-    // Places the household simply shops often. Neither, and excluded from both
-    // so the lists stay actionable.
     frequentMerchants: analyzed.filter((s) => s.kind === 'merchant'),
-
     totalAnnual: round(subscriptions.reduce((s, x) => s + x.annualCost, 0)),
     totalMonthly: round(subscriptions.reduce((s, x) => s + x.monthlyEquivalent, 0)),
     billsAnnual: round(bills.reduce((s, x) => s + x.annualCost, 0)),
-
-    // Price changes matter on bills too — an insurance renewal is exactly the
-    // kind of quiet increase worth catching.
     priceIncreases: [...subscriptions, ...bills].filter(
       (s) => s.priceChange?.direction === 'increase',
     ),
@@ -204,13 +176,6 @@ export function analyzeSubscriptions(transactions, opts = {}) {
   };
 }
 
-/**
- * Streams sharing a category that plausibly do the same job.
- *
- * Phrased as a question in the UI, never an assertion — two streaming services
- * may both be wanted, and a tool that confidently tells someone to cancel
- * something they use loses their trust for everything else it says.
- */
 function findDuplicateServices(subscriptions) {
   const byCategory = new Map();
   for (const sub of subscriptions) {
@@ -229,12 +194,6 @@ function findDuplicateServices(subscriptions) {
     }));
 }
 
-/**
- * Streams that are still charging but overdue relative to their own cadence.
- *
- * A heuristic about the household's life, not their data, so it is surfaced as
- * a prompt rather than a conclusion.
- */
 function findForgotten(subscriptions, thresholdDays) {
   const now = Date.now();
   return subscriptions
@@ -250,13 +209,6 @@ function findForgotten(subscriptions, thresholdDays) {
     }));
 }
 
-/**
- * Known cancellation routes.
- *
- * This is the honest version of Rocket Money's concierge: it saves the lookup,
- * not the phone call. Nobody cancels on the household's behalf, and the UI
- * says so rather than implying otherwise.
- */
 const CANCEL_ROUTES = {
   netflix: { url: 'https://www.netflix.com/cancelplan', method: 'online' },
   spotify: { url: 'https://www.spotify.com/account/subscription/', method: 'online' },
@@ -276,9 +228,6 @@ export function cancellationRoute(payee) {
   return null;
 }
 
-/**
- * Draft a cancellation message the household can send themselves.
- */
 export function draftCancellation(subscription) {
   return {
     subject: `Cancel my subscription — ${subscription.payee}`,
@@ -295,12 +244,6 @@ export function draftCancellation(subscription) {
   };
 }
 
-/**
- * Bills worth trying to negotiate, with a script.
- *
- * Rocket Money charges 35-60% of the first year's savings for a person to make
- * this call. This is the same call, made by the household, keeping all of it.
- */
 const NEGOTIABLE = ['Internet/Phone', 'Insurance', 'Car Insurance', 'Subscriptions'];
 
 export function negotiationCandidates(subscriptions) {
