@@ -15,6 +15,11 @@
 
   const svg = (name, size = 21) => `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 
+  /**
+   * Route through an existing app-owned tab button. app.js reads dataset.view
+   * at click time, so this reaches the real router without inventing a second
+   * state machine. The temporary value disappears with the next app render.
+   */
   function routeTo(view) {
     const tab = document.querySelector('.tabbar .tab');
     if (!tab) return;
@@ -50,6 +55,23 @@
     tab.innerHTML = `<span class="tab-icon">${svg(iconName)}</span>${label}${dot}`;
   }
 
+  /**
+   * budget-clarity.js predates this primary IA and intentionally rewrites the
+   * bottom tab with data-view="budget" into Bills. Giving the new Budget tab
+   * a private DOM route keeps that legacy enhancer from seeing it. A capture
+   * listener then forwards the tap into app.js's real `budget` view before the
+   * old bubble listener can interpret the private route.
+   */
+  function bindBudgetPrimary(tab) {
+    if (!tab || tab.dataset.simpleBudgetPrimaryBound === '1') return;
+    tab.dataset.simpleBudgetPrimaryBound = '1';
+    tab.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      routeTo('budget');
+    }, true);
+  }
+
   function polishNav(view) {
     const tabs = [...document.querySelectorAll('.tabbar .tab')];
     if (tabs.length !== 5) return;
@@ -57,7 +79,8 @@
     setTab(tabs[0], 'dashboard', 'Home', 'home');
     setTab(tabs[1], 'bills', 'Plan', 'plan');
     setTab(tabs[2], 'spending', 'Spending', 'spending');
-    setTab(tabs[3], 'budget', 'Budget', 'budget');
+    setTab(tabs[3], 'simple-budget-primary', 'Budget', 'budget');
+    bindBudgetPrimary(tabs[3]);
     setTab(tabs[4], 'more', 'More', 'more');
 
     const activeIndex = view === 'dashboard' ? 0
