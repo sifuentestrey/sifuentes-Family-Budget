@@ -44,15 +44,19 @@
   function setHeader(title, sub) {
     const titleNode = document.querySelector('.app-bar-title');
     const subNode = document.querySelector('.app-bar-sub');
-    if (titleNode) titleNode.textContent = title;
-    if (subNode) subNode.textContent = sub;
+    if (titleNode && titleNode.textContent !== title) titleNode.textContent = title;
+    if (subNode && subNode.textContent !== sub) subNode.textContent = sub;
   }
 
   function setTab(tab, view, label, iconName) {
     if (!tab) return;
-    tab.dataset.view = view;
-    const dot = tab.querySelector('.tab-dot') ? '<span class="tab-dot"></span>' : '';
+    if (tab.dataset.view !== view) tab.dataset.view = view;
+    const hasDot = Boolean(tab.querySelector('.tab-dot'));
+    const signature = `${view}|${label}|${iconName}|${hasDot ? 1 : 0}`;
+    if (tab.dataset.simpleShellSignature === signature) return;
+    const dot = hasDot ? '<span class="tab-dot"></span>' : '';
     tab.innerHTML = `<span class="tab-icon">${svg(iconName)}</span>${label}${dot}`;
+    tab.dataset.simpleShellSignature = signature;
   }
 
   /**
@@ -115,10 +119,14 @@
       const text = title.textContent.trim();
       if (text === 'Bills' || text === 'Bills paid this month') {
         title.textContent = 'Bills & utilities';
-        if (sub) sub.textContent = 'Recurring household costs that actually cleared this month.';
+        if (sub && sub.textContent !== 'Recurring household costs that actually cleared this month.') {
+          sub.textContent = 'Recurring household costs that actually cleared this month.';
+        }
       } else if (text === 'After the bills') {
         title.textContent = 'Spending';
-        if (sub) sub.textContent = 'Everything else that left the account this month.';
+        if (sub && sub.textContent !== 'Everything else that left the account this month.') {
+          sub.textContent = 'Everything else that left the account this month.';
+        }
       }
     }
   }
