@@ -60,6 +60,39 @@ export async function dismissBill(id) {
 }
 
 /**
+ * A household edit outranks every automated parser.
+ *
+ * Keep the existing record/id so payment history and shared preferences stay
+ * attached, but make the corrected name, amount, date and category the facts
+ * every screen uses from now on.
+ */
+export async function updateBillDetails(id, {
+  providerName, amountDue, dueDate, category,
+}) {
+  const name = String(providerName ?? '').trim();
+  const amount = Number(amountDue);
+  if (!name) throw new Error('Bill name is required');
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Enter a valid amount');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dueDate ?? ''))) throw new Error('Enter a valid due date');
+
+  const { error } = await supabase
+    .from('bills')
+    .update({
+      provider_name: name,
+      provider_key: slugify(name) || 'manual-entry',
+      amount_due: amount,
+      due_date: dueDate,
+      category: category || 'Other',
+      status: 'confirmed',
+      source: 'manual',
+      confidence: 1,
+      needs_review: false,
+    })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/**
  * Store the household's planning facts without adding schema just for UI
  * preferences. `raw` is already the provider-agnostic JSON payload on a bill,
  * so a tiny namespaced object is the safest place for "autopay vs we pay it"
@@ -178,9 +211,12 @@ export async function createBill({ providerName, amountDue, dueDate, category, s
     const row = billToRow({ ...verdict.existing, ...candidate, id: verdict.existing.id });
     const { error } = await supabase.from('bills').update(row).eq('id', verdict.existing.id);
     if (error) throw error;
-    return;
+    return verdict.existing.id;
   }
 
-  const { error } = await supabase.from('bills').insert(billToRow(candidate));
+  const row = billToRow(candidate);
+  delete row.id;
+  const { data, error } = await supabase.from('bills').insert(row).select('id').single();
   if (error) throw error;
+  return data.id;
 }
