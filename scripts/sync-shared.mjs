@@ -36,6 +36,14 @@ const RULES = [
   { source: 'sync', dest: 'sync' },
 ];
 
+// Browser-only engines deliberately do not get copied into the Edge Function
+// bundle. They may import web/domain concerns that no server function uses,
+// and copying dead code creates a second file CI has to keep synchronized for
+// no runtime benefit.
+const BROWSER_ONLY = new Set([
+  'engine/bill-center.js',
+]);
+
 // Single files, named explicitly rather than by directory, so files that
 // exist only for the browser or for tests (mock providers, the registry)
 // don't end up bundled into an Edge Function that never uses them.
@@ -77,7 +85,9 @@ for (const rule of RULES) {
   mkdirSync(destDir, { recursive: true });
 
   for (const name of readdirSync(sourceDir).filter((f) => f.endsWith('.js'))) {
-    syncFile(join(sourceDir, name), `${rule.source}/${name}`, join(destDir, name));
+    const sourceLabel = `${rule.source}/${name}`;
+    if (BROWSER_ONLY.has(sourceLabel)) continue;
+    syncFile(join(sourceDir, name), sourceLabel, join(destDir, name));
   }
 }
 
