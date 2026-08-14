@@ -75,12 +75,15 @@ function isFixedPrice(amounts) {
   if (amounts.length < 2) return false;
   const avg = amounts.reduce((a, b) => a + b, 0) / amounts.length;
   if (!avg) return false;
+  // Compare against the most common value rather than the spread, so a stream
+  // that stepped once still reads as fixed-price on each side of the step.
   const counts = new Map();
   for (const a of amounts) {
     const key = a.toFixed(2);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const modeCount = Math.max(...counts.values());
+  // At least half the charges being identical means a set price.
   return modeCount / amounts.length >= 0.4;
 }
 
@@ -99,6 +102,8 @@ function round(n) {
 export function detectPriceChange(amounts) {
   if (amounts.length < 3) return null;
 
+  // Start at 2 so there are always at least two prior charges establishing the
+  // old price. A change from a single observation is not a change from a price.
   for (let i = 2; i < amounts.length; i++) {
     const before = amounts[i - 1];
     const after = amounts[i];
