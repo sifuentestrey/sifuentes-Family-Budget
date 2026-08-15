@@ -38,6 +38,17 @@ jobs:
               raise SystemExit('expected v46 cache not found')
           sw_path.write_text(sw.replace("const CACHE_VERSION = 'v46';", "const CACHE_VERSION = 'v47';", 1))
 
+          startup_test_path = Path('tests/startup-performance.test.mjs')
+          startup_test = startup_test_path.read_text()
+          old_version_assertion = "assert.match(sw, /CACHE_VERSION = 'v46'/);"
+          if old_version_assertion not in startup_test:
+              raise SystemExit('startup cache assertion not found')
+          startup_test_path.write_text(startup_test.replace(
+              old_version_assertion,
+              "assert.match(sw, /CACHE_VERSION = 'v47'/);",
+              1,
+          ))
+
           Path('tests/uncommitted-calculation.test.mjs').write_text('''import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { readFileSync } from 'node:fs';\n\nconst app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');\nconst sw = readFileSync(new URL('../web/sw.js', import.meta.url), 'utf8');\n\ntest('until-payday money does not deduct an unfunded three-month emergency goal', () => {\n  const start = app.indexOf('function gatherSafeToSpendInputs()');\n  const end = app.indexOf('function buildPlan()', start);\n  const gather = app.slice(start, end);\n  assert.match(gather, /const bufferTarget = 0;/);\n  assert.doesNotMatch(gather, /monthly\\?\\.necessary.*\\* 3/);\n});\n\ntest('household UI calls the result uncommitted rather than safe/free to spend', () => {\n  assert.match(app, /Uncommitted until/);\n  assert.match(app, />Uncommitted<\\/span>/);\n});\n\ntest('installed app receives the corrected calculation', () => {\n  assert.match(sw, /CACHE_VERSION = 'v47'/);\n});\n''')
 
           Path('.github/workflows/apply-uncommitted-fix.yml').unlink()
