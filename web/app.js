@@ -764,8 +764,11 @@ function gatherSafeToSpendInputs() {
   // Sinking fund: irregular annual bills spread monthly.
   const sinkingFundContribution = state.picture?.monthly?.irregular ?? 0;
 
-  // Emergency buffer: 3 months of necessary spending.
-  const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;
+  // Emergency savings is a separate planning goal, not money that must be
+  // rebuilt out of the cash on hand before every payday. The until-payday
+  // number answers only what is already committed or reasonably expected
+  // before the next check.
+  const bufferTarget = 0;
   const bufferBalance = 0;
 
   // Income landing strictly BEFORE the horizon — never the paycheck that defines
@@ -1529,7 +1532,7 @@ function renderDashboard() {
     ${safeToSpendResult ? `
       <div class="card" style="margin-top:12px;">
         <div class="card-head">
-          <span class="card-title">Free to spend until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
+          <span class="card-title">Uncommitted until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
           <span class="row-amount ${safeToSpendResult.status === 'negative' ? 'negative' : ''}">
             ${moneyExact(safeToSpendResult.safeToSpend)}
           </span>
@@ -1556,7 +1559,7 @@ function renderDashboard() {
               </div>
             `).join('')}
             <div class="kv-row total">
-              <span class="kv-label">Free to spend</span>
+              <span class="kv-label">Uncommitted</span>
               <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
             </div>
           </div>
