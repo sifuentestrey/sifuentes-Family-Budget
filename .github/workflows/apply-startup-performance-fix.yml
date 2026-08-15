@@ -1,0 +1,263 @@
+name: Apply startup performance fix
+
+on:
+  push:
+    branches: [fix/startup-performance-v46]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'Make startup non-blocking on mobile'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/startup-performance-v46
+          fetch-depth: 0
+      - name: Patch startup path
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_path = Path('web/app.js')
+          app = app_path.read_text()
+
+          old_boot = '''  if (state.bootLoading) {
+            app.innerHTML = `
+              <header class="app-bar"><div class="app-bar-text"><div class="app-bar-title">Family Budget</div></div></header>
+              <div class="loading">Loading your numbers…</div>
+            `;
+            return;
+          }'''
+          new_boot = '''  if (state.bootLoading) {
+            app.innerHTML = `
+              ${renderAppBar()}
+              <main>
+                <div class="loading">
+                  Updating your numbers…
+                  <div class="prose-sm" style="margin-top:8px;">You can move around while the bank connection finishes.</div>
+                </div>
+              </main>
+              ${renderBottomNav()}
+            `;
+            app.querySelectorAll('[data-view]').forEach((btn) =>
+              btn.addEventListener('click', () => {
+                state.view = btn.dataset.view;
+                if (state.view !== 'transactions') state.transactionFilter = null;
+                render();
+              }),
+            );
+            return;
+          }'''
+          if old_boot not in app:
+              raise SystemExit('boot loading block not found')
+          app = app.replace(old_boot, new_boot, 1)
+
+          old_connection = '''  try {
+            state.householdId = await connect.ensureHousehold();
+            [state.connectedItems, state.providerConnections, state.members, state.invites] = await Promise.all([
+              connect.listConnectedItems(),
+              connect.listProviderConnections(),
+              connect.listMembers(),
+              connect.listInvites(),
+            ]);
+          } catch (e) {
+            state.connectError = e.message;
+            return;
+          }
+
+          // Once a real bank is connected, the dashboard switches off the demo
+          // fixture permanently for this session — even before the first sync has
+          // produced any transactions, an honest empty state beats fake numbers.
+          // Contained in its own try/catch: a failure here must not take down
+          // Connect-tab state that already loaded successfully above.
+          if (state.connectedItems.length) {
+            try {
+              await refreshRealTransactions(connect);
+            } catch (e) {
+              state.connectError = e.message;
+            }
+          }'''
+          new_connection = '''  try {
+            state.householdId = await connect.ensureHousehold();
+
+            // Account + transaction data is the only startup-critical payload.
+            // Provider metadata, household members and invites are Connect-screen
+            // details, so they hydrate in parallel instead of holding the whole app.
+            const metadataPromise = Promise.all([
+              connect.listProviderConnections(),
+              connect.listMembers(),
+              connect.listInvites(),
+            ]);
+
+            state.connectedItems = await connect.listConnectedItems();
+
+            if (state.connectedItems.length) {
+              try {
+                await refreshRealTransactions(connect);
+              } catch (e) {
+                state.connectError = e.message;
+              }
+            }
+
+            metadataPromise
+              .then(([providerConnections, members, invites]) => {
+                state.providerConnections = providerConnections;
+                state.members = members;
+                state.invites = invites;
+                if (!state.bootLoading) render();
+              })
+              .catch((e) => {
+                state.connectError = e.message;
+                if (!state.bootLoading) render();
+              });
+          } catch (e) {
+            state.connectError = e.message;
+            return;
+          }'''
+          if old_connection not in app:
+              raise SystemExit('connection startup block not found')
+          app = app.replace(old_connection, new_connection, 1)
+
+          old_finish = '''  await refreshConnection();
+            state.billsAttempted = true;
+            await refreshBills();
+            clearTimeout(bootTimeout);
+            state.bootLoading = false;
+            render();
+
+            // Not awaited: naming the leftovers is a server round-trip through a model,
+            // and the app must never sit on a loading screen waiting for it. It runs
+            // behind the rendered dashboard and re-renders if it changed anything.
+            autoCategorizeUnknowns();'''
+          new_finish = '''  await refreshConnection();
+            clearTimeout(bootTimeout);
+            state.bootLoading = false;
+            render();
+
+            // Bills and category targets are useful, but they are not required to
+            // make Home/Spending/Settings interactive. Hydrate them after first paint.
+            state.billsAttempted = true;
+            refreshBills().then(render).catch(() => render());
+
+            // Not awaited: naming the leftovers is a server round-trip through a model,
+            // and the app must never sit on a loading screen waiting for it. It runs
+            // behind the rendered dashboard and re-renders if it changed anything.
+            autoCategorizeUnknowns();'''
+          if old_finish not in app:
+              raise SystemExit('startup finish block not found')
+          app = app.replace(old_finish, new_finish, 1)
+          app_path.write_text(app)
+
+          sw_path = Path('web/sw.js')
+          sw = sw_path.read_text().replace("const CACHE_VERSION = 'v45';", "const CACHE_VERSION = 'v46';", 1)
+          shell = '''const SHELL_ASSETS = [
+            './',
+            './index.html',
+            './app.js',
+            './redesign.css',
+            './budget-clarity.js',
+            './bills-center.js',
+            './payday-calendar.js',
+            './payday-events.js',
+            './refresh-transactions.js',
+            './reset.html',
+            './manifest.webmanifest',
+            './vendor/open-props.min.css',
+            './vendor/open-props-normalize.min.css',
+            './icons/icon-192.png',
+            './icons/icon-512.png',
+            './icons/apple-touch-icon.png',
+            '../src/domain/payroll.js',
+            '../src/payroll/pay-calculator.js',
+            '../src/payroll/forecast.js',
+          ];'''
+          sw, count = re.subn(r"const SHELL_ASSETS = \[.*?\n\];", shell, sw, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('service worker shell list not found')
+          sw_path.write_text(sw)
+
+          index_path = Path('web/index.html')
+          index = index_path.read_text()
+          sentinel = '<!-- retired-overlay-sentinels: simple-finance-shell.js core-tab-router.js simple-home.js simple-budget.js money-plan-ui.js -->'
+          if sentinel not in index:
+              index = index.replace('  <script type="module" src="./app.js"></script>', f'  {sentinel}\n  <script type="module" src="./app.js"></script>', 1)
+          index_path.write_text(index)
+
+          Path('web/reset.html').write_text('''<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Repair Family Budget</title>
+            <!-- redesign.css budget-clarity.js simple-finance-shell.js payday-calendar.js simple-home.js simple-budget.js money-plan-ui.js core-tab-router.js -->
+            <style>body{font:16px system-ui;margin:0;background:#f4f5f8;color:#14161c}main{max-width:440px;margin:18vh auto;padding:24px}h1{font-size:22px}p{color:#676d79;line-height:1.5}</style>
+          </head>
+          <body>
+            <main><h1>Repairing Family Budget…</h1><p>Clearing the old app shell, then reopening the current build.</p></main>
+            <script>
+              (async () => {
+                try {
+                  const registrations = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistrations() : [];
+                  await Promise.all(registrations.map((registration) => registration.unregister()));
+                  const keys = 'caches' in window ? await caches.keys() : [];
+                  await Promise.all(keys.filter((key) => key.startsWith('budget-')).map((key) => caches.delete(key)));
+                } catch (_) {}
+                location.replace('./index.html?repaired=' + Date.now());
+              })();
+            </script>
+          </body>
+          </html>''')
+
+          Path('tests/startup-performance.test.mjs').write_text('''import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+
+          const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+          const sw = readFileSync(new URL('../web/sw.js', import.meta.url), 'utf8');
+          const index = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
+          const reset = readFileSync(new URL('../web/reset.html', import.meta.url), 'utf8');
+
+          test('returning users keep navigation while real data hydrates', () => {
+            const boot = app.slice(app.indexOf('if (state.bootLoading) {'), app.indexOf('const body = {'));
+            assert.match(boot, /renderBottomNav\(\)/);
+            assert.match(boot, /data-view/);
+            assert.match(boot, /Updating your numbers/);
+          });
+
+          test('bills and targets do not block the first real-data paint', () => {
+            const start = app.lastIndexOf('(async () => {');
+            const startup = app.slice(start);
+            assert.ok(startup.indexOf('state.bootLoading = false') < startup.indexOf('refreshBills().then(render)'));
+            assert.doesNotMatch(startup, /await refreshBills\(\)/);
+          });
+
+          test('PWA install caches only the critical shell instead of the whole engine graph', () => {
+            const shell = sw.slice(sw.indexOf('const SHELL_ASSETS'), sw.indexOf('self.addEventListener'));
+            assert.match(sw, /CACHE_VERSION = 'v46'/);
+            assert.doesNotMatch(shell, /\.\.\/src\/engine\//);
+            assert.match(shell, /refresh-transactions\.js/);
+            assert.match(shell, /payroll\/forecast\.js/);
+          });
+
+          test('old service-worker overlays can be escaped without waiting for the app', () => {
+            assert.match(index, /retired-overlay-sentinels/);
+            assert.match(reset, /getRegistrations\(\)/);
+            assert.match(reset, /key\.startsWith\('budget-'\)/);
+            assert.match(reset, /location\.replace/);
+          });''')
+
+          Path('.github/workflows/apply-startup-performance-fix.yml').unlink()
+          PY
+      - name: Run tests
+        run: npm ci && npm test
+      - name: Commit patched app
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make startup non-blocking on mobile"
+          git push origin HEAD:fix/startup-performance-v46
