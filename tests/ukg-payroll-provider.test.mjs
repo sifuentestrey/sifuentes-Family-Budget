@@ -87,3 +87,66 @@ test('uses runtime session cookie and remains read-only', async () => {
   assert.equal(calls.at(-1).headers.cookie, 'UKG_SESSION=runtime-only');
   assert.equal(calls.every((call) => call.method === 'GET'), true);
 });
+
+test('scopes the runtime cookie lookup to the exact provider URL', async () => {
+  const requestedUrls = [];
+  const provider = createUkgPayrollProvider({
+    baseUrl: 'https://texashealth-ss3.prd.mykronos.com',
+    endpoints: { timecard: '/timecard', paystubs: '/paystubs' },
+    sessionStore: {
+      get: ({ url }) => {
+        requestedUrls.push(url);
+        return 'UKG_SESSION=runtime-only';
+      },
+    },
+    transport: { request: async () => ({ data: [] }) },
+  });
+
+  await provider.getTimecard({ start: '2026-08-01', end: '2026-08-14' });
+  assert.deepEqual(requestedUrls, ['https://texashealth-ss3.prd.mykronos.com/timecard']);
+});
+
+test('accepts caller-supplied read-only parsers for tenant-specific payloads', async () => {
+  const provider = createUkgPayrollProvider({
+    baseUrl: 'https://tenant.example',
+    endpoints: { timecard: '/timecard', paystubs: '/paystubs' },
+    sessionStore: { get: () => 'SESSION=runtime-only' },
+    transport: { request: async ({ url }) => ({ data: url.endsWith('/paystubs') ? '<html>paystub</html>' : '<html>timecard</html>' }) },
+    parsers: {
+      timecard: () => ({ entries: [{ workDate: '2026-08-15', regularHours: 10 }] }),
+      paystubs: () => ({ statements: [{ payDate: '2026-08-21', periodStart: '2026-08-02', periodEnd: '2026-08-15', grossPay: 3000, netPay: 2200 }] }),
+    },
+  });
+
+  assert.equal((await provider.getTimecard({}))[0].regularHours, 10);
+  assert.equal((await provider.getPaystubs())[0].netPay, 2200);
+});
+
+test('normalizes earning lines and forecast metadata from paystubs', () => {
+  const stub = normalizePaystub({
+    statementId: 'advice-123',
+    payDate: '2026-08-14',
+    periodStart: '2026-07-26',
+    periodEnd: '2026-08-08',
+    grossPay: 4453.07,
+    netPay: 2900.15,
+    payRate: 53.57,
+    ptoBalance: 30.22,
+    ytdGross: 88462.22,
+    earningLines: [
+      { description: 'Regular', hours: 77.75, amount: 4165.07 },
+      { description: 'On Call', hours: 36, amount: 288 },
+      { description: 'Overtime', hours: 0, amount: 0 },
+    ],
+  });
+
+  assert.equal(stub.regularHours, 77.75);
+  assert.equal(stub.overtimeHours, 0);
+  assert.deepEqual(stub.earnings, { Regular: 4165.07, 'On Call': 288, Overtime: 0 });
+  assert.deepEqual(stub.metadata, {
+    statementId: 'advice-123',
+    payRate: 53.57,
+    ptoBalance: 30.22,
+    ytdGross: 88462.22,
+  });
+});
