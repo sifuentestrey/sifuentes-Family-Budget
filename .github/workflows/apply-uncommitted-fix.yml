@@ -1,0 +1,53 @@
+name: Apply uncommitted calculation fix
+
+on:
+  push:
+    branches: [fix/uncommitted-calculation]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'Fix uncommitted money calculation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/uncommitted-calculation
+          fetch-depth: 0
+      - name: Patch calculation and labels
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app_path = Path('web/app.js')
+          app = app_path.read_text()
+          old = '''  // Emergency buffer: 3 months of necessary spending.\n  const bufferTarget = (state.picture?.monthly?.necessary ?? 0) * 3;\n  const bufferBalance = 0;'''
+          new = '''  // Emergency savings is a separate planning goal, not money that must be\n  // rebuilt out of the cash on hand before every payday. The until-payday\n  // number answers only what is already committed or reasonably expected\n  // before the next check.\n  const bufferTarget = 0;\n  const bufferBalance = 0;'''
+          if old not in app:
+              raise SystemExit('emergency buffer block not found')
+          app = app.replace(old, new, 1)
+          app = app.replace('Free to spend until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString', 'Uncommitted until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString', 1)
+          app = app.replace('<span class="kv-label">Free to spend</span>', '<span class="kv-label">Uncommitted</span>', 1)
+          app_path.write_text(app)
+
+          sw_path = Path('web/sw.js')
+          sw = sw_path.read_text()
+          if "const CACHE_VERSION = 'v46';" not in sw:
+              raise SystemExit('expected v46 cache not found')
+          sw_path.write_text(sw.replace("const CACHE_VERSION = 'v46';", "const CACHE_VERSION = 'v47';", 1))
+
+          Path('tests/uncommitted-calculation.test.mjs').write_text('''import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { readFileSync } from 'node:fs';\n\nconst app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');\nconst sw = readFileSync(new URL('../web/sw.js', import.meta.url), 'utf8');\n\ntest('until-payday money does not deduct an unfunded three-month emergency goal', () => {\n  const start = app.indexOf('function gatherSafeToSpendInputs()');\n  const end = app.indexOf('function buildPlan()', start);\n  const gather = app.slice(start, end);\n  assert.match(gather, /const bufferTarget = 0;/);\n  assert.doesNotMatch(gather, /monthly\\?\\.necessary.*\\* 3/);\n});\n\ntest('household UI calls the result uncommitted rather than safe/free to spend', () => {\n  assert.match(app, /Uncommitted until/);\n  assert.match(app, />Uncommitted<\\/span>/);\n});\n\ntest('installed app receives the corrected calculation', () => {\n  assert.match(sw, /CACHE_VERSION = 'v47'/);\n});\n''')
+
+          Path('.github/workflows/apply-uncommitted-fix.yml').unlink()
+          PY
+      - name: Run tests
+        run: npm ci && npm test
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix uncommitted money calculation"
+          git push origin HEAD:fix/uncommitted-calculation
