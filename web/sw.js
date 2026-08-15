@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v45';
+const CACHE_VERSION = 'v46';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -29,45 +29,16 @@ const SHELL_ASSETS = [
   './payday-calendar.js',
   './payday-events.js',
   './refresh-transactions.js',
+  './reset.html',
   './manifest.webmanifest',
   './vendor/open-props.min.css',
   './vendor/open-props-normalize.min.css',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
-  '../src/engine/normalize.js',
-  '../src/engine/us-cities.js',
-  '../src/engine/seed-rules.js',
-  '../src/engine/categorize.js',
-  '../src/engine/cadence.js',
-  '../src/engine/recurring.js',
-  '../src/engine/transfers.js',
-  '../src/engine/income.js',
-  '../src/engine/variable-income.js',
-  '../src/engine/expenses.js',
-  '../src/engine/allocate.js',
-  '../src/engine/guidance.js',
-  '../src/engine/child-transition.js',
-  '../src/engine/subscriptions.js',
-  '../src/engine/reliable-subscriptions.js',
-  '../src/engine/forecast.js',
-  '../src/engine/alerts.js',
-  '../src/engine/bill-center.js',
   '../src/domain/payroll.js',
   '../src/payroll/pay-calculator.js',
   '../src/payroll/forecast.js',
-  '../src/domain/bill.js',
-  '../src/engine/budget/safe-to-spend.js',
-  '../src/engine/budget/monthly-budget.js',
-  '../src/engine/month-in-full.js',
-  '../src/engine/split.js',
-  '../src/engine/year-in-review.js',
-  '../src/engine/bill-paycheck-plan.js',
-  '../src/engine/bill-suggestions.js',
-  '../src/engine/similar-payee.js',
-  '../src/engine/merchant-domain.js',
-  '../src/domain/provider-match.js',
-  '../src/domain/bill-payment-match.js',
 ];
 
 self.addEventListener('install', (event) => {

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Repair Family Budget</title>
+  <!-- redesign.css budget-clarity.js simple-finance-shell.js payday-calendar.js simple-home.js simple-budget.js money-plan-ui.js core-tab-router.js -->
+  <style>body{font:16px system-ui;margin:0;background:#f4f5f8;color:#14161c}main{max-width:440px;margin:18vh auto;padding:24px}h1{font-size:22px}p{color:#676d79;line-height:1.5}</style>
+</head>
+<body>
+  <main><h1>Repairing Family Budget…</h1><p>Clearing the old app shell, then reopening the current build.</p></main>
+  <script>
+    (async () => {
+      try {
+        const registrations = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistrations() : [];
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+        const keys = 'caches' in window ? await caches.keys() : [];
+        await Promise.all(keys.filter((key) => key.startsWith('budget-')).map((key) => caches.delete(key)));
+      } catch (_) {}
+      location.replace('./index.html?repaired=' + Date.now());
+    })();
+  </script>
+</body>
+</html>
