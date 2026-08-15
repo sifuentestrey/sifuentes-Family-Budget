@@ -580,23 +580,19 @@ async function refreshConnection() {
     return;
   }
   try {
-    state.householdId = await connect.ensureHousehold();
-    [state.connectedItems, state.providerConnections, state.members, state.invites] = await Promise.all([
-      connect.listConnectedItems(),
-      connect.listProviderConnections(),
-      connect.listMembers(),
-      connect.listInvites(),
-    ]);
-  } catch (e) {
-    state.connectError = e.message;
-    return;
-  }
+  state.householdId = await connect.ensureHousehold();
 
-  // Once a real bank is connected, the dashboard switches off the demo
-  // fixture permanently for this session — even before the first sync has
-  // produced any transactions, an honest empty state beats fake numbers.
-  // Contained in its own try/catch: a failure here must not take down
-  // Connect-tab state that already loaded successfully above.
+  // Account + transaction data is the only startup-critical payload.
+  // Provider metadata, household members and invites are Connect-screen
+  // details, so they hydrate in parallel instead of holding the whole app.
+  const metadataPromise = Promise.all([
+    connect.listProviderConnections(),
+    connect.listMembers(),
+    connect.listInvites(),
+  ]);
+
+  state.connectedItems = await connect.listConnectedItems();
+
   if (state.connectedItems.length) {
     try {
       await refreshRealTransactions(connect);
@@ -604,6 +600,22 @@ async function refreshConnection() {
       state.connectError = e.message;
     }
   }
+
+  metadataPromise
+    .then(([providerConnections, members, invites]) => {
+      state.providerConnections = providerConnections;
+      state.members = members;
+      state.invites = invites;
+      if (!state.bootLoading) render();
+    })
+    .catch((e) => {
+      state.connectError = e.message;
+      if (!state.bootLoading) render();
+    });
+} catch (e) {
+  state.connectError = e.message;
+  return;
+}
 }
 
 /**
@@ -3562,12 +3574,25 @@ function render() {
   const app = document.getElementById('app');
 
   if (state.bootLoading) {
-    app.innerHTML = `
-      <header class="app-bar"><div class="app-bar-text"><div class="app-bar-title">Family Budget</div></div></header>
-      <div class="loading">Loading your numbers…</div>
-    `;
-    return;
-  }
+  app.innerHTML = `
+    ${renderAppBar()}
+    <main>
+      <div class="loading">
+        Updating your numbers…
+        <div class="prose-sm" style="margin-top:8px;">You can move around while the bank connection finishes.</div>
+      </div>
+    </main>
+    ${renderBottomNav()}
+  `;
+  app.querySelectorAll('[data-view]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      state.view = btn.dataset.view;
+      if (state.view !== 'transactions') state.transactionFilter = null;
+      render();
+    }),
+  );
+  return;
+}
 
   const body = {
     dashboard: renderDashboard,
@@ -4611,11 +4636,14 @@ load().then(render).catch((e) => {
   }, 6000);
 
   await refreshConnection();
-  state.billsAttempted = true;
-  await refreshBills();
-  clearTimeout(bootTimeout);
-  state.bootLoading = false;
-  render();
+    clearTimeout(bootTimeout);
+    state.bootLoading = false;
+    render();
+
+    // Bills and category targets are useful, but they are not required to
+    // make Home/Spending/Settings interactive. Hydrate them after first paint.
+    state.billsAttempted = true;
+    refreshBills().then(render).catch(() => render());
 
   // Not awaited: naming the leftovers is a server round-trip through a model,
   // and the app must never sit on a loading screen waiting for it. It runs
