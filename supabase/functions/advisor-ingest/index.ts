@@ -35,7 +35,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
-  const configured = Deno.env.get('ADVISOR_INGEST_SECRET')?.trim();
+  const admin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+  const { data: vaultSecret } = await admin.rpc('read_vault_secret', { secret_name: 'advisor_ingest_secret' });
+  const configured = (Deno.env.get('ADVISOR_INGEST_SECRET') ?? vaultSecret)?.trim();
   const presented = req.headers.get('Authorization') ?? '';
   if (!configured || !sameSecret(presented, `Bearer ${configured}`)) {
     return json({ error: 'unauthorized' }, 401);
@@ -59,11 +64,6 @@ Deno.serve(async (req) => {
     if (recommendations.length > 100) {
       return json({ error: 'bad_request', message: 'maximum 100 recommendations per delivery' }, 400);
     }
-
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
 
     const { data: household, error: householdError } = await admin
       .from('households').select('id').eq('id', householdId).maybeSingle();
