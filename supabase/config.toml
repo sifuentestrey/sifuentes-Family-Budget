@@ -56,6 +56,11 @@ verify_jwt = true
 [functions.advisor-daily]
 verify_jwt = false
 
+# External ChatGPT Finance delivery uses a dedicated shared secret, checked by
+# advisor-ingest itself. Supabase's JWT gate is therefore intentionally off.
+[functions.advisor-ingest]
+verify_jwt = false
+
 # Called directly by a signed-in household member from the "Add a bill" form,
 # same reasoning as advisor-note above.
 [functions.parse-bill-text]
