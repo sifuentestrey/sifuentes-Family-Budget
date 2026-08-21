@@ -61,6 +61,11 @@ verify_jwt = false
 [functions.advisor-ingest]
 verify_jwt = false
 
+# ChatGPT Finance fetches app-only context using the same dedicated advisor
+# secret as advisor-ingest. The function performs its own constant-time check.
+[functions.finance-context]
+verify_jwt = false
+
 # Called directly by a signed-in household member from the "Add a bill" form,
 # same reasoning as advisor-note above.
 [functions.parse-bill-text]
