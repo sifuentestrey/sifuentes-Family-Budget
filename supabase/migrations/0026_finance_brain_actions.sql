@@ -24,6 +24,8 @@ create table if not exists public.finance_brain_actions (
 
 alter table public.finance_brain_actions enable row level security;
 
+grant select on table public.finance_brain_actions to authenticated;
+
 create policy "household members can read finance brain actions"
 on public.finance_brain_actions for select
 to authenticated
