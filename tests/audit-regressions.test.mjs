@@ -31,6 +31,8 @@ test('account roster and balances refresh before transaction deltas are mapped',
   assert.match(syncTransactions, /accounts\/get/);
   assert.match(syncTransactions, /current_balance:/);
   assert.match(syncTransactions, /available_balance:/);
+  assert.match(syncTransactions, /owner_user_id:\s*item\.owner_user_id \?\? null/,
+    'accounts discovered after Link must inherit their Plaid Item owner');
   assert.match(syncTransactions, /const accountMap = await refreshAccounts/);
   assert.match(syncTransactions, /unknownAccountIds/);
   assert.match(syncTransactions, /Do not advance the Plaid cursor/);
