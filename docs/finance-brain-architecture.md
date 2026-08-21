@@ -62,10 +62,44 @@ may omit it.
 
 ## Return bridge
 
-`advisor-ingest` remains the return path from Finances to the app. Finance
+`advisor-ingest` is the return path from Finances to the app. Finance
 recommendations are stored idempotently by `(household_id, recommendation_id)`.
-Recommendations should be structured enough for the app to display, review, or
-later execute deterministically.
+
+Recommendations may include `app_changes`, but automatic application is a strict
+whitelist rather than arbitrary model-driven writes.
+
+Supported operations:
+
+- `set_transaction_transfer` — may automatically promote an exact Plaid
+  transaction to a transfer and clear its income flag.
+- `set_transaction_category` — may assign an exact Plaid transaction to an
+  existing household category.
+
+Automatic application requires all of the following:
+
+1. The recommendation itself uses `action: apply`.
+2. The action identifies an exact `plaid_transaction_id`.
+3. Confidence is at least 0.92.
+4. The operation is on the whitelist above.
+5. A category change does not override `manually_categorized = true`.
+6. Transfer auto-application only promotes to transfer; unmarking an existing
+   transfer goes to review because it could break a valid pair.
+
+Every attempted action is recorded in `finance_brain_actions` with before/after
+state, confidence, outcome, and any error. This is the audit trail for changes
+that can affect displayed spending/income totals.
+
+The application layer must never use a Finance recommendation to move money,
+make a payment, initiate an investment transaction, delete transaction history,
+or perform another real-world financial action.
+
+## Why these changes affect existing app numbers
+
+The existing app calculations already exclude rows where `is_transfer = true`
+and already aggregate by the transaction's `category_id`. Therefore a safe
+Finance correction to those fields immediately feeds the current deterministic
+budget math after the app reloads transaction data. No second parallel Finance
+calculation engine is required.
 
 ## Usage policy
 
