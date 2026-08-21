@@ -2808,6 +2808,11 @@ function renderConnect() {
     (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
   );
   const gmailStatusLabel = { connected: 'connected', needs_reauth: 'needs reconnect', error: 'error' };
+  const memberName = (ownerUserId) => {
+    if (!ownerUserId) return 'Shared household source';
+    if (ownerUserId === state.session.user.id) return 'Connected by you';
+    return `Connected by ${state.members.find((m) => m.user_id === ownerUserId)?.display_name ?? 'household member'}`;
+  };
 
   return `
     ${state.connectError ? `<div class="banner banner-warn"><div class="banner-body">${state.connectError}</div></div>` : ''}
@@ -2828,7 +2833,7 @@ function renderConnect() {
             chips: `<span class="chip ${item.status === 'good' ? 'chip-ok' : 'chip-warn'}">${item.status}</span>`,
             sub: (item.accounts?.length
               ? item.accounts.map((a) => `${a.nickname} ····${a.mask ?? ''}`).join(' · ')
-              : 'No accounts yet'),
+              : 'No accounts yet') + ` · ${memberName(item.owner_user_id)}`,
           })).join('')}
         </div>
         <button data-action="connect-bank" class="btn btn-secondary btn-block" style="margin-top:8px;" ${state.connectBusy ? 'disabled' : ''}>
@@ -2850,7 +2855,8 @@ function renderConnect() {
             sub: (gmail.last_synced_at
               ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}`
               : 'Not scanned yet — runs on the next daily sync')
-              + (gmail.status_detail ? ` · ${gmail.status_detail}` : ''),
+              + (gmail.status_detail ? ` · ${gmail.status_detail}` : '')
+              + ` · ${memberName(gmail.owner_user_id)}`,
             actions: `
               <button data-action="disconnect-gmail" data-id="${gmail.id}" class="btn btn-sm btn-outline" ${state.gmailBusy ? 'disabled' : ''}>
                 ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}

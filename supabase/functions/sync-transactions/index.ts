@@ -130,6 +130,11 @@ async function refreshAccounts(supabase: any, item: any, accessToken: string) {
 
   const rows = (body.accounts ?? []).map((account: any) => ({
     household_id: item.household_id,
+    // Accounts discovered after the initial Link flow still belong to the
+    // member who owns the Plaid Item. Without this, later-discovered accounts
+    // become falsely "household-owned" and member labels/transfer matching
+    // lose an important signal.
+    owner_user_id: item.owner_user_id ?? null,
     item_id: item.id,
     plaid_account_id: account.account_id,
     nickname: account.name ?? account.official_name ?? 'Account',
