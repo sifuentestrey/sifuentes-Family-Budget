@@ -64,7 +64,7 @@ export async function ensureHousehold() {
 export async function listProviderConnections() {
   const { data, error } = await supabase
     .from('provider_connections')
-    .select('id, provider_key, display_name, kind, is_live, status, status_detail, connected_at, last_synced_at')
+    .select('id, owner_user_id, provider_key, display_name, kind, is_live, status, status_detail, connected_at, last_synced_at')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data ?? [];
@@ -122,7 +122,7 @@ export async function disconnectGmail(id) {
 export async function listConnectedItems() {
   const { data, error } = await supabase
     .from('items')
-    .select('id, institution_name, status, status_detail, updated_at, accounts(id, nickname, mask, type, current_balance)')
+    .select('id, owner_user_id, institution_name, status, status_detail, updated_at, accounts(id, owner_user_id, nickname, mask, type, current_balance)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data ?? [];
