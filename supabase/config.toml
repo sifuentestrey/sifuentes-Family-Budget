@@ -65,3 +65,9 @@ verify_jwt = false
 # same reasoning as advisor-note above.
 [functions.parse-bill-text]
 verify_jwt = true
+
+# Hermes runs outside Supabase and presents a dedicated Vault-held bearer token.
+# hermes-ingest performs its own constant-time authentication and only accepts
+# normalized bills, payroll time entries, and paystubs.
+[functions.hermes-ingest]
+verify_jwt = false
