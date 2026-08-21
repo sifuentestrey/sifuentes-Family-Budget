@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 46768)
-Total output lines: 4661
-
 /**
  * Family Budget web app.
  *
@@ -1533,7 +1530,1548 @@ function renderDashboard() {
     </div>
 
     ${safeToSpendResult ? `
-      <div class="card" style="margin-to…16768 tokens truncated…Hours}h worked` : '',
+      <div class="card" style="margin-top:12px;">
+        <div class="card-head">
+          <span class="card-title">Uncommitted until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
+          <span class="row-amount ${safeToSpendResult.status === 'negative' ? 'negative' : ''}">
+            ${moneyExact(safeToSpendResult.safeToSpend)}
+          </span>
+        </div>
+        <div class="prose-sm" style="margin-top:6px;">
+          What's in checking, plus the pay landing before then, less the bills
+          due and the groceries and gas you'll need in between. Savings is left
+          out of it on purpose.
+        </div>
+      </div>
+
+      <details class="fold">
+        <summary>Where this number comes from</summary>
+        <div class="fold-body">
+          <div class="kv">
+            <div class="kv-row">
+              <span class="kv-label">What you have, plus the pay coming</span>
+              <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
+            </div>
+            ${safeToSpendResult.deductions.map((d) => `
+              <div class="kv-row">
+                <span class="kv-label">${d.label}</span>
+                <span>−${moneyExact(d.amount)}</span>
+              </div>
+            `).join('')}
+            <div class="kv-row total">
+              <span class="kv-label">Uncommitted</span>
+              <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
+            </div>
+          </div>
+          ${safeToSpendResult.warnings.length ? `
+            <div class="note" style="margin-top:8px;">
+              <strong>Worth knowing:</strong>
+              <ul>${safeToSpendResult.warnings.map((w) => `<li>${w}</li>`).join('')}</ul>
+            </div>` : ''}
+        </div>
+      </details>
+    ` : ''}
+
+    ${renderUpcoming()}
+
+    ${section('This month', `
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-label">Income</div>
+          <div class="stat-value positive">${money(income.total)}</div>
+          <div class="stat-note">${income.detail.map((d) => `${d.paychecks} checks`).join(' + ')}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Spent</div>
+          <div class="stat-value">${money(total)}</div>
+          <div class="stat-note">${txns.length} transactions</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Left over</div>
+          <div class="stat-value ${net < 0 ? 'negative' : 'positive'}">${money(net)}</div>
+          <div class="stat-note">${net < 0 ? 'overspending' : 'saved'}</div>
+        </div>
+      </div>
+
+      ${income.detail.some((d) => d.paychecks === 3) ? `
+        <div class="banner banner-good" style="margin:10px 0 0;">
+          <div class="banner-body">
+            <strong>Three-paycheck month.</strong>
+            ${income.detail.find((d) => d.paychecks === 3).payee} pays every two weeks, so
+            there's an extra check — about
+            ${money(state.streams.find((s) => s.cadence === 'biweekly')?.typical_amount || 0)}
+            more than a normal month. Good month to put some aside for the once-a-year bills.
+          </div>
+        </div>` : ''}
+    `)}
+
+    ${section('Where it went', `
+      <div class="list tight">
+        ${renderCategoryRows(categories.slice(0, CATEGORY_LIST_LIMIT), max)}
+      </div>
+      ${transferTotal > 0 ? `
+        <div class="note" style="margin-top:10px;">
+          <strong>${moneyExact(transferTotal)} in transfers excluded.</strong>
+          Card payments and money moved to savings aren't spending — that spending
+          already counted when each purchase was made.
+        </div>` : ''}
+    `, {
+      action: '<button class="section-action" data-view="spending">See all</button>',
+    })}
+
+    ${reviewCount ? section('Needs a decision', `
+      <div class="list">
+        ${row({
+          iconName: 'inbox',
+          title: `${reviewCount} transaction${reviewCount === 1 ? '' : 's'} to categorize`,
+          sub: 'Setting one teaches that payee permanently',
+          chevron: true, tag: 'button', attrs: 'data-view="review"',
+        })}
+      </div>
+    `) : ''}
+  `;
+}
+
+/**
+ * "It's just you in here."
+ *
+ * The app is built end to end for two people — one household, shared budget
+ * targets, a plan both can see — and none of that does anything while there
+ * is one member. The invite form has always existed, three taps deep under
+ * Accounts & sync, which is not where anybody looks for it. So the app says
+ * so once, on the screen they actually open, and stops as soon as an invite
+ * is out.
+ */
+function renderHouseholdPrompt() {
+  if (!state.session) return '';
+  if (state.members.length !== 1) return '';
+  if (state.invites.length) return '';
+  if (localStorage.getItem('householdPromptDismissed') === '1') return '';
+
+  return `
+    <div class="banner banner-good">
+      <div class="banner-body">
+        <strong>It's just you in here.</strong>
+        Budget targets, bills and the plan are shared across the household —
+        invite the other half of it and you'll both see the same numbers.
+      </div>
+      <span style="display:flex;gap:12px;flex-shrink:0;">
+        <button class="linkbtn" data-view="connect">Invite</button>
+        <button class="linkbtn quiet" data-action="dismiss-household-prompt">Not now</button>
+      </span>
+    </div>
+  `;
+}
+
+/**
+ * What's due before the household's next paycheck.
+ *
+ * Home's job is the one question the whole app exists for — how much can we
+ * safely spend — and the answer is meaningless without the obligations that
+ * are about to eat into it. Previously bills lived only on their own tab, so
+ * the dashboard's headline number was the only thing on screen and nothing
+ * explained what was pressing against it.
+ */
+function renderUpcoming() {
+  const upcoming = [...state.bills]
+    .filter((b) => b.status !== 'paid' && b.status !== 'ignored')
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, 4);
+
+  if (!upcoming.length) return '';
+
+  const total = upcoming.reduce((s, b) => s + b.amountDue, 0);
+
+  return section('Coming up', `
+    <div class="list">
+      ${upcoming.map((b) => renderBillRow(b)).join('')}
+    </div>
+  `, {
+    sub: `${moneyExact(total)} across the next ${upcoming.length}`,
+    action: '<button class="section-action" data-view="bills">All bills</button>',
+  });
+}
+
+function renderTransactions() {
+  const filter = state.transactionFilter;
+  const txns = state.transactions
+    .filter((t) => monthKey(t.posted_date) === state.month && !t.pending)
+    .filter((t) => !filter || (t.category || 'Uncategorized') === filter)
+    .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
+
+  const reviewCount = uncategorizedCount();
+
+  return `
+    ${segmented(SPENDING_TABS)}
+    ${renderMonthPicker()}
+
+    ${reviewCount ? `
+      <div class="banner">
+        <div class="banner-body">
+          <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
+          Setting one teaches that payee permanently.
+        </div>
+        <button class="linkbtn" data-view="review">Review</button>
+      </div>` : ''}
+
+    ${filter ? `
+      <div class="banner">
+        <div class="banner-body">Showing <strong>${escapeHtml(filter)}</strong> only.</div>
+        <button class="linkbtn" data-action="clear-txn-filter">Show all</button>
+      </div>` : ''}
+
+    <label class="field" style="margin-bottom:12px;">
+      <input class="input" id="search" placeholder="Search transactions…" autocomplete="off" />
+    </label>
+
+    ${txns.length ? `
+      <div class="list tight" id="txn-list">${txns.map(renderTransactionRow).join('')}</div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'No transactions this month',
+      body: 'Nothing has posted for this period yet.',
+    })}
+  `;
+}
+
+/**
+ * Where a category came from, in words rather than in the layer's internal
+ * name. "PLAID_PFC" on a grocery run told the household nothing except that
+ * the app has internals.
+ */
+const CATEGORY_SOURCE_LABEL = {
+  learned: 'you set this',
+  rule: 'by name',
+  plaid_pfc: 'from your bank',
+  similar: 'same as a lookalike',
+  llm: 'looked up',
+};
+
+function renderTransactionRow(t) {
+  const kind = t.is_transfer ? 'transfer' : t.is_income ? 'income' : null;
+  const date = new Date(`${t.posted_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const editing = state.editingCategory === t.plaid_transaction_id;
+
+  // The category is text until it's tapped. It used to be a <select> on every
+  // single row, which put a 34px control on a line that otherwise needs 40 —
+  // nearly doubling the height of every transaction in the app to offer a
+  // control almost nobody uses on almost any row.
+  const category = kind
+    ? `<span class="chip ${kind === 'income' ? 'chip-ok' : ''}">${kind}</span>`
+    : `<button class="cat-pill ${t.category ? '' : 'unset'}" data-edit-category="${t.plaid_transaction_id}">
+        ${t.category ? escapeHtml(t.category) : 'Add category'}
+      </button>`;
+
+  const rowId = t.plaid_transaction_id ?? t.id;
+  const parts = splitChildrenOf(t);
+
+  return `
+    <div class="row" data-id="${rowId}"
+      data-search="${escapeHtml((`${t.payee} ${t.category || ''}`).toLowerCase())}">
+      ${avatarFor(t.payee, logoForPayee(t.payee))}
+      <div class="row-body">
+        <div class="row-title">${t.payee}</div>
+        <div class="row-sub">
+          ${date} · ${parts.length ? `<span class="chip">split ${parts.length} ways</span>` : category}
+        </div>
+        ${parts.length ? `
+          <div class="split-parts">
+            ${parts.map((c) => `
+              <span><b>${moneyExact(Math.abs(c.amount))}</b> ${escapeHtml(c.category ?? 'Uncategorized')}</span>
+            `).join('')}
+          </div>` : ''}
+        ${editing ? `<select class="cat-select select-sm" style="margin-top:6px;" data-id="${rowId}">
+          ${categoryOptions(t.category)}
+        </select>` : ''}
+        ${kind || !state.session ? '' : `
+          <div class="row-sub" style="margin-top:5px;">
+            <button class="cat-pill" data-split="${rowId}">
+              ${parts.length ? 'Change the split' : 'Split this'}
+            </button>
+          </div>`}
+        ${state.splitting === rowId ? renderSplitForm(t, parts) : ''}
+      </div>
+      <div class="row-end">
+        <div class="row-amount ${t.amount < 0 ? 'income' : ''}">
+          ${t.amount < 0 ? '+' : ''}${moneyExact(Math.abs(t.amount))}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * What the remainder line says.
+ *
+ * "Adds up" is deliberately withheld while only one part carries an amount:
+ * the sum is right, but saving would be refused, and a green line followed by
+ * a refusal is worse than an amber line that says what's missing.
+ */
+function splitFootState(rows, total) {
+  const filled = rows.filter((r) => (Number(r.amount) || 0) > 0);
+  const assigned = filled.reduce((s, r) => s + Number(r.amount), 0);
+  const left = Math.round((total - assigned) * 100) / 100;
+
+  if (left > 0) return { ok: false, label: `${moneyExact(left)} left to assign` };
+  if (left < 0) return { ok: false, label: `${moneyExact(-left)} too much` };
+  if (filled.length < 2) return { ok: false, label: 'Give a second category some of it' };
+  return { ok: true, label: 'Adds up' };
+}
+
+/** The child rows of a split, if this transaction has been split. */
+function splitChildrenOf(txn) {
+  if (!txn.id) return [];
+  return state.transactions.filter((c) => c.parent_transaction_id === txn.id);
+}
+
+/**
+ * The split editor, inline under the charge it belongs to.
+ *
+ * Opens with the whole amount on one line, because the common move is "most
+ * of this was groceries, and $40 of it wasn't" — starting from the real total
+ * means the household adjusts one number rather than entering two.
+ */
+function renderSplitForm(txn, existing) {
+  const total = Math.abs(txn.amount);
+  const rows = state.splitDraft.length
+    ? state.splitDraft
+    : existing.length
+      ? existing.map((c) => ({ amount: Math.abs(c.amount).toFixed(2), category: c.category ?? '' }))
+      : [{ amount: total.toFixed(2), category: txn.category ?? '' }, { amount: '', category: '' }];
+
+  const state_ = splitFootState(rows, total);
+
+  return `
+    <form class="split-form" data-split-form="${txn.plaid_transaction_id ?? txn.id}"
+      data-total="${total.toFixed(2)}">
+      ${rows.map((r, i) => `
+        <div class="split-row">
+          <input class="input" type="number" step="0.01" min="0" name="amount"
+            value="${escapeHtml(String(r.amount))}" placeholder="0.00" inputmode="decimal" />
+          <select class="select" name="category">${categoryOptions(r.category)}</select>
+          ${rows.length > 2 ? `<button type="button" class="linkbtn quiet" data-split-remove="${i}">Remove</button>` : ''}
+        </div>
+      `).join('')}
+
+      <div class="split-foot">
+        <span class="${state_.ok ? 'ok' : 'off'}">${state_.label}</span>
+        <button type="button" class="linkbtn" data-split-add="1">Add a part</button>
+      </div>
+
+      ${state.splitError ? `<div class="field-hint" style="color:var(--negative);">${escapeHtml(state.splitError)}</div>` : ''}
+
+      <div class="row-actions">
+        <button type="submit" class="btn btn-sm btn-primary" ${state.splitBusy ? 'disabled' : ''}>
+          ${state.splitBusy ? 'Saving…' : 'Save split'}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline" data-split-cancel="1">Cancel</button>
+        ${existing.length ? `
+          <button type="button" class="btn btn-sm btn-danger" data-unsplit="${txn.id}" ${state.splitBusy ? 'disabled' : ''}>
+            Undo split
+          </button>` : ''}
+      </div>
+    </form>
+  `;
+}
+
+function categoryOptions(selected) {
+  const all = [...new Set(state.transactions.map((t) => t.category).filter(Boolean))].sort();
+  return [
+    `<option value="" ${!selected ? 'selected' : ''}>Uncategorized</option>`,
+    ...all.map((c) => `<option value="${c}" ${c === selected ? 'selected' : ''}>${c}</option>`),
+  ].join('');
+}
+
+function renderReview() {
+  const queue = state.transactions.filter(
+    (t) => !t.category && !t.is_transfer && !t.is_income && !t.pending,
+  );
+  const stats = categorizationStats(state.transactions.filter((t) => !t.is_transfer && !t.is_income));
+
+  if (!queue.length) {
+    return `
+      ${segmented(SPENDING_TABS)}
+      ${emptyState({
+        iconName: 'check',
+        title: 'Nothing to review',
+        body: `${stats.coverage}% of your transactions were categorized for you.`,
+        action: '<button class="btn btn-secondary" data-view="transactions">Back to transactions</button>',
+      })}
+    `;
+  }
+
+  return `
+    ${segmented(SPENDING_TABS)}
+    ${section('Still unknown', `
+      ${state.autoCategorizeResult ? `
+        <div class="banner banner-good">
+          <div class="banner-body">${escapeHtml(state.autoCategorizeResult)}</div>
+        </div>` : ''}
+      ${state.autoCategorizeError ? `
+        <div class="banner banner-warn">
+          <div class="banner-body">${escapeHtml(state.autoCategorizeError)}</div>
+        </div>` : ''}
+
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-head">
+          <span class="card-title">These already had a go</span>
+        </div>
+        <div class="prose-sm" style="margin:6px 0 10px;">
+          Categories are found automatically — when the app opens, and again
+          overnight. What's left is what nothing could name with any confidence:
+          an unusual merchant, a Venmo to a person, a description with no name
+          in it. Guessing at these would quietly bend your totals, so they wait
+          for you instead. Set one and that payee is remembered for good, along
+          with anything that looks like it.
+        </div>
+        <button class="btn btn-secondary" data-action="auto-categorize"
+          ${state.autoCategorizing || !state.session ? 'disabled' : ''}>
+          ${state.autoCategorizing ? 'Trying again…' : 'Try these again'}
+        </button>
+        ${!state.session ? '<div class="field-hint">Sign in to use this — it runs against your household\'s own data.</div>' : ''}
+      </div>
+
+      <div class="list tight">${queue.map(renderTransactionRow).join('')}</div>
+
+      <div class="note" style="margin-top:12px;">
+        <strong>${stats.coverage}% got a category without you.</strong>
+        Most charges are decided by the merchant name, by a payee you've
+        corrected once before, or by one that looks like it. What's left is
+        shown rather than guessed at — a wrong category quietly bends your
+        totals, an empty one just asks a question.
+      </div>
+    `, {
+      sub: `${queue.length} nothing could name`,
+    })}
+  `;
+}
+
+/** Shared by every view that is scoped to one month. */
+function renderMonthPicker() {
+  return `
+    <div class="month-picker">
+      <button class="chev-btn" data-month-step="-1" ${state.months.indexOf(state.month) <= 0 ? 'disabled' : ''}>${icon('back', 16)}</button>
+      <div class="month-picker-label">${monthLabel(state.month)}</div>
+      <button class="chev-btn" data-month-step="1" ${state.months.indexOf(state.month) >= state.months.length - 1 ? 'disabled' : ''}>${icon('chevron', 16)}</button>
+    </div>
+  `;
+}
+
+function renderTrends() {
+  const cats = [...new Set(state.months.flatMap((m) => byCategory(spendingIn(m)).map(([c]) => c)))];
+  const rows = cats
+    .map((cat) => ({
+      cat,
+      values: state.months.map((m) =>
+        spendingIn(m).filter((t) => (t.category || 'Uncategorized') === cat)
+          .reduce((s, t) => s + t.amount, 0),
+      ),
+    }))
+    .filter((r) => r.values.some((v) => v > 0))
+    .sort((a, b) => b.values.reduce((x, y) => x + y, 0) - a.values.reduce((x, y) => x + y, 0));
+
+  return `
+    ${segmented(SPENDING_TABS)}
+    ${section('Month by month', `
+      <div class="table">
+        <div class="table-head">
+          <span>Category</span>
+          ${state.months.map((m) => `<span>${monthLabel(m).split(' ')[0].slice(0, 3)}</span>`).join('')}
+          <span>Avg</span>
+        </div>
+        ${rows.map((r) => {
+          // Same rule as the dashboard: average only over months with activity,
+          // and don't call a single month an average.
+          const active = r.values.filter((v) => v > 0);
+          const avg = active.length >= MIN_MONTHS_FOR_AVERAGE
+            ? active.reduce((a, b) => a + b, 0) / active.length
+            : null;
+          return `
+            <div class="table-row">
+              <span class="strong">${r.cat}</span>
+              ${r.values.map((v) => `<span class="${v === 0 ? 'muted' : ''}">${v ? money(v) : '–'}</span>`).join('')}
+              <span class="strong ${avg === null ? 'muted' : ''}">${avg === null ? '–' : money(avg)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `, { sub: 'What to budget for, from what you actually spent' })}
+  `;
+}
+
+function renderIncome() {
+  const [year, month] = state.month.split('-').map(Number);
+  const projection = projectMonthlyIncome(state.streams, year, month);
+
+  const next = [...state.streams]
+    .filter((s) => s.next_expected)
+    .sort((a, b) => a.next_expected.localeCompare(b.next_expected))[0];
+
+  return `
+    ${segmented(INCOME_TABS)}
+
+    ${next ? `
+      <div class="hero hero-sm">
+        <div class="hero-label">Next deposit</div>
+        <div class="hero-value">${moneyExact(next.typical_amount)}</div>
+        <div class="hero-note">
+          ${next.payee} · expected
+          ${new Date(`${next.next_expected}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+        </div>
+      </div>` : ''}
+
+    ${section('Who pays you', `
+      <div class="list">
+        ${state.streams.map((s) => row({
+          avatar: s.payee,
+          logo: logoForPayee(s.payee),
+          title: s.payee,
+          sub: `${s.cadence} · next ${s.next_expected}`,
+          chips: s.distribution?.stability && s.distribution.stability !== 'stable'
+            ? '<span class="chip chip-warn">varies</span>'
+            : '<span class="chip chip-ok">steady</span>',
+          amount: moneyExact(s.typical_amount),
+          amountClass: 'income',
+          amountSub: 'typical',
+        })).join('')}
+      </div>
+    `, { sub: 'Spotted from your deposits — take-home amounts, what actually lands' })}
+
+    ${section(`What lands in ${monthLabel(state.month)}`, `
+      <div class="kv">
+        ${projection.detail.map((d) => `
+          <div class="kv-row">
+            <span class="kv-label">${d.payee} · ${d.paychecks} × ${moneyExact(d.amount / d.paychecks)}</span>
+            <span>${moneyExact(d.amount)}</span>
+          </div>
+        `).join('')}
+        <div class="kv-row total">
+          <span class="kv-label">Total</span>
+          <span>${moneyExact(projection.total)}</span>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:10px;">
+        <strong>Why the total moves month to month.</strong>
+        A biweekly paycheck arrives 26 times a year, so two months out of twelve
+        carry a third check. Planning against a flat "monthly income" figure
+        under-counts those two months and over-counts the other ten.
+      </div>
+    `)}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Paycheck — the answer to "how much do I put away from this check?"
+// ---------------------------------------------------------------------------
+
+function renderPaycheck() {
+  if (!state.allocation) {
+    return `
+      ${segmented(INCOME_TABS)}
+      ${emptyState({
+        iconName: 'income',
+        title: 'Not enough paychecks yet',
+        body: 'This screen tells you what to do with a check when the amount changes every time. It fills in once a few have landed.',
+      })}
+    `;
+  }
+
+  const latest = state.allocation.allocations.at(-1);
+  const isShort = latest.status !== 'surplus';
+
+  return `
+    ${segmented(INCOME_TABS)}
+
+    <div class="hero">
+      <div class="hero-label">${isShort ? 'Short this check' : 'Save from this check'}</div>
+      <div class="hero-value ${isShort ? 'bad' : ''}">
+        ${moneyExact(isShort ? latest.shortfall : latest.surplus)}
+      </div>
+      <div class="hero-note">${latest.message}</div>
+    </div>
+
+    ${section('What to do with this check', `
+      <div class="kv">
+        <div class="kv-row">
+          <span class="kv-label">Check on ${latest.paycheckDate}</span>
+          <span>${moneyExact(latest.paycheckAmount)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Leave in the account for bills</span><span>−${moneyExact(latest.holdForBills)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Save for once-a-year bills</span><span>−${moneyExact(latest.moveToSinking)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Groceries &amp; gas (${latest.daysCovered} days)</span>
+          <span>−${moneyExact(latest.keepForNecessary)}</span>
+        </div>
+        <div class="kv-row total">
+          <span class="kv-label">${isShort ? 'Short by' : 'Left to save'}</span>
+          <span>${moneyExact(isShort ? latest.shortfall : latest.surplus)}</span>
+        </div>
+      </div>
+    `)}
+
+    ${state.extraPaycheckMonths?.length ? `
+      <div class="banner banner-good" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>Three-paycheck month${state.extraPaycheckMonths.length > 1 ? 's' : ''}:
+          ${state.extraPaycheckMonths.map((m) => monthLabel(m.month)).join(', ')}.</strong>
+          Monthly bills are covered by the first two checks, so the third is almost
+          entirely spare. Worth deciding where it goes before it arrives.
+        </div>
+      </div>` : ''}
+
+    ${section('Every check', `
+      <div class="kv">
+        ${state.allocation.allocations.map((a) => `
+          <div class="kv-row">
+            <span class="kv-label">${a.paycheckDate} · ${moneyExact(a.paycheckAmount)}</span>
+            <span class="${a.status === 'surplus' ? '' : 'negative'}">
+              ${a.status === 'surplus' ? moneyExact(a.surplus) : `−${moneyExact(a.shortfall)}`}
+            </span>
+          </div>`).join('')}
+        <div class="kv-row total">
+          <span class="kv-label">Saved in total</span>
+          <span>${moneyExact(state.allocation.netSaved)}</span>
+        </div>
+      </div>
+
+      ${state.allocation.checksNeedingBuffer > 0 ? `
+        <div class="note" style="margin-top:10px;">
+          ${state.allocation.checksNeedingBuffer} of ${state.allocation.allocations.length} checks
+          came up short and were topped up from your cushion savings. That's what the cushion is
+          for. If it keeps happening, the monthly plan is aimed higher than the small checks can
+          reach — nothing is broken, the targets just need to come down.
+        </div>` : ''}
+    `, {
+      sub: 'Every check saves a share of the bills, so no one check gets hit with all of them',
+    })}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Plan — guidance and the child transition
+// ---------------------------------------------------------------------------
+
+function renderPlan() {
+  const g = state.guidance;
+  const child = state.child;
+
+  return `
+    ${section('What to do next', `
+      ${state.structure ? `
+        <div class="note" style="margin-bottom:10px;">
+          <strong>Structure.</strong> ${state.structure.recommendation}
+        </div>` : ''}
+
+      ${g.steps.map((step) => `
+        <div class="card ${step.status === 'done' ? 'done' : ''}">
+          <div class="card-head">
+            <span class="card-title">
+              ${step.status === 'done' ? `<span style="color:var(--positive);">${icon('check', 15)}</span> ` : `${step.priority}. `}${step.title}
+            </span>
+            ${step.amount ? `<span class="row-amount">${money(step.amount)}</span>` : ''}
+          </div>
+          ${step.monthsToGoal ? `<div class="row-sub">~${step.monthsToGoal} months at what you're saving now</div>` : ''}
+          <div class="prose-sm" style="margin-top:8px;">${step.why}</div>
+          ${step.comparison ? renderDebtComparison(step.comparison) : ''}
+        </div>`).join('')}
+    `)}
+
+    ${section('The child, ~2 years out', `
+      <div class="stat-row two">
+        <div class="stat">
+          <div class="stat-label">Spare each month now</div>
+          <div class="stat-value positive">${money(child.surplus.now)}</div>
+          <div class="stat-note">per month</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">After childcare</div>
+          <div class="stat-value ${child.surplus.after < 0 ? 'negative' : ''}">${money(child.surplus.after)}</div>
+          <div class="stat-note">${child.surplus.reductionPercent}% of it gone</div>
+        </div>
+      </div>
+
+      <div class="kv" style="margin-top:8px;">
+        <div class="kv-row"><span class="kv-label">Childcare</span><span>${moneyExact(child.childcare.monthly)}/mo</span></div>
+        <div class="kv-row"><span class="kv-label">Birth (your share after insurance)</span><span>${moneyExact(child.birth.cost)}</span></div>
+        ${child.leave ? `<div class="kv-row"><span class="kv-label">Pay missed while on leave</span><span>${moneyExact(child.leave.incomeLost)}</span></div>` : ''}
+        <div class="kv-row total">
+          <span class="kv-label">Set aside monthly</span>
+          <span>${moneyExact(child.monthlySetAside)}</span>
+        </div>
+      </div>
+
+      ${child.insights.length ? `
+        <div class="list" style="margin-top:10px;">
+          ${child.insights.map((i) => row({
+            title: i.title,
+            sub: i.detail,
+            tone: i.severity === 'high' ? 'warn' : '',
+          })).join('')}
+        </div>` : ''}
+
+      ${child.unknowns.length ? `
+        <div class="note" style="margin-top:10px;">
+          <strong>Worth finding out — none of this is visible from your transactions:</strong>
+          <ul>${child.unknowns.map((u) => `<li>${u}</li>`).join('')}</ul>
+        </div>` : ''}
+    `)}
+
+    <div class="disclaimer">${g.disclaimer}</div>
+  `;
+}
+
+function renderDebtComparison(c) {
+  return `
+    <div class="kv" style="margin-top:10px;">
+      <div class="kv-row">
+        <span class="kv-label">Highest interest rate first · ${c.avalanche.months} mo</span>
+        <span>${moneyExact(c.avalanche.interestPaid)} interest</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-label">Smallest balance first · ${c.snowball.months} mo</span>
+        <span>${moneyExact(c.snowball.interestPaid)} interest</span>
+      </div>
+    </div>
+    <div class="prose-sm" style="margin-top:8px;">${c.note}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Budget — the bills and the necessities, in one place
+// ---------------------------------------------------------------------------
+
+/**
+ * What this month is supposed to cost.
+ *
+ * The two things a household has to cover before anything else: the bills
+ * with due dates, and the necessities without them — groceries, gas,
+ * utilities, pharmacy. Targets default to what was actually spent in prior
+ * months, so the tab is useful before anybody sets a single number, and each
+ * one can be overridden by tapping it.
+ */
+function renderBudget() {
+  const budget = buildMonthlyBudget({
+    transactions: state.transactions,
+    bills: state.bills,
+    month: state.month,
+    targets: state.budgetTargets,
+  });
+
+  const t = budget.totals;
+  const spentOfPlan = t.billsPaid + budget.necessities.reduce((s, l) => s + l.spent, 0);
+
+  const line = (l) => {
+    const editing = state.editingTarget === l.category;
+    const pct = l.planned ? Math.min(100, (l.spent / l.planned) * 100) : 0;
+
+    return `
+      <div class="row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+          <span class="row-title">${escapeHtml(l.category)}</span>
+          <span class="row-amount ${l.over ? 'negative' : ''}">
+            ${moneyExact(l.spent)}${l.planned !== null ? ` <span class="row-amount-sub">of ${money(l.planned)}</span>` : ''}
+          </span>
+        </div>
+        ${l.planned !== null ? `
+          <div class="meter">
+            <div class="meter-fill ${l.over ? 'warn' : 'ok'}" style="width:${pct}%"></div>
+          </div>` : ''}
+        <div class="row-sub" style="margin-top:5px;">
+          <span>
+            ${l.planned === null
+              ? 'No target yet'
+              : l.over
+                ? `${moneyExact(l.spent - l.planned)} over`
+                : `${moneyExact(l.remaining)} left`}
+          </span>
+          <button class="cat-pill" data-action="edit-target" data-category="${escapeHtml(l.category)}">
+            ${editing ? 'Cancel' : l.planned === null ? 'Set a target' : 'Change target'}
+          </button>
+        </div>
+        ${editing ? `
+          <form class="field-inline" data-target-form="${escapeHtml(l.category)}" style="margin-top:9px;">
+            <input class="input" type="number" step="1" min="0" name="amount"
+              value="${l.planned ?? ''}" placeholder="Monthly target" />
+            <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            ${l.plannedSource === 'set'
+              ? '<button class="btn btn-sm btn-outline" type="button" data-action="clear-target" data-category="' + escapeHtml(l.category) + '">Clear</button>'
+              : ''}
+          </form>` : ''}
+      </div>
+    `;
+  };
+
+  return `
+    ${segmented(BUDGET_TABS)}
+    ${renderMonthPicker()}
+
+    ${state.budgetTargetsError ? `
+      <div class="banner banner-warn">
+        <div class="banner-body">${escapeHtml(state.budgetTargetsError)}</div>
+      </div>` : ''}
+
+    <div class="hero">
+      <div class="hero-label">The plan for ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(t.planned)}</div>
+      <div class="hero-note">
+        ${moneyExact(t.billsPlanned)} in bills and ${moneyExact(t.necessitiesPlanned)} in necessities.
+        ${t.remaining > 0 ? `${moneyExact(t.remaining)} of it still has to go out.` : 'All of it is covered.'}
+      </div>
+      <div class="hero-foot">
+        <span><b>${money(spentOfPlan)}</b> spent on it so far</span>
+        <span><b>${money(t.remaining)}</b> still to go</span>
+      </div>
+    </div>
+
+    ${section('Bills', budget.bills.length ? `
+      <div class="list">
+        ${budget.bills.map((b) => row({
+          avatar: b.name,
+          logo: logoForPayee(b.name),
+          title: escapeHtml(b.name),
+          chips: b.paid ? '<span class="chip chip-ok">paid</span>' : '',
+          sub: `Due ${new Date(`${b.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${b.category ?? 'Uncategorized'}`,
+          amount: moneyExact(b.amount),
+        })).join('')}
+      </div>
+      <div class="kv" style="margin-top:10px;">
+        <div class="kv-row total">
+          <span class="kv-label">Due this month</span><span>${moneyExact(t.billsPlanned)}</span>
+        </div>
+      </div>
+    ` : emptyState({
+      iconName: 'bills',
+      title: 'No bills tracked yet',
+      body: state.session
+        ? billSuggestionCount()
+          ? `${billSuggestionCount()} recurring charges in your own transactions look like bills — rent, childcare, insurance, the utilities. Tracking them is what turns this half of the tab from a guess into your actual bills.`
+          : 'Nothing in your transactions repeats on a bill-shaped rhythm yet.'
+        : 'Sign in to track bills.',
+      action: state.session && billSuggestionCount()
+        ? `<button class="btn btn-primary" data-view="bills">See the ${billSuggestionCount()} found</button>`
+        : '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
+    }), {
+      sub: 'Known payee, known due date',
+      action: '<button class="section-action" data-view="bills">All bills</button>',
+    })}
+
+    ${section('Necessities', budget.necessities.length ? `
+      <div class="list tight">${budget.necessities.map(line).join('')}</div>
+      <div class="note" style="margin-top:10px;">
+        <strong>Targets start from your own spending.</strong>
+        Each one is the average of recent months, rounded — change any of them and
+        it's saved for the whole household, so both of you are planning against the
+        same numbers. Categories a bill already covers aren't repeated here, so
+        nothing is counted twice.
+      </div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'No necessity spending yet',
+      body: 'Groceries, gas, utilities and pharmacy show up here once they post.',
+    }), { sub: 'No due date, but the money goes out anyway' })}
+
+    ${t.otherSpent > 0 ? `
+      <div class="prose-sm" style="margin-top:4px;">
+        ${moneyExact(t.otherSpent)} more went to everything else this month — dining out,
+        shopping, the discretionary side. That's on the Spending tab, not budgeted here.
+      </div>` : ''}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the money went this month. That's the whole screen.
+ *
+ * It used to lead with a surplus figure and a four-bucket accounting table
+ * built from a multi-month model, which meant the "Spending" tab answered a
+ * question about the emergency fund. The bucket model still exists and still
+ * feeds safe-to-spend and the plan — it just isn't what someone opening
+ * Spending is looking for.
+ */
+/**
+ * The month, in full.
+ *
+ * The question this screen exists for is "where did it actually go", and the
+ * honest answer has two halves: the money that was always leaving — rent,
+ * childcare, the power bill — and what happened to the rest. A flat list of
+ * categories answers neither, because rent sitting next to dining out makes
+ * the fixed half look like overspending and buries the half anybody can
+ * actually change.
+ */
+function renderSpending() {
+  const m = buildMonthInFull({
+    transactions: state.transactions,
+    bills: state.bills,
+    month: state.month,
+  });
+  const reviewCount = uncategorizedCount();
+
+  const prior = state.months.filter((x) => x < state.month).slice(-3)
+    .map((x) => spendingIn(x).reduce((s, t) => s + t.amount, 0))
+    .filter((v) => v > 0);
+  const priorAvg = prior.length >= MIN_MONTHS_FOR_AVERAGE
+    ? prior.reduce((a, b) => a + b, 0) / prior.length
+    : null;
+
+  const restMax = m.rest.categories.length ? m.rest.categories[0].amount : 1;
+
+  return `
+    ${segmented(SPENDING_TABS)}
+    ${renderMonthPicker()}
+
+    <div class="hero">
+      <div class="hero-label">Out the door in ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(m.total)}</div>
+      <div class="hero-note">
+        ${priorAvg !== null
+          ? `${money(priorAvg)} in a typical recent month.`
+          : 'Everything that left the account, minus transfers between your own accounts.'}
+      </div>
+      ${m.total > 0 ? `
+        <div class="split">
+          <div class="split-bar">
+            <i class="split-bills" style="width:${m.bills.share}%"></i>
+            <i class="split-rest" style="width:${m.rest.share}%"></i>
+          </div>
+          <div class="split-keys">
+            <span class="split-key"><b class="split-bills"></b>${money(m.bills.total)} bills · ${m.bills.share}%</span>
+            <span class="split-key"><b class="split-rest"></b>${money(m.rest.total)} everything else · ${m.rest.share}%</span>
+          </div>
+        </div>` : ''}
+    </div>
+
+    ${reviewCount ? `
+      <div class="banner" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
+          They're sitting under Uncategorized below until they have one.
+        </div>
+        <button class="linkbtn" data-view="review">Review</button>
+      </div>` : ''}
+
+    ${section('Bills', m.bills.items.length ? `
+      <div class="list tight">
+        ${m.bills.items.map((b) => row({
+          avatar: b.name,
+          logo: logoForPayee(b.payee),
+          title: escapeHtml(b.name),
+          chips: b.source === 'fixed' ? '' : '<span class="chip chip-ok">tracked</span>',
+          sub: `${new Date(`${b.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${escapeHtml(b.category)}`,
+          amount: moneyExact(b.amount),
+        })).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:9px;">
+        ${m.bills.trackedCount
+          ? `${m.bills.trackedCount} of these matched a bill you track. `
+          : ''}The rest are charges in categories that are a bill by nature —
+        rent, utilities, insurance, childcare, a car payment, a subscription.
+      </div>
+    ` : emptyState({
+      iconName: 'bills',
+      title: 'No bills paid this month',
+      body: 'Nothing has cleared yet that looks like a fixed monthly cost.',
+    }), {
+      sub: `${moneyExact(m.bills.total)} that was always going out`,
+      action: '<button class="section-action" data-view="bills">Bills tab</button>',
+    })}
+
+    ${section('After the bills', m.rest.categories.length ? `
+      <div class="list tight">${renderCategoryRows(
+        m.rest.categories.map((c) => [c.category, c.amount]), restMax,
+      )}</div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing else this month',
+      body: 'Every charge that cleared was a bill.',
+    }), {
+      sub: `${moneyExact(m.rest.total)} across ${m.rest.count} transaction${m.rest.count === 1 ? '' : 's'} · tap any to open it`,
+      action: '<button class="section-action" data-view="transactions">All transactions</button>',
+    })}
+  `;
+}
+
+/**
+ * Twelve months at once.
+ *
+ * Everything else in the app is scoped to a month, which answers "how are we
+ * doing" and cannot answer "what does a year of us look like" — what eating
+ * out actually costs a year, whether groceries are drifting up, which month
+ * wrecked us. The month in progress is included and marked, never averaged.
+ */
+function renderYear() {
+  const year = buildYearInReview({
+    transactions: state.transactions,
+    endMonth: state.month,
+    currentMonth: state.months.at(-1),
+  });
+
+  const t = year.totals;
+
+  // Months before the household's first transaction are noise — a run of
+  // empty rows above the real data, which on a new account is most of the
+  // list. The window still spans twelve months; it just starts where the
+  // history does.
+  const firstWithData = year.months.findIndex((m) => m.spent > 0 || m.earned > 0);
+  const months = firstWithData > 0 ? year.months.slice(firstWithData) : year.months;
+
+  const maxMonth = Math.max(...months.map((m) => m.spent), 1);
+  const maxCat = year.categories.length ? year.categories[0].total : 1;
+  const label = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short' });
+
+  return `
+    ${segmented(SPENDING_TABS)}
+
+    <div class="hero">
+      <div class="hero-label">Out the door · 12 months to ${monthLabel(state.month)}</div>
+      <div class="hero-value">${moneyExact(t.spent)}</div>
+      <div class="hero-note">
+        ${year.typical.spent !== null
+          ? `About ${money(year.typical.spent)} in a finished month, across ${year.typical.monthsCounted} of them.`
+          : 'Not enough finished months yet to call anything typical.'}
+      </div>
+      ${t.spent > 0 ? `
+        <div class="split">
+          <div class="split-bar">
+            <i class="split-bills" style="width:${t.billsShare}%"></i>
+            <i class="split-rest" style="width:${100 - t.billsShare}%"></i>
+          </div>
+          <div class="split-keys">
+            <span class="split-key"><b class="split-bills"></b>${money(t.bills)} bills</span>
+            <span class="split-key"><b class="split-rest"></b>${money(t.rest)} everything else</span>
+          </div>
+        </div>` : ''}
+    </div>
+
+    ${t.earned > 0 ? `
+      <div class="stat-row" style="margin-top:12px;">
+        <div class="stat">
+          <div class="stat-label">Came in</div>
+          <div class="stat-value positive">${money(t.earned)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Went out</div>
+          <div class="stat-value">${money(t.spent)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Kept</div>
+          <div class="stat-value ${t.net < 0 ? 'negative' : 'positive'}">${money(t.net)}</div>
+        </div>
+      </div>` : ''}
+
+    ${section('Month by month', `
+      <div class="list tight">
+        ${months.map((m) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">
+                ${label(m.month)} ${m.month.slice(0, 4)}
+                ${m.inProgress ? '<span class="chip">so far</span>' : ''}
+              </span>
+              <span class="row-amount">${m.spent ? moneyExact(m.spent) : '—'}</span>
+            </div>
+            ${m.spent > 0 ? `
+              <div class="meter">
+                <div class="meter-fill" style="width:${Math.min(100, (m.spent / maxMonth) * 100)}%"></div>
+              </div>
+              <div class="row-sub" style="margin-top:5px;">
+                ${money(m.bills)} bills · ${money(m.rest)} everything else${m.earned > 0
+                  ? ` · <span style="color:${m.net < 0 ? 'var(--negative)' : 'var(--positive)'};">${m.net < 0 ? '−' : '+'}${money(Math.abs(m.net))}</span>`
+                  : ''}
+              </div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${year.biggest ? `
+        <div class="prose-sm" style="margin-top:9px;">
+          The heaviest finished month was ${monthLabel(year.biggest.month)} at
+          ${moneyExact(year.biggest.spent)}.
+        </div>` : ''}
+    `, {
+      sub: months.length < year.months.length
+        ? `${months.length} month${months.length === 1 ? '' : 's'} of history · the one in progress is counted, never averaged in`
+        : 'The month in progress is counted, but never averaged in',
+    })}
+
+    ${section('Where it went, all year', year.categories.length ? `
+      <div class="list tight">
+        ${year.categories.slice(0, 14).map((c) => `
+          <div class="row" style="display:block;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+              <span class="row-title">${escapeHtml(c.category)}</span>
+              <span class="row-amount">${moneyExact(c.total)}</span>
+            </div>
+            <div class="meter">
+              <div class="meter-fill ${c.category === 'Uncategorized' ? 'quiet' : ''}"
+                style="width:${Math.min(100, (c.total / maxCat) * 100)}%"></div>
+            </div>
+            <div class="row-sub" style="margin-top:5px;">
+              ${moneyExact(c.perActiveMonth)} in each of the ${c.monthsSeen} month${c.monthsSeen === 1 ? '' : 's'} it happened
+              · ${c.count} transaction${c.count === 1 ? '' : 's'}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:9px;">
+        Averages are per month the category actually happened in, not divided by
+        twelve — a premium paid twice a year is not forty dollars a month, and
+        budgeting against a number like that never works.
+      </div>
+    ` : emptyState({
+      iconName: 'list',
+      title: 'Nothing to show yet',
+      body: 'No spending has cleared in the last twelve months.',
+    }), { sub: `${year.categories.length} categories` })}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+function renderSubscriptions() {
+  const s = state.subs;
+
+  return `
+    ${segmented(SPENDING_TABS)}
+
+    <div class="hero">
+      <div class="hero-label">Subscriptions, per year</div>
+      <div class="hero-value">${money(s.totalAnnual)}</div>
+      <div class="hero-note">
+        ${moneyExact(s.totalMonthly)}/mo across ${s.subscriptions.length} services.
+        Shown yearly because that's the number that prompts a decision.
+      </div>
+    </div>
+
+    ${s.priceIncreases.length ? `
+      <div class="banner banner-warn" style="margin-top:14px;">
+        <div class="banner-body">
+          <strong>${s.priceIncreases.length} price increase${s.priceIncreases.length > 1 ? 's' : ''}.</strong>
+          ${s.priceIncreases.map((p) =>
+            `${p.payee} ${moneyExact(p.priceChange.from)} → ${moneyExact(p.priceChange.to)}
+             (+${p.priceChange.changePercent}%, ${money(p.annualImpactOfIncrease)}/yr)`).join(' · ')}
+        </div>
+      </div>` : ''}
+
+    ${section('Subscriptions', s.subscriptions.length ? `
+      <div class="list">
+        ${s.subscriptions.map((sub) => row({
+          avatar: sub.payee,
+          logo: logoForPayee(sub.payee),
+          title: sub.payee,
+          chips: sub.confidence === 'low' ? '<span class="chip">new</span>' : '',
+          sub: `${sub.cadence} · last charged ${sub.last_seen}`,
+          amount: `${moneyExact(sub.last_amount)}`,
+          amountSub: `${money(sub.annualCost)}/yr`,
+        })).join('')}
+      </div>
+
+      ${s.duplicates.map((d) => `
+        <div class="note" style="margin-top:10px;">
+          <strong>${d.question}</strong>
+          ${d.services.map((x) => x.payee).join(', ')} — ${money(d.combinedAnnual)}/yr combined.
+        </div>`).join('')}
+    ` : emptyState({
+      iconName: 'repeat',
+      title: 'No subscriptions detected',
+      body: 'Nothing in your transactions repeats on a subscription-shaped rhythm yet.',
+    }), { sub: 'Things you could cancel' })}
+
+    ${s.bills.length ? section('Recurring obligations', `
+      <div class="list">
+        ${s.bills.map((b) => row({
+          avatar: b.payee,
+          logo: logoForPayee(b.payee),
+          title: b.payee,
+          sub: `${b.cadence} · next ${b.next_expected}`,
+          amount: moneyExact(b.last_amount),
+        })).join('')}
+      </div>
+      <div class="prose-sm" style="margin-top:10px;">
+        Not candidates for cancelling — listed so the forecast can use them.
+        Track any of these as a bill from the Bills tab.
+      </div>
+    `, {
+      sub: 'Not subscriptions — things you owe',
+      action: '<button class="section-action" data-view="bills">Bills</button>',
+    }) : ''}
+
+    ${s.frequentMerchants.length ? `
+      <div class="prose-sm" style="margin-top:18px;">
+        ${s.frequentMerchants.map((m) => m.payee).join(', ')} recur too, but they're places
+        you shop rather than things you can cancel — kept out of both lists.
+      </div>` : ''}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Advisor
+// ---------------------------------------------------------------------------
+
+/**
+ * A check-in note, generated on request rather than automatically — it is a
+ * real API call with real latency and real (if small) cost, so it happens
+ * when asked for, not on every visit to the tab. Past notes stay visible
+ * below so the advisor reads as a running relationship, not a one-off tool.
+ */
+function renderAdvisor() {
+  if (!state.session) return signInPrompt('use the advisor');
+
+  return `
+    ${section('Advisor', `
+      ${state.advisorError ? `<div class="banner banner-warn"><div class="banner-body">${state.advisorError}</div></div>` : ''}
+
+      <form id="advisor-ask-form" class="field-inline" style="margin-bottom:10px;">
+        <input class="input" type="text" name="question" placeholder="Ask about your numbers…"
+          autocomplete="off" ${state.advisorBusy ? 'disabled' : ''} />
+        <button type="submit" class="btn btn-primary" ${state.advisorBusy ? 'disabled' : ''}>
+          ${state.advisorBusy ? '…' : 'Ask'}
+        </button>
+      </form>
+
+      <button data-action="get-advisor-note" class="btn btn-secondary btn-block"
+        ${state.advisorBusy ? 'disabled' : ''}>
+        ${icon('sparkle', 16)} ${state.advisorBusy ? 'Thinking…' : 'Get a check-in'}
+      </button>
+    `, {
+      sub: 'Only numbers this app already computed — never one it made up',
+    })}
+
+    ${state.advisorNotes.length === 0 ? `
+      <div style="margin-top:14px;">
+        ${emptyState({
+          iconName: 'sparkle',
+          title: 'No check-ins yet',
+          body: 'The first one starts the history.',
+        })}
+      </div>
+    ` : section('History', `
+      <div class="list">
+        ${state.advisorNotes.map((n) => `
+          <div class="row" style="display:block;">
+            <div class="row-sub" style="margin-bottom:6px;">
+              ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              ${n.source === 'daily' ? '<span class="chip">daily</span>' : ''}
+            </div>
+            ${n.question ? `<div class="row-title" style="margin-bottom:6px;">You asked: “${escapeHtml(n.question)}”</div>` : ''}
+            <div class="prose">${n.note}</div>
+          </div>
+        `).join('')}
+      </div>
+    `)}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Install prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * iOS has no install event — Apple does not implement beforeinstallprompt, so
+ * every iOS install is a manual Add to Home Screen. The only thing we can do is
+ * tell people where the button is, and only when they aren't already installed.
+ */
+function renderConnect() {
+  if (!state.session) {
+    return `
+      ${section('Sign in', `
+        <form id="auth-form" class="form">
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input class="input" type="email" name="email" placeholder="you@example.com" required />
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input class="input" type="password" name="password" placeholder="At least 6 characters" minlength="6" required />
+          </label>
+          ${state.authNotice ? `<div class="banner banner-good" style="margin:0;"><div class="banner-body">${state.authNotice}</div></div>` : ''}
+          ${state.authError ? `<div class="banner banner-warn" style="margin:0;"><div class="banner-body">${state.authError}</div></div>` : ''}
+          <div class="btn-row">
+            <button type="submit" data-auth="signin" class="btn btn-primary">Sign in</button>
+            <button type="submit" data-auth="signup" class="btn btn-outline">Create account</button>
+          </div>
+        </form>
+      `, { sub: 'Everything runs on demo numbers until you do' })}
+    `;
+  }
+
+  const items = state.connectedItems;
+  const gmailConnections = state.providerConnections.filter(
+    (c) => c.provider_key === 'gmail' && c.status !== 'disconnected',
+  );
+  const gmailStatusLabel = { connected: 'connected', needs_reauth: 'needs reconnect', error: 'error' };
+  const memberName = (ownerUserId) => {
+    if (!ownerUserId) return 'Shared household source';
+    if (ownerUserId === state.session.user.id) return 'Connected by you';
+    return `Connected by ${state.members.find((m) => m.user_id === ownerUserId)?.display_name ?? 'household member'}`;
+  };
+
+  return `
+    ${state.connectError ? `<div class="banner banner-warn"><div class="banner-body">${state.connectError}</div></div>` : ''}
+
+    ${section('Bank accounts', `
+      ${items.length === 0 ? emptyState({
+        iconName: 'bank',
+        title: 'No bank connected',
+        body: 'Plaid Link opens in its own secure window — your bank credentials never touch this app.',
+        action: `<button data-action="connect-bank" class="btn btn-primary" ${state.connectBusy ? 'disabled' : ''}>
+          ${state.connectBusy ? 'Connecting…' : 'Connect a bank'}
+        </button>`,
+      }) : `
+        <div class="list">
+          ${items.map((item) => row({
+            iconName: 'bank',
+            title: item.institution_name,
+            chips: `<span class="chip ${item.status === 'good' ? 'chip-ok' : 'chip-warn'}">${item.status}</span>`,
+            sub: (item.accounts?.length
+              ? item.accounts.map((a) => `${a.nickname} ····${a.mask ?? ''}`).join(' · ')
+              : 'No accounts yet') + ` · ${memberName(item.owner_user_id)}`,
+          })).join('')}
+        </div>
+        <button data-action="connect-bank" class="btn btn-secondary btn-block" style="margin-top:8px;" ${state.connectBusy ? 'disabled' : ''}>
+          ${icon('plus', 16)} ${state.connectBusy ? 'Connecting…' : 'Connect another bank'}
+        </button>
+      `}
+    `)}
+
+    ${section('Email for bills', `
+      ${state.gmailNotice ? `<div class="banner banner-good"><div class="banner-body">${state.gmailNotice}</div></div>` : ''}
+      ${state.gmailError ? `<div class="banner banner-warn"><div class="banner-body">${state.gmailError}</div></div>` : ''}
+
+      ${gmailConnections.length ? `
+        <div class="list">
+          ${gmailConnections.map((gmail) => row({
+            iconName: 'mail',
+            title: gmail.display_name,
+            chips: `<span class="chip ${gmail.status === 'connected' ? 'chip-ok' : 'chip-warn'}">${gmailStatusLabel[gmail.status] ?? gmail.status}</span>`,
+            sub: (gmail.last_synced_at
+              ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString()}`
+              : 'Not scanned yet — runs on the next daily sync')
+              + (gmail.status_detail ? ` · ${gmail.status_detail}` : '')
+              + ` · ${memberName(gmail.owner_user_id)}`,
+            actions: `
+              <button data-action="disconnect-gmail" data-id="${gmail.id}" class="btn btn-sm btn-outline" ${state.gmailBusy ? 'disabled' : ''}>
+                ${state.gmailBusy ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+              ${gmail.status === 'needs_reauth'
+                ? `<button data-action="connect-gmail" class="btn btn-sm btn-secondary" ${state.gmailBusy ? 'disabled' : ''}>Reconnect</button>`
+                : ''}
+            `,
+          })).join('')}
+        </div>
+      ` : ''}
+
+      <button data-action="connect-gmail" class="btn btn-secondary btn-block" style="margin-top:8px;" ${state.gmailBusy ? 'disabled' : ''}>
+        ${icon('plus', 16)}
+        ${state.gmailBusy ? 'Connecting…' : gmailConnections.length ? 'Connect another Gmail' : 'Connect Gmail'}
+      </button>
+
+      <div class="prose-sm" style="margin-top:10px;">
+        Scans for bill-looking mail (statements, "amount due", "payment due") and nothing
+        else — read-only, no email is ever sent or modified. Google's own consent screen is
+        where you approve this, not this app.
+      </div>
+    `)}
+
+    ${section("Who's in this household", `
+      <div class="list">
+        ${state.members.map((m) => row({
+          avatar: m.display_name,
+          title: m.display_name,
+          chips: m.user_id === state.session.user.id ? '<span class="chip chip-ok">you</span>' : '',
+        })).join('')}
+      </div>
+
+      <form id="invite-form" class="form" style="margin-top:12px;">
+        <label class="field">
+          <span class="field-label">Invite someone</span>
+          <input class="input" type="email" name="email" placeholder="Their email address" required />
+          <span class="field-hint">
+            Signup is invite-only — nobody can create an account unless their address is
+            invited here first.
+          </span>
+        </label>
+        ${state.inviteNotice ? `<div class="banner banner-good" style="margin:0;"><div class="banner-body">${state.inviteNotice}</div></div>` : ''}
+        ${state.inviteError ? `<div class="banner banner-warn" style="margin:0;"><div class="banner-body">${state.inviteError}</div></div>` : ''}
+        <button type="submit" class="btn btn-secondary" ${state.inviteBusy ? 'disabled' : ''}>
+          ${state.inviteBusy ? 'Inviting…' : 'Send invite'}
+        </button>
+      </form>
+
+      ${state.invites.length ? `
+        <div class="list" style="margin-top:12px;">
+          ${state.invites.map((inv) => row({
+            iconName: 'mail',
+            title: inv.email,
+            sub: `Can create an account until ${new Date(inv.expires_at).toLocaleDateString()}`,
+            actions: `<button class="btn btn-sm btn-danger" data-action="revoke-invite" data-id="${inv.id}">Revoke</button>`,
+          })).join('')}
+        </div>` : ''}
+    `)}
+  `;
+}
+
+/** One labelled input, used by every form in the app. */
+function field(label, name, type, value, extra = '', hint = '') {
+  return `
+    <label class="field">
+      <span class="field-label">${label}</span>
+      <input class="input" type="${type}" name="${name}" value="${value ?? ''}" ${extra} />
+      ${hint ? `<span class="field-hint">${hint}</span>` : ''}
+    </label>`;
+}
+
+/**
+ * Shift logging and the forecast it feeds.
+ *
+ * This is the one number Plaid cannot produce. A bank feed shows the deposit
+ * after it has landed; for income that swings with how many shifts were worked,
+ * knowing the check in advance is the whole point.
+ */
+function renderShifts() {
+  if (!state.session) return `${segmented(INCOME_TABS)}${signInPrompt('log shifts')}`;
+
+  if (state.shiftsError) {
+    return `${segmented(INCOME_TABS)}<div class="banner banner-warn"><div class="banner-body">${state.shiftsError}</div></div>`;
+  }
+
+  const p = state.payProfile;
+
+  if (!p || state.editingProfile) {
+    return `
+      ${segmented(INCOME_TABS)}
+      ${section(p ? 'Edit pay setup' : 'Set up your pay', `
+        <form id="pay-profile-form" class="form">
+          ${field('Label', 'label', 'text', p?.label ?? 'Primary', 'required')}
+          ${field('Employer (optional)', 'employerName', 'text', p?.employerName ?? '')}
+          ${field('Base hourly rate', 'baseHourlyRate', 'number', p?.baseHourlyRate ?? '', 'step="0.01" min="0.01" required')}
+
+          <label class="field">
+            <span class="field-label">Pay frequency</span>
+            <select class="select" name="payFrequency">
+              ${['weekly', 'biweekly', 'semimonthly', 'monthly'].map((f) => `
+                <option value="${f}" ${(p?.payFrequency ?? 'biweekly') === f ? 'selected' : ''}>${f}</option>
+              `).join('')}
+            </select>
+          </label>
+
+          ${field('A pay period you know: start', 'payPeriodStart', 'date', p?.payPeriodStart ?? '', 'required')}
+          ${field('…and its end', 'payPeriodEnd', 'date', p?.payPeriodEnd ?? '', 'required')}
+          ${field('…and the payday for it', 'payday', 'date', p?.payday ?? '', 'required',
+            'Periods are walked forward from this anchor rather than computed from today, so they stay aligned to your employer\'s actual calendar.')}
+
+          <details class="fold">
+            <summary>Overtime, call shifts &amp; standby — sensible defaults already set</summary>
+            <div class="fold-body form">
+              ${field('Overtime multiplier', 'overtimeMultiplier', 'number', p?.overtimeMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+
+              ${field('Daily overtime threshold (hours)', 'dailyOvertimeThreshold', 'number', p?.dailyOvertimeThreshold ?? 0, 'step="0.5" min="0" required',
+                '<strong>0 disables it</strong>, which is the right default for a compressed schedule. An 8-hour threshold turns every 10-hour shift into 2 hours of overtime you were never paid — roughly 8 phantom hours a week.')}
+
+              ${field('Weekly overtime threshold (hours)', 'weeklyOvertimeThreshold', 'number', p?.weeklyOvertimeThreshold ?? 40, 'step="0.5" min="0" required')}
+
+              ${field('Callback minimum (hours paid per callout)', 'callbackMinimumHours', 'number', p?.callbackMinimumHours ?? 0, 'step="0.5" min="0" required',
+                'Paid <em>per event</em>, not per hour worked. Two 30-minute callouts on a 2-hour minimum pay 4 hours, not 1.')}
+
+              ${field('Callback multiplier', 'callbackMultiplier', 'number', p?.callbackMultiplier ?? 1.5, 'step="0.1" min="1" required')}
+              ${field('Standby rate', 'standbyRate', 'number', p?.standbyRate ?? 0, 'step="0.01" min="0" required',
+                'Standby is time on call. It pays its own rate and never counts toward an overtime threshold.')}
+
+              ${field('Estimated tax + deduction rate (%)', 'taxRate', 'number',
+                p?.taxAssumptions?.federalRate != null
+                  ? Math.round((p.taxAssumptions.federalRate + (p.taxAssumptions.stateRate ?? 0)) * 100)
+                  : 18, 'step="1" min="0" max="60" required',
+                'A starting guess for federal + state. Social Security and Medicare are added automatically. Once you enter a real paystub the app learns your actual effective rate — usually the biggest source of error in a take-home estimate.')}
+            </div>
+          </details>
+
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary" ${state.shiftsBusy ? 'disabled' : ''}>
+              ${state.shiftsBusy ? 'Saving…' : 'Save pay setup'}
+            </button>
+            ${p ? '<button type="button" data-action="cancel-profile" class="btn btn-outline">Cancel</button>' : ''}
+          </div>
+        </form>
+      `, {
+        sub: 'Two defaults here are deliberately not the usual ones — the usual ones are wrong for call work',
+      })}`;
+  }
+
+  const period = state.payPeriod;
+  const forecast = period
+    ? forecastPaycheck({
+      profile: p,
+      entries: state.timeEntries,
+      period: period.period,
+      payDate: period.payDate,
+    })
+    : null;
+
+  return `
+    ${segmented(INCOME_TABS)}
+
+    ${forecast ? `
+      <div class="hero">
+        <div class="hero-label">Next check · ${new Date(`${forecast.payDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div>
+        <div class="hero-value">${moneyExact(forecast.estimatedNet)}</div>
+        <div class="hero-note">
+          Estimated take-home for ${forecast.period.start} → ${forecast.period.end}.
+          ${forecast.daysCovered} of ${forecast.daysInPeriod} days logged.
+        </div>
+        <div class="hero-foot">
+          <span><b>${money(forecast.breakdown.totalGross)}</b> gross</span>
+          <span><b>−${money(forecast.breakdown.totalTaxes)}</b> taxes</span>
+          <span><b>−${money(forecast.breakdown.totalDeductions)}</b> deductions</span>
+          <span class="chip ${forecast.confidence === 'high' ? 'chip-ok' : 'chip-warn'}">${forecast.confidence} confidence</span>
+        </div>
+      </div>
+      ${forecast.confidenceReasons.length
+        ? `<div class="prose-sm" style="margin-top:8px;">${forecast.confidenceReasons.join(' · ')}</div>`
+        : ''}
+    ` : `
+      <div class="banner banner-warn">
+        <div class="banner-body">No upcoming pay period — check the anchor dates in your pay setup.</div>
+      </div>`}
+
+    ${section('Log a shift', `
+      <form id="shift-form" class="form">
+        ${field('Date', 'date', 'date', new Date().toISOString().slice(0, 10), 'required')}
+        ${field('Hours worked', 'regularHours', 'number', '', 'step="0.25" min="0" required')}
+        <details class="fold">
+          <summary>Callouts, standby, holiday &amp; PTO</summary>
+          <div class="fold-body form">
+            ${field('Callback hours', 'callbackHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('Number of callouts', 'callbackEvents', 'number', '', 'step="1" min="0"')}
+            ${field('Standby hours (on call)', 'standbyHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('Holiday hours', 'holidayHours', 'number', '', 'step="0.25" min="0"')}
+            ${field('PTO hours', 'ptoHours', 'number', '', 'step="0.25" min="0"')}
+          </div>
+        </details>
+        <button type="submit" class="btn btn-primary btn-block" ${state.shiftsBusy ? 'disabled' : ''}>
+          ${state.shiftsBusy ? 'Saving…' : 'Add shift'}
+        </button>
+      </form>
+    `, {
+      action: '<button data-action="edit-profile" class="section-action">Pay setup</button>',
+    })}
+
+    ${section('This period', state.timeEntries.length === 0
+      ? emptyState({ iconName: 'clock', title: 'No shifts logged yet', body: 'Add one above and the forecast sharpens immediately.' })
+      : `
+        <div class="list">
+          ${state.timeEntries.map((e) => row({
+            iconName: 'clock',
+            title: new Date(`${e.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+            sub: [
+              e.regularHours ? `${e.regularHours}h worked` : '',
               e.callbackEvents ? `${e.callbackEvents} callout${e.callbackEvents > 1 ? 's' : ''} (${e.callbackHours}h)` : '',
               e.standbyHours ? `${e.standbyHours}h standby` : '',
               e.holidayHours ? `${e.holidayHours}h holiday` : '',
