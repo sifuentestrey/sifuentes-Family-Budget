@@ -1,13 +1,8 @@
 /**
  * Start the Gmail OAuth flow.
  *
- * Google's eventual redirect back to gmail-oauth-callback carries no Supabase
- * session — nothing about that request identifies who started it. So this
- * function mints a one-time `state` token, records which household it belongs
- * to server-side, and hands the state to Google to echo back unmodified. The
- * callback trusts the state row, not anything in the redirect itself.
- *
- * Returns the consent URL as JSON; the browser does the actual navigation.
+ * The callback has no Supabase session, so the one-time state row carries both
+ * household and member ownership through the Google redirect.
  */
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -25,17 +20,10 @@ Deno.serve(async (req) => {
 
   const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
   if (!clientId) {
-    return json({
-      error: 'not_configured',
-      message: 'GOOGLE_CLIENT_ID is not set on this project. ' +
-        'Add it under Edge Functions → Secrets in the Supabase dashboard.',
-    }, 503);
+    return json({ error: 'not_configured', message: 'GOOGLE_CLIENT_ID is not set on this project.' }, 503);
   }
 
   try {
-    // Identify the caller from their JWT, same pattern as plaid-link-token —
-    // the household this connection belongs to must come from a verified
-    // session, never from a value the client could supply directly.
     const authHeader = req.headers.get('Authorization') ?? '';
     const userClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -54,15 +42,13 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!membership) return json({ error: 'no_household', message: 'User is not in a household' }, 400);
 
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     const state = crypto.randomUUID();
     const { error: insertError } = await admin.from('oauth_states').insert({
       state,
       household_id: membership.household_id,
+      owner_user_id: user.id,
       provider_key: 'gmail',
     });
     if (insertError) throw new Error(`could not start OAuth flow: ${insertError.message}`);
@@ -74,10 +60,6 @@ Deno.serve(async (req) => {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', SCOPE);
     url.searchParams.set('access_type', 'offline');
-    // Google issues a refresh token only on the first consent for a given
-    // account+scope combination. Forcing the consent screen every time is
-    // what makes reconnecting after a revoked or expired token actually work,
-    // rather than silently succeeding with no refresh token to show for it.
     url.searchParams.set('prompt', 'consent');
     url.searchParams.set('state', state);
 
@@ -88,8 +70,5 @@ Deno.serve(async (req) => {
 });
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...cors, 'Content-Type': 'application/json' },
-  });
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 }
