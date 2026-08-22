@@ -1514,16 +1514,15 @@ function renderDashboard() {
     </div>
 
     <div class="hero">
-      <div class="hero-label">Money in the bank</div>
-      <div class="hero-value">${moneyExact(cash.total)}</div>
+      <div class="hero-label">Checking</div>
+      <div class="hero-value">${moneyExact(cash.checking)}</div>
       <div class="hero-note">
         ${cash.accountCount
-          ? `Across ${cash.accountCount} account${cash.accountCount === 1 ? '' : 's'}, as of the last sync.`
+          ? 'The main number is checking only. Savings stays separate below.'
           : 'No bank connected yet — connect one and your real balance shows here.'}
       </div>
       ${cash.accountCount ? `
         <div class="hero-foot">
-          <span><b>${money(cash.checking)}</b> in checking</span>
           ${cash.savings > 0 ? `<span><b>${money(cash.savings)}</b> in savings</span>` : ''}
           ${cash.owed > 0 ? `<span><b>${money(cash.owed)}</b> owed on cards</span>` : ''}
         </div>` : ''}
