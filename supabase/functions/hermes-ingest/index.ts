@@ -18,6 +18,12 @@ const optionalNumber = (v, min = 0, max = 1_000_000) => v === null || v === unde
   const n = Number(v);
   return Number.isFinite(n) && n >= min && n <= max ? Math.round(n * 100) / 100 : null;
 })();
+const time = (v) => {
+  const value = text(v, 8);
+  if (!value) return null;
+  if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return `${value}:00`;
+  return /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value) ? value : null;
+};
 const same = (a, b) => Math.abs(Number(a ?? 0) - Number(b ?? 0)) < 0.005;
 const obj = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 
@@ -128,7 +134,7 @@ async function payroll(db, e, profileId, periodId, s) {
     if (!externalId || !isDate(r?.entry_date)) { s.skipped++; s.errors.push({ external_id: externalId, error: 'time entry requires external_id, entry_date' }); continue; }
     const row = {
       household_id: e.householdId, pay_profile_id: profileId, pay_period_id: periodId, entry_date: r.entry_date,
-      start_time: text(r.start_time, 8), end_time: text(r.end_time, 8), regular_hours: number(r.regular_hours, 0, 24),
+      start_time: time(r.start_time), end_time: time(r.end_time), regular_hours: number(r.regular_hours, 0, 24),
       overtime_hours: number(r.overtime_hours, 0, 24), standby_hours: number(r.standby_hours, 0, 168),
       callback_hours: number(r.callback_hours, 0, 24), callback_events: Math.max(0, Math.min(20, Math.trunc(Number(r.callback_events ?? 0)) || 0)),
       holiday_hours: number(r.holiday_hours, 0, 24), pto_hours: number(r.pto_hours, 0, 24),
