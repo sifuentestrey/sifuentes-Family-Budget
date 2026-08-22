@@ -1528,49 +1528,6 @@ function renderDashboard() {
         </div>` : ''}
     </div>
 
-    ${safeToSpendResult ? `
-      <div class="card" style="margin-top:12px;">
-        <div class="card-head">
-          <span class="card-title">Uncommitted until ${new Date(`${sts.nextPayday}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
-          <span class="row-amount ${safeToSpendResult.status === 'negative' ? 'negative' : ''}">
-            ${moneyExact(safeToSpendResult.safeToSpend)}
-          </span>
-        </div>
-        <div class="prose-sm" style="margin-top:6px;">
-          What's in checking, plus the pay landing before then, less the bills
-          due and the groceries and gas you'll need in between. Savings is left
-          out of it on purpose.
-        </div>
-      </div>
-
-      <details class="fold">
-        <summary>Where this number comes from</summary>
-        <div class="fold-body">
-          <div class="kv">
-            <div class="kv-row">
-              <span class="kv-label">What you have, plus the pay coming</span>
-              <span>${moneyExact(safeToSpendResult.startingPoint)}</span>
-            </div>
-            ${safeToSpendResult.deductions.map((d) => `
-              <div class="kv-row">
-                <span class="kv-label">${d.label}</span>
-                <span>−${moneyExact(d.amount)}</span>
-              </div>
-            `).join('')}
-            <div class="kv-row total">
-              <span class="kv-label">Uncommitted</span>
-              <span>${moneyExact(safeToSpendResult.safeToSpend)}</span>
-            </div>
-          </div>
-          ${safeToSpendResult.warnings.length ? `
-            <div class="note" style="margin-top:8px;">
-              <strong>Worth knowing:</strong>
-              <ul>${safeToSpendResult.warnings.map((w) => `<li>${w}</li>`).join('')}</ul>
-            </div>` : ''}
-        </div>
-      </details>
-    ` : ''}
-
     ${renderUpcoming()}
 
     ${section('This month', `
