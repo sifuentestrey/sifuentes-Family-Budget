@@ -57,7 +57,14 @@ async function payProfile(db, householdId, requested) {
   return data[0].id;
 }
 async function payPeriod(db, householdId, profileId, c) {
-  if (![c?.period_start, c?.period_end, c?.pay_date].every(isDate)) return null;
+  if (!isDate(c?.period_start)) return null;
+  if (![c?.period_end, c?.pay_date].every(isDate)) {
+    const { data, error } = await db.from('pay_periods').select('id')
+      .eq('household_id', householdId).eq('pay_profile_id', profileId)
+      .eq('period_start', c.period_start).maybeSingle();
+    if (error) throw error;
+    return data?.id ?? null;
+  }
   const { data, error } = await db.from('pay_periods').upsert({
     household_id: householdId, pay_profile_id: profileId, period_start: c.period_start,
     period_end: c.period_end, pay_date: c.pay_date,
