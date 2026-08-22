@@ -160,10 +160,9 @@ function render(host, data) {
 
   host.innerHTML = `
     <div class="sh-hero">
-      <div class="sh-label">Cash across checking & savings</div>
-      <div class="sh-balance">${money(accounts.cash)}</div>
+      <div class="sh-label">Checking</div>
+      <div class="sh-balance">${money(accounts.checking)}</div>
       <div class="sh-foot">
-        <span><b>${money(accounts.checking)}</b> checking</span>
         ${accounts.savings ? `<span><b>${money(accounts.savings)}</b> savings</span>` : ''}
         ${accounts.owed ? `<span><b>${money(accounts.owed)}</b> on cards</span>` : ''}
       </div>
