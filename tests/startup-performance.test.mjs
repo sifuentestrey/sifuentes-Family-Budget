@@ -29,7 +29,7 @@ test('bills and targets do not block the first real-data paint', () => {
 
 test('PWA install caches only the critical shell instead of the whole engine graph', () => {
   const shell = sw.slice(sw.indexOf('const SHELL_ASSETS'), sw.indexOf('self.addEventListener'));
-  assert.match(sw, /CACHE_VERSION = 'v55'/);
+  assert.match(sw, /CACHE_VERSION = 'v56'/);
   assert.doesNotMatch(shell, /\.\.\/src\/engine\//);
   assert.match(shell, /refresh-transactions\.js/);
   assert.match(shell, /payroll\/forecast\.js/);
