@@ -135,6 +135,7 @@ export function buildDinnerGuidance({ asOf, transactions = [], plan } = {}) {
   const restaurantStats = recentRestaurantStats(transactions, asOf);
 
   if (!allowance) {
+    const recommendation = restaurantStats[0] ?? null;
     return {
       status: 'needs_target',
       amount: null,
@@ -144,6 +145,7 @@ export function buildDinnerGuidance({ asOf, transactions = [], plan } = {}) {
       confidence: 'high',
       basedOn: ['household budget targets'],
       restaurantStats,
+      recommendation,
     };
   }
 
