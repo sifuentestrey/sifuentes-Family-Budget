@@ -122,7 +122,7 @@ export async function disconnectGmail(id) {
 export async function listConnectedItems() {
   const { data, error } = await supabase
     .from('items')
-    .select('id, owner_user_id, institution_name, status, status_detail, updated_at, accounts(id, owner_user_id, nickname, mask, type, current_balance)')
+    .select('id, owner_user_id, institution_name, status, status_detail, updated_at, accounts(id, owner_user_id, nickname, mask, type, current_balance, available_balance)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data ?? [];
