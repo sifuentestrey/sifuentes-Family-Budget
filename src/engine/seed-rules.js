@@ -92,6 +92,8 @@ export const SEED_RULES = [
 
   // --- Dining ---
   ['chipotle', 'Dining Out'], ['mcdonald', 'Dining Out'], ['taco bell', 'Dining Out'],
+  ['kfc', 'Dining Out'], ['kentucky fried chicken', 'Dining Out'],
+  ['papa john', 'Dining Out'],
   ['subway', 'Dining Out'], ['panera', 'Dining Out'], ['chick-fil-a', 'Dining Out'],
   ['chick fil a', 'Dining Out'], ['wendys', 'Dining Out'], ['burger king', 'Dining Out'],
   ['pizza', 'Dining Out'], ['sushi', 'Dining Out'], ['restaurant', 'Dining Out'],
