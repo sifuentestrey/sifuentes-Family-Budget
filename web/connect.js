@@ -174,6 +174,121 @@ export async function listTransactions() {
   return (data ?? []).map(({ categories, ...t }) => ({ ...t, category: categories?.name ?? null }));
 }
 
+const merchantRuleKey = (value) => String(value ?? '')
+  .toLowerCase()
+  .replace(/[’']/g, '')
+  .replace(/[^a-z0-9]+/g, '');
+
+/**
+ * Save one explicit household merchant decision.
+ *
+ * The rule is shared by both members and is exact after payee normalization,
+ * so a correction for one merchant cannot bleed into a similarly named one.
+ * Existing transaction amounts are never touched. Past categories change only
+ * when the household explicitly chose the "update past" action.
+ */
+export async function applyMerchantDecision({ merchant, category, applyHistory = false, matchType = 'exact' }) {
+  const merchantName = String(merchant ?? '').trim();
+  const categoryName = String(category ?? '').trim();
+  if (!merchantName || !categoryName) throw new Error('Merchant and category are required');
+
+  const session = await getSession();
+  if (!session) throw new Error('Not signed in');
+  const { data: membership, error: memberError } = await supabase
+    .from('household_members')
+    .select('household_id')
+    .eq('user_id', session.user.id)
+    .limit(1)
+    .maybeSingle();
+  if (memberError) throw memberError;
+  if (!membership) throw new Error('Not in a household');
+
+  const householdId = membership.household_id;
+  const { data: categoryRows, error: categoryError } = await supabase
+    .from('categories')
+    .select('id, name')
+    .eq('household_id', householdId)
+    .eq('is_archived', false);
+  if (categoryError) throw categoryError;
+  const categoryRow = (categoryRows ?? []).find((row) =>
+    row.name.toLowerCase() === categoryName.toLowerCase());
+  if (!categoryRow) throw new Error(`Category "${categoryName}" was not found`);
+
+  const ruleKind = matchType === 'contains' ? 'contains' : 'exact';
+  const { data: ruleRows, error: ruleReadError } = await supabase
+    .from('rules')
+    .select('id, pattern, match_type, is_learned')
+    .eq('household_id', householdId);
+  if (ruleReadError) throw ruleReadError;
+  const key = merchantRuleKey(merchantName);
+  const existing = (ruleRows ?? []).find((row) => merchantRuleKey(row.pattern) === key
+    && row.match_type === ruleKind && row.is_learned === (ruleKind === 'exact'));
+
+  let ruleId;
+  if (existing) {
+    const { data, error } = await supabase
+      .from('rules')
+      .update({ pattern: merchantName, match_type: ruleKind, category_id: categoryRow.id, priority: 100 })
+      .eq('id', existing.id)
+      .select('id')
+      .single();
+    if (error) throw error;
+    ruleId = data.id;
+  } else {
+    const { data, error } = await supabase
+      .from('rules')
+      .insert({
+        household_id: householdId,
+        pattern: merchantName,
+        match_type: ruleKind,
+        category_id: categoryRow.id,
+        priority: 100,
+        is_learned: ruleKind === 'exact',
+      })
+      .select('id')
+      .single();
+    if (error) throw error;
+    ruleId = data.id;
+  }
+
+  let updatedTransactions = 0;
+  if (applyHistory) {
+    const { data: transactionRows, error: transactionError } = await supabase
+      .from('transactions')
+      .select('id, payee, is_transfer, is_income, parent_transaction_id')
+      .eq('household_id', householdId);
+    if (transactionError) throw transactionError;
+    const ids = (transactionRows ?? [])
+      .filter((row) => (ruleKind === 'contains'
+        ? merchantRuleKey(row.payee).includes(key)
+        : merchantRuleKey(row.payee) === key)
+        && !row.is_transfer && !row.is_income && !row.parent_transaction_id)
+      .map((row) => row.id);
+    try {
+      for (let start = 0; start < ids.length; start += 100) {
+        const batch = ids.slice(start, start + 100);
+        const { error } = await supabase
+          .from('transactions')
+          .update({
+            category_id: categoryRow.id,
+            categorized_by: 'learned',
+            manually_categorized: true,
+            updated_at: new Date().toISOString(),
+          })
+          .in('id', batch);
+        if (error) throw error;
+        updatedTransactions += batch.length;
+      }
+    } catch (error) {
+      const partial = new Error(`The household rule was saved, but only ${updatedTransactions} past charges were updated: ${error.message}`);
+      partial.ruleApplied = true;
+      throw partial;
+    }
+  }
+
+  return { ruleId, updatedTransactions, merchant: merchantName, category: categoryRow.name };
+}
+
 /**
  * Household members, so the Connect tab can show who is actually in here.
  *

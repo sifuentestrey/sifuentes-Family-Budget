@@ -46,6 +46,7 @@ const BROWSER_ONLY = new Set([
   'engine/adaptive-budget.js',
   'engine/money-plan-summary.js',
   'engine/household-plan.js',
+  'engine/finance-advisor.js',
 ]);
 
 // Single files, named explicitly rather than by directory, so files that

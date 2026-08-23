@@ -3492,6 +3492,22 @@ function recategorize(id, category) {
   // this runs.
   buildPlan();
   render();
+
+  if (state.session && category) {
+    void loadConnect()
+      .then((connect) => connect.applyMerchantDecision({
+        merchant: txn.payee,
+        category,
+        applyHistory: true,
+      }))
+      .then(() => window.dispatchEvent(new CustomEvent('family-budget:data-changed', {
+        detail: { source: 'transaction-category' },
+      })))
+      .catch((error) => {
+        state.autoCategorizeError = `Couldn't save that household rule: ${error.message}`;
+        render();
+      });
+  }
 }
 
 function routeFromEnhancement(view) {
@@ -3507,6 +3523,20 @@ function routeFromEnhancement(view) {
 }
 
 window.__familyBudgetRoute = routeFromEnhancement;
+
+let householdDataRefreshBusy = false;
+window.addEventListener('family-budget:data-changed', async () => {
+  if (householdDataRefreshBusy || !state.session) return;
+  householdDataRefreshBusy = true;
+  try {
+    const connect = await loadConnect();
+    await Promise.all([refreshRealTransactions(connect), refreshBills()]);
+    buildPlan();
+    render();
+  } finally {
+    householdDataRefreshBusy = false;
+  }
+});
 
 function render() {
   const app = document.getElementById('app');
