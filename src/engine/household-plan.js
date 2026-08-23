@@ -190,7 +190,7 @@ export function buildHouseholdPlan({
   paychecks = [],
   incomeStreams = [],
   budgetTargets = {},
-  flexibleCategories = ['Groceries', 'Restaurants', 'Gas', 'Household/Fun'],
+  flexibleCategories = ['Groceries', 'Dining Out', 'Gas', 'Household/Fun'],
   transactions = [],
 } = {}) {
   if (!validDate(asOf)) throw new Error('asOf must be YYYY-MM-DD');
