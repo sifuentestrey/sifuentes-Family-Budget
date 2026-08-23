@@ -22,7 +22,7 @@ const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   './', './index.html', './app.js', './redesign.css', './budget-clarity.js',
   './bills-center.js', './payday-calendar.js', './payday-events.js',
-  './refresh-transactions.js', './simple-home.js', './reset.html', './manifest.webmanifest',
+  './refresh-transactions.js', './reset.html', './manifest.webmanifest',
   './vendor/open-props.min.css', './vendor/open-props-normalize.min.css',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
   '../src/domain/payroll.js', '../src/payroll/pay-calculator.js', '../src/payroll/forecast.js',
@@ -65,7 +65,6 @@ async function shellDocument(request) {
   if (!refreshed.includes('redesign.css')) refreshed = refreshed.replace('</head>', '  <link rel="stylesheet" href="./redesign.css" />\\n</head>');
   if (!refreshed.includes('budget-clarity.js')) refreshed = refreshed.replace('</body>', '  <script src="./budget-clarity.js"></script>\\n</body>');
   if (!refreshed.includes('payday-calendar.js')) refreshed = refreshed.replace('</body>', '  <script type="module" src="./payday-calendar.js"></script>\\n</body>');
-  if (!refreshed.includes('simple-home.js')) refreshed = refreshed.replace('</body>', '  <script type="module" src="./simple-home.js"></script>\\n</body>');
   const headers = new Headers(response.headers); headers.delete('content-length');
   return new Response(refreshed, { status: response.status, statusText: response.statusText, headers });
 }
