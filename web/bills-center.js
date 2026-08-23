@@ -97,7 +97,10 @@ function ensureStyle() {
     [data-bill-center] .bill-day-dot.paid{background:var(--positive)}
     [data-bill-center] .bill-day-count{font-size:9px;color:var(--muted)}
     [data-bill-center] .bill-center-row.paid{opacity:.78}
-    [data-bill-center] .bill-center-row .row-title .chip{margin-left:6px}
+    [data-bill-center] .bill-center-row .row-body{min-width:0}
+    [data-bill-center] .bill-center-row .row-title{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center;min-width:0}
+    [data-bill-center] .bill-row-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    [data-bill-center] .bill-primary-status{display:inline-flex;flex:0 0 auto}
     [data-bill-center] .bill-center-row .row-end{min-width:88px}
     [data-bill-center] .bill-center-loading{padding:22px 10px;text-align:center;color:var(--muted)}
     [data-bill-center] .bill-row-edit{border:0;background:transparent;color:var(--accent);font:inherit;font-size:12px;font-weight:750;padding:4px 0 0;cursor:pointer}
@@ -218,13 +221,10 @@ function avatar(name, transactions) {
     onload="this.classList.add('loaded')" onerror="window.__logoFailed(this)" /></span>`;
 }
 
-function statusChips(item) {
-  const chips = [item.paid ? '<span class="chip chip-ok">paid</span>' : '<span class="chip chip-outline">due</span>'];
-  if (item.kind === 'subscription') chips.push('<span class="chip">subscription</span>');
-  if (item.paymentMode === 'auto') chips.push('<span class="chip">auto</span>');
-  if (item.paymentMode === 'manual') chips.push('<span class="chip">you pay</span>');
-  if (item.amountVaries) chips.push('<span class="chip chip-warn">varies</span>');
-  return chips.join('');
+function statusChip(item) {
+  return item.paid
+    ? '<span class="chip chip-ok">paid</span>'
+    : '<span class="chip chip-outline">due</span>';
 }
 
 function trackedBillFor(item, bills) {
@@ -338,7 +338,10 @@ function renderObligationRow(item, transactions, bills, assignments) {
     <div class="row bill-center-row ${item.paid ? 'paid' : ''}">
       ${avatar(item.providerName, transactions)}
       <div class="row-body">
-        <div class="row-title">${esc(item.providerName)}${statusChips(item)}</div>
+        <div class="row-title">
+          <span class="bill-row-name">${esc(item.providerName)}</span>
+          <span class="bill-primary-status">${statusChip(item)}</span>
+        </div>
         <div class="row-sub">${esc(detail)}</div>
       </div>
       <div class="row-end">
