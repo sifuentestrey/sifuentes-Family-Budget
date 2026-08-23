@@ -117,7 +117,7 @@ function append(html, kind = '') {
 function renderDinner(result) {
   const basis = `${result.confidence[0].toUpperCase()}${result.confidence.slice(1)} confidence · Based on ${result.basedOn.join(', ')}.`;
   const recommendation = result.recommendation
-    ? `<div class="af-callout"><strong>${esc(result.recommendation.merchant)} usually runs ${money(result.recommendation.typical)}</strong><br>Recent visits were typically ${money(result.recommendation.low)}–${money(result.recommendation.high)}. That fits tonight's amount. If that sounds good, it is a reasonable choice for tonight.</div>`
+    ? `<div class="af-callout"><strong>${esc(result.recommendation.merchant)} usually runs ${money(result.recommendation.typical)}</strong><br>Recent visits were typically ${money(result.recommendation.low)}–${money(result.recommendation.high)}. ${result.status === 'needs_target' ? 'Set the Dining Out target before I call that affordable tonight.' : "That fits tonight's amount. If that sounds good, it is a reasonable choice for tonight."}</div>`
     : result.status === 'available'
       ? '<div class="af-callout">I do not have two recent visits to one restaurant that clearly fits, so I will not invent a recommendation.</div>'
       : '';
@@ -161,7 +161,7 @@ function renderProposal(proposal) {
   append(`<div class="af-card" data-af-proposal>
     <div class="af-kicker">Needs review</div>
     <div class="af-card-title">${esc(proposal.merchant)} → ${esc(proposal.category)}</div>
-    <div class="af-copy">Create an exact household rule for Trey and Alexus.${esc(recurring)}</div>
+    <div class="af-copy">Create a merchant-name household rule for Trey and Alexus.${esc(recurring)}</div>
     ${caution}
     <div class="af-meta">High confidence in the requested action · Based on your words. Transaction amounts will not change, and no money will move.</div>
     <div class="af-actions">
@@ -217,6 +217,7 @@ async function applyProposal(mode, button) {
       merchant: currentProposal.merchant,
       category: currentProposal.category,
       applyHistory: mode === 'history',
+      matchType: 'contains',
     });
     if (currentProposal.suppressRecurring) {
       await data.bills.suppressBill({ providerName: currentProposal.merchant, category: currentProposal.category });
