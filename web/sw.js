@@ -62,9 +62,9 @@ async function shellDocument(request) {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('text/html')) return response;
   let refreshed = await response.text();
-  if (!refreshed.includes('redesign.css')) refreshed = refreshed.replace('</head>', '  <link rel="stylesheet" href="./redesign.css" />\\n</head>');
-  if (!refreshed.includes('budget-clarity.js')) refreshed = refreshed.replace('</body>', '  <script src="./budget-clarity.js"></script>\\n</body>');
-  if (!refreshed.includes('payday-calendar.js')) refreshed = refreshed.replace('</body>', '  <script type="module" src="./payday-calendar.js"></script>\\n</body>');
+  if (!refreshed.includes('redesign.css')) refreshed = refreshed.replace('</head>', '  <link rel="stylesheet" href="./redesign.css" />\n</head>');
+  if (!refreshed.includes('budget-clarity.js')) refreshed = refreshed.replace('</body>', '  <script src="./budget-clarity.js"></script>\n</body>');
+  if (!refreshed.includes('payday-calendar.js')) refreshed = refreshed.replace('</body>', '  <script type="module" src="./payday-calendar.js"></script>\n</body>');
   const headers = new Headers(response.headers); headers.delete('content-length');
   return new Response(refreshed, { status: response.status, statusText: response.statusText, headers });
 }
