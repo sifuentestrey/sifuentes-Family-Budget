@@ -206,3 +206,9 @@ function schedule() {
 
 new MutationObserver(schedule).observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true });
 schedule();
+
+window.addEventListener('family-budget:data-changed', () => {
+  dataPromise = null;
+  document.querySelector('main [data-simple-home]')?.remove();
+  schedule();
+});
