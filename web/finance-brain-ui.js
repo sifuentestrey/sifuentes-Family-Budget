@@ -1,5 +1,3 @@
-import { listAdvisorRecommendations, dismissAdvisorRecommendation } from './connect.js';
-
 let scheduled = false;
 let loading = false;
 
@@ -61,7 +59,7 @@ function render(host, rows) {
   host.querySelectorAll('[data-finance-dismiss]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try {
-      await dismissAdvisorRecommendation(button.dataset.financeDismiss);
+      await (await import('./connect.js')).dismissAdvisorRecommendation(button.dataset.financeDismiss);
       schedule();
     } catch {
       button.disabled = false;
@@ -75,7 +73,7 @@ async function run() {
   loading = true;
   try {
     ensureStyle();
-    const rows = await listAdvisorRecommendations();
+    const rows = await (await import('./connect.js')).listAdvisorRecommendations();
     if (!home.isConnected || !homeActive()) return;
     const host = document.createElement('section');
     host.dataset.financeBrain = '1';
