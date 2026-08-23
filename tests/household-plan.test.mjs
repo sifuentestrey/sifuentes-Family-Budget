@@ -38,7 +38,7 @@ test('uses exact bill amounts over recurring estimates and assigns each bill to 
   assert.equal(plan.forecasts.nextPaycheckPlan.billsTotal, 2010);
   assert.deepEqual(plan.forecasts.nextPaycheckPlan.bills.map((item) => item.providerName), ['Mortgage', 'Electric']);
   assert.equal(plan.forecasts.nextPaycheckPlan.bills[0].amountSource, 'verified amount');
-  assert.equal(plan.forecasts.later.length, 0);
+  assert.equal(plan.forecasts.laterBills.length, 0);
 });
 
 test('does not present an incomplete timecard as final or use it in the expected after-plan number', () => {
