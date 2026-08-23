@@ -80,6 +80,28 @@ export async function getAdvisorNote(summary, question) {
   return callFunction('advisor-note', question ? { summary, question } : { summary });
 }
 
+
+/** Finance Brain recommendations are advisory; applying one never moves money. */
+export async function listAdvisorRecommendations() {
+  const { data, error } = await supabase
+    .from('advisor_recommendations')
+    .select('id, recommendation_id, analysis_date, type, action, priority, title, message, reason, confidence, status, created_at, applied_at')
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Dismissal is a household-visible decision record, not a financial action. */
+export async function dismissAdvisorRecommendation(id) {
+  const { error } = await supabase
+    .from('advisor_recommendations')
+    .update({ status: 'dismissed' })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+
 /** Household-visible history of past advisor notes, most recent first. */
 export async function listAdvisorNotes() {
   const { data, error } = await supabase
@@ -122,7 +144,7 @@ export async function disconnectGmail(id) {
 export async function listConnectedItems() {
   const { data, error } = await supabase
     .from('items')
-    .select('id, owner_user_id, institution_name, status, status_detail, updated_at, accounts(id, owner_user_id, nickname, mask, type, current_balance)')
+    .select('id, owner_user_id, institution_name, status, status_detail, updated_at, accounts(id, owner_user_id, nickname, mask, type, current_balance, available_balance)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data ?? [];

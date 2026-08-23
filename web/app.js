@@ -1494,13 +1494,6 @@ function renderDashboard() {
 
   const cash = cashOnHand();
 
-  // The same until-payday arithmetic as before, now shown as a supporting
-  // line under the balance rather than as the headline. "Safe to spend" was
-  // the app's own coinage and meant nothing to the people using it; the
-  // number is still useful, the name was not.
-  const sts = gatherSafeToSpendInputs();
-  const safeToSpendResult = sts ? calculateSafeToSpend(sts) : null;
-
   const reviewCount = uncategorizedCount();
 
   return `
