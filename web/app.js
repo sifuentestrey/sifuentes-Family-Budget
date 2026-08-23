@@ -1242,7 +1242,7 @@ const INCOME_TABS = [
 ];
 
 function uncategorizedCount() {
-  return state.transactions.filter((t) => !t.category && !t.is_transfer && !t.is_income && !t.pending).length;
+  return spendingIn(state.month).filter((t) => !t.category).length;
 }
 
 function renderBottomNav() {
@@ -1838,14 +1838,16 @@ function categoryOptions(selected) {
 }
 
 function renderReview() {
-  const queue = state.transactions.filter(
-    (t) => !t.category && !t.is_transfer && !t.is_income && !t.pending,
+  const monthTransactions = state.transactions.filter(
+    (t) => monthKey(t.posted_date) === state.month && !t.is_transfer && !t.is_income && !t.pending,
   );
-  const stats = categorizationStats(state.transactions.filter((t) => !t.is_transfer && !t.is_income));
+  const queue = spendingIn(state.month).filter((t) => !t.category);
+  const stats = categorizationStats(monthTransactions);
 
   if (!queue.length) {
     return `
       ${segmented(SPENDING_TABS)}
+      ${renderMonthPicker()}
       ${emptyState({
         iconName: 'check',
         title: 'Nothing to review',
@@ -1857,6 +1859,7 @@ function renderReview() {
 
   return `
     ${segmented(SPENDING_TABS)}
+    ${renderMonthPicker()}
     ${section('Still unknown', `
       ${state.autoCategorizeResult ? `
         <div class="banner banner-good">
