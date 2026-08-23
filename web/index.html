@@ -748,10 +748,18 @@
     // Registered outside the module so a service-worker failure can never stop
     // the app itself from loading.
     if ('serviceWorker' in navigator) {
+      let refreshingShell = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshingShell) return;
+        refreshingShell = true;
+        location.reload();
+      });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(() => {
-          /* Offline support is a bonus, not a requirement. */
-        });
+        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+          .then((registration) => registration.update())
+          .catch(() => {
+            /* Offline support is a bonus, not a requirement. */
+          });
       });
     }
   </script>
