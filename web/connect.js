@@ -264,19 +264,25 @@ export async function applyMerchantDecision({ merchant, category, applyHistory =
         : merchantRuleKey(row.payee) === key)
         && !row.is_transfer && !row.is_income && !row.parent_transaction_id)
       .map((row) => row.id);
-    for (let start = 0; start < ids.length; start += 100) {
-      const batch = ids.slice(start, start + 100);
-      const { error } = await supabase
-        .from('transactions')
-        .update({
-          category_id: categoryRow.id,
-          categorized_by: 'learned',
-          manually_categorized: true,
-          updated_at: new Date().toISOString(),
-        })
-        .in('id', batch);
-      if (error) throw error;
-      updatedTransactions += batch.length;
+    try {
+      for (let start = 0; start < ids.length; start += 100) {
+        const batch = ids.slice(start, start + 100);
+        const { error } = await supabase
+          .from('transactions')
+          .update({
+            category_id: categoryRow.id,
+            categorized_by: 'learned',
+            manually_categorized: true,
+            updated_at: new Date().toISOString(),
+          })
+          .in('id', batch);
+        if (error) throw error;
+        updatedTransactions += batch.length;
+      }
+    } catch (error) {
+      const partial = new Error(`The household rule was saved, but only ${updatedTransactions} past charges were updated: ${error.message}`);
+      partial.ruleApplied = true;
+      throw partial;
     }
   }
 
