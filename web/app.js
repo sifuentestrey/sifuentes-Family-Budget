@@ -1202,10 +1202,10 @@ function signInPrompt(what) {
  */
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
-  { id: 'plan', label: 'Plan', icon: 'calendar', views: ['plan', 'bills', 'paycheck'] },
+  { id: 'bills', label: 'Plan', icon: 'calendar', views: ['bills', 'paycheck'] },
   { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'subscriptions'] },
-  { id: 'connect', label: 'Accounts', icon: 'bank', views: ['connect', 'more', 'income', 'shifts', 'paystubs', 'advisor', 'trends'] },
+  { id: 'connect', label: 'Accounts', icon: 'bank', views: ['connect', 'more', 'income', 'shifts', 'paystubs', 'advisor', 'trends', 'plan'] },
 ];
 
 /**
@@ -1226,8 +1226,8 @@ const SPENDING_TABS = [
 
 /** Paycheck planning and the bills it must cover. */
 const PLAN_TABS = [
-  ['plan', 'Paycheck plan'],
-  ['bills', 'Monthly bills'],
+  ['bills', 'Paycheck & bills'],
+  ['paycheck', 'Paycheck details'],
 ];
 
 const BUDGET_TABS = [
@@ -2119,7 +2119,6 @@ function renderPlan() {
   const child = state.child;
 
   return `
-    ${segmented(PLAN_TABS)}
     ${section('What to do next', `
       ${state.structure ? `
         <div class="note" style="margin-bottom:10px;">
