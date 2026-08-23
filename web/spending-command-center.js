@@ -1,5 +1,3 @@
-import { listTransactions } from './connect.js';
-
 let scheduled = false;
 let loading = false;
 
@@ -82,7 +80,7 @@ async function run() {
   loading = true;
   try {
     ensureStyle();
-    const transactions = await listTransactions();
+    const transactions = await (await import('./connect.js')).listTransactions();
     if (!spendingActive() || !main.isConnected) return;
     const host = document.createElement('section');
     host.dataset.spendingCommandCenter = '1';
