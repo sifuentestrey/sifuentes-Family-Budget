@@ -11,6 +11,7 @@ let dataPromise = null;
 let currentProposal = null;
 let busy = false;
 let lastAnalysis = null;
+let authWatching = false;
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const esc = (value) => String(value ?? '')
@@ -219,11 +220,16 @@ async function applyProposal(mode, button) {
       applyHistory: mode === 'history',
       matchType: 'contains',
     });
+    let suppressionError = null;
     if (currentProposal.suppressRecurring) {
-      await data.bills.suppressBill({ providerName: currentProposal.merchant, category: currentProposal.category });
+      try {
+        await data.bills.suppressBill({ providerName: currentProposal.merchant, category: currentProposal.category });
+      } catch (error) {
+        suppressionError = error;
+      }
     }
     const proposalNode = button.closest('[data-af-proposal]');
-    proposalNode.innerHTML = `<div class="af-kicker">Applied</div><div class="af-card-title">${esc(currentProposal.merchant)} now follows ${esc(currentProposal.category)}</div><div class="af-copy">The household rule is shared with Trey and Alexus.${mode === 'history' ? ` ${result.updatedTransactions} past charge${result.updatedTransactions === 1 ? '' : 's'} updated.` : ' Existing charges were left alone.'}${currentProposal.suppressRecurring ? ' It will no longer appear as a subscription.' : ''}</div><div class="af-meta">No transaction amounts changed and no money moved.</div>`;
+    proposalNode.innerHTML = `<div class="af-kicker">${suppressionError ? 'Partly applied' : 'Applied'}</div><div class="af-card-title">${esc(currentProposal.merchant)} now follows ${esc(currentProposal.category)}</div><div class="af-copy">The household rule is shared with Trey and Alexus.${mode === 'history' ? ` ${result.updatedTransactions} past charge${result.updatedTransactions === 1 ? '' : 's'} updated.` : ' Existing charges were left alone.'}${currentProposal.suppressRecurring && !suppressionError ? ' It will no longer appear as a subscription.' : ''}${suppressionError ? ` The category rule was saved, but the subscription correction was not: ${esc(suppressionError.message)}` : ''}</div><div class="af-meta">No transaction amounts changed and no money moved.</div>`;
     currentProposal = null;
     dataPromise = null;
     window.dispatchEvent(new CustomEvent('family-budget:data-changed', { detail: { source: 'ask-finance' } }));
@@ -273,8 +279,20 @@ function open() {
 async function mount() {
   if (host || !document.getElementById('app')) return;
   try {
-    const { getSession } = await import('./connect.js');
-    if (!await getSession()) return;
+    const connect = await import('./connect.js');
+    if (!authWatching) {
+      authWatching = true;
+      connect.onAuthChange((session) => {
+        dataPromise = null;
+        if (session) { mount(); return; }
+        sheet?.closest('.af-backdrop')?.remove();
+        sheet = null;
+        currentProposal = null;
+        host?.remove();
+        host = null;
+      });
+    }
+    if (!await connect.getSession()) return;
     ensureStyle();
     host = document.createElement('button');
     host.type = 'button';
