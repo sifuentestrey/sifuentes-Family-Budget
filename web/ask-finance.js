@@ -234,7 +234,11 @@ async function applyProposal(mode, button) {
     dataPromise = null;
     window.dispatchEvent(new CustomEvent('family-budget:data-changed', { detail: { source: 'ask-finance' } }));
   } catch (error) {
-    append(`<strong>That was not applied.</strong><br>${esc(error.message)}`, 'message');
+    append(`<strong>${error.ruleApplied ? 'Partly applied.' : 'That was not applied.'}</strong><br>${esc(error.message)}`, 'message');
+    if (error.ruleApplied) {
+      dataPromise = null;
+      window.dispatchEvent(new CustomEvent('family-budget:data-changed', { detail: { source: 'ask-finance' } }));
+    }
     sheet.querySelectorAll('[data-af-apply], [data-af-dismiss]').forEach((node) => { node.disabled = false; });
   } finally {
     busy = false;
