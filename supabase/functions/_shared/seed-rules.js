@@ -96,7 +96,9 @@ export const SEED_RULES = [
   // --- Dining ---
   ['chipotle', 'Dining Out'], ['mcdonald', 'Dining Out'], ['taco bell', 'Dining Out'],
   ['kfc', 'Dining Out'], ['kentucky fried chicken', 'Dining Out'],
-  ['papa john', 'Dining Out'],
+  ['papa john', 'Dining Out'], ['wingstop', 'Dining Out'],
+  ['jack in the box', 'Dining Out'], ['sonic drive-in', 'Dining Out'],
+  ["mo' bettahs", 'Dining Out'], ['donut', 'Dining Out'],
   ['subway', 'Dining Out'], ['panera', 'Dining Out'], ['chick-fil-a', 'Dining Out'],
   ['chick fil a', 'Dining Out'], ['wendys', 'Dining Out'], ['burger king', 'Dining Out'],
   ['pizza', 'Dining Out'], ['sushi', 'Dining Out'], ['restaurant', 'Dining Out'],
@@ -110,6 +112,7 @@ export const SEED_RULES = [
   ['arco', 'Gas'], ['valero', 'Gas'], ['texaco', 'Gas'], ['sunoco', 'Gas'],
   ['citgo', 'Gas'], ['marathon', 'Gas'], ['speedway', 'Gas'], ['wawa', 'Gas'],
   ['quiktrip', 'Gas'], ['racetrac', 'Gas'], ['circle k', 'Gas'], ['76 ', 'Gas'],
+  ['7-eleven', 'Gas'], ['pilot flying j', 'Gas'],
   ['fuel', 'Gas'], ['gasoline', 'Gas'],
 
   // --- Transit / parking ---
@@ -135,6 +138,7 @@ export const SEED_RULES = [
 
   // --- Subscriptions ---
   ['netflix', 'Subscriptions'], ['spotify', 'Subscriptions'],
+  ['namecheap', 'Subscriptions'],
   ['hulu', 'Subscriptions'], ['disney', 'Subscriptions'],
   ['hbo', 'Subscriptions'], ['max.com', 'Subscriptions'],
   ['apple.com/bill', 'Subscriptions'], ['apple services', 'Subscriptions'],
@@ -160,6 +164,7 @@ export const SEED_RULES = [
   // --- Pharmacy / medical ---
   ['cvs', 'Pharmacy'], ['walgreens', 'Pharmacy'], ['rite aid', 'Pharmacy'],
   ['pharmacy', 'Pharmacy'], ['dental', 'Medical'], ['dentist', 'Medical'],
+  ['texas health', 'Medical'],
   ['clinic', 'Medical'], ['medical', 'Medical'], ['hospital', 'Medical'],
   ['physician', 'Medical'], ['optometry', 'Medical'], ['urgent care', 'Medical'],
   ['labcorp', 'Medical'], ['quest diagnostics', 'Medical'],
@@ -197,6 +202,7 @@ export const SEED_RULES = [
   ['southwest air', 'Travel'], ['alaska air', 'Travel'], ['hotel', 'Travel'],
 
   // --- Financial ---
+  ['pennymac', 'Rent/Mortgage'], ['advancial fed cu', 'Car Payment'],
   ['geico', 'Car Insurance'], ['state farm', 'Insurance'],
   ['progressive', 'Car Insurance'], ['allstate', 'Insurance'],
   ['usaa', 'Insurance'], ['dmv', 'Registration/Fees'],
