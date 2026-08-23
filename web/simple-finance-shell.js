@@ -85,7 +85,7 @@
     setTab(tabs[2], 'spending', 'Spending', 'spending');
     setTab(tabs[3], 'simple-budget-primary', 'Budget', 'budget');
     bindBudgetPrimary(tabs[3]);
-    setTab(tabs[4], 'more', 'More', 'more');
+    setTab(tabs[4], 'more', 'Accounts', 'more');
 
     const activeIndex = view === 'dashboard' ? 0
       : view === 'bills' ? 1
@@ -133,6 +133,7 @@
 
   function injectIncomeInMore(view) {
     if (view !== 'more') return;
+    setHeader('Accounts', 'Connected accounts, household members, and income sources.');
     const section = [...document.querySelectorAll('main .section')]
       .find((node) => node.querySelector('.section-title')?.textContent.trim() === 'More');
     const list = section?.querySelector('.list');
@@ -155,7 +156,7 @@
 
   function polishHome(view) {
     if (view !== 'dashboard') return;
-    setHeader('Home', 'Balances, bills, budget and recent activity.');
+    setHeader('Home', 'What needs attention, checking, and next payday.');
 
     // Forecasting belongs in Plan. Home should stay factual and familiar.
     const cards = [...document.querySelectorAll('main .card')];
