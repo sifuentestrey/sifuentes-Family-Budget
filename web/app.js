@@ -1205,7 +1205,7 @@ const NAV_GROUPS = [
   { id: 'bills', label: 'Plan', icon: 'calendar', views: ['bills', 'paycheck'] },
   { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'subscriptions'] },
-  { id: 'connect', label: 'Accounts', icon: 'bank', views: ['connect', 'more', 'income', 'shifts', 'paystubs', 'advisor', 'trends', 'plan'] },
+  { id: 'advisor', label: 'Advisor', icon: 'sparkle', views: ['advisor'] },
 ];
 
 /**
@@ -1270,13 +1270,14 @@ function renderBottomNav() {
  * there; what's left is genuinely peripheral.
  */
 function renderMore() {
+  // 'more' is intentionally reached from the app-bar settings button rather
+  // than spending one of the five primary tabs on settings.
   const rows = [
+    // The app-bar settings button routes here with data-view='more'.
     ['subscriptions', 'Recurring & subscriptions', 'repeat', 'What renews, and what it costs per year'],
     ['trends', 'Trends', 'trend', 'Category by category, month by month'],
     ['connect', 'Accounts & sync', 'bank', state.connectedItems.length
       ? `${state.connectedItems.length} connected` : 'No bank connected'],
-    ['advisor', 'Advisor', 'sparkle', state.advisorNotes.length
-      ? `${state.advisorNotes.length} check-in${state.advisorNotes.length === 1 ? '' : 's'}` : 'Ask about your numbers'],
     ['plan', 'Long-term plan', 'trend', 'Priorities, debt, the child transition'],
   ];
 
@@ -2641,49 +2642,11 @@ function renderSubscriptions() {
 function renderAdvisor() {
   if (!state.session) return signInPrompt('use the advisor');
 
-  return `
-    ${section('Advisor', `
-      ${state.advisorError ? `<div class="banner banner-warn"><div class="banner-body">${state.advisorError}</div></div>` : ''}
-
-      <form id="advisor-ask-form" class="field-inline" style="margin-bottom:10px;">
-        <input class="input" type="text" name="question" placeholder="Ask about your numbers…"
-          autocomplete="off" ${state.advisorBusy ? 'disabled' : ''} />
-        <button type="submit" class="btn btn-primary" ${state.advisorBusy ? 'disabled' : ''}>
-          ${state.advisorBusy ? '…' : 'Ask'}
-        </button>
-      </form>
-
-      <button data-action="get-advisor-note" class="btn btn-secondary btn-block"
-        ${state.advisorBusy ? 'disabled' : ''}>
-        ${icon('sparkle', 16)} ${state.advisorBusy ? 'Thinking…' : 'Get a check-in'}
-      </button>
-    `, {
-      sub: 'Only numbers this app already computed — never one it made up',
-    })}
-
-    ${state.advisorNotes.length === 0 ? `
-      <div style="margin-top:14px;">
-        ${emptyState({
-          iconName: 'sparkle',
-          title: 'No check-ins yet',
-          body: 'The first one starts the history.',
-        })}
-      </div>
-    ` : section('History', `
-      <div class="list">
-        ${state.advisorNotes.map((n) => `
-          <div class="row" style="display:block;">
-            <div class="row-sub" style="margin-bottom:6px;">
-              ${new Date(n.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-              ${n.source === 'daily' ? '<span class="chip">daily</span>' : ''}
-            </div>
-            ${n.question ? `<div class="row-title" style="margin-bottom:6px;">You asked: “${escapeHtml(n.question)}”</div>` : ''}
-            <div class="prose">${n.note}</div>
-          </div>
-        `).join('')}
-      </div>
-    `)}
-  `;
+  // The Advisor surface is mounted by ask-finance.js. Keeping it as a normal
+  // first-class view — rather than a floating sheet — makes its answers part
+  // of the household's navigation and prevents a question from hiding the
+  // bill or budget screen underneath it.
+  return '<div id="finance-advisor-tab"><div class="loading">Loading household facts…</div></div>';
 }
 
 // ---------------------------------------------------------------------------
@@ -3441,7 +3404,7 @@ const VIEW_HEADERS = {
   shifts: () => ['Income', 'Hours logged, and what they forecast'],
   paystubs: () => ['Income', 'Real stubs against the forecast'],
   plan: () => ['Plan', 'The order to do things in'],
-  advisor: () => ['Advisor', 'A read on your own numbers'],
+  advisor: () => ['Advisor', 'Household facts, corrections, and Finance handoff'],
   connect: () => ['Accounts', 'Banks, email, and who else is here'],
   more: () => ['Settings', ''],
 };
@@ -3650,10 +3613,6 @@ function render() {
           .then(refreshPaystubs)
           .then(render);
       }
-      // Advisor needs a session to read/write its note history, same pattern
-      // as the other tabs above — does not generate a note on visit, only
-      // loads past ones, since generating one is a real API call the user
-      // should trigger deliberately, not something that fires on every tab click.
       // The browser is the authority on notification permission, and it can
       // change outside the app, so this is re-read on every visit to More
       // rather than cached.
@@ -3667,14 +3626,6 @@ function render() {
           .catch(() => { /* the row falls back to "cannot show them" */ });
       }
 
-      if (state.view === 'advisor' && !state.advisorAttempted) {
-        state.advisorAttempted = true;
-        const haveSession = state.connectAttempted;
-        state.connectAttempted = true;
-        (haveSession ? Promise.resolve() : refreshConnection())
-          .then(refreshAdvisorNotes)
-          .then(render);
-      }
       render(); // shows the view immediately either way
     }),
   );
