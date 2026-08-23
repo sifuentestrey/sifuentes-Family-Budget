@@ -1,7 +1,8 @@
 /**
- * Advisor tab — deterministic while ChatGPT Finance remains the optional
- * reasoning surface. It looks up exact ledger facts and proposes rules; it
- * never claims an aggregate summary knows a specific merchant.
+ * Advisor tab — Gemini reasons over a privacy-scoped household context built
+ * from the exact same deterministic plan that powers the rest of the app.
+ * Gemini may explain and propose a correction; applying it remains a separate,
+ * explicit household action below.
  */
 import { buildHouseholdPlan } from '../src/engine/household-plan.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
@@ -93,16 +94,90 @@ function factCards(context) {
     </div>`;
 }
 
+function compactTransaction(transaction) {
+  return {
+    date: transaction.posted_date,
+    merchant: transaction.payee || transaction.raw_description,
+    amount: Number(transaction.amount || 0),
+    category: transaction.category || 'Uncategorized',
+    transfer: Boolean(transaction.is_transfer),
+    income: Boolean(transaction.is_income),
+    pending: Boolean(transaction.pending),
+  };
+}
+
+function merchantDirectory(transactions) {
+  const groups = new Map();
+  for (const transaction of transactions) {
+    if (transaction.pending || transaction.is_transfer || transaction.is_income || transaction.parent_transaction_id) continue;
+    const merchant = transaction.payee || transaction.raw_description;
+    if (!merchant) continue;
+    const key = merchantMatchKey(merchant);
+    const group = groups.get(key) || { merchant, charges: [], categories: new Set(), latest: transaction.posted_date };
+    group.charges.push(Number(transaction.amount || 0));
+    if (transaction.category) group.categories.add(transaction.category);
+    if (String(transaction.posted_date || '') > String(group.latest || '')) {
+      group.latest = transaction.posted_date;
+      group.merchant = merchant;
+    }
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => ({
+    merchant: group.merchant,
+    charges: group.charges.length,
+    total: Math.round(group.charges.reduce((sum, amount) => sum + amount, 0) * 100) / 100,
+    latest: group.latest,
+    categories: [...group.categories],
+  })).sort((a, b) => String(b.latest).localeCompare(String(a.latest))).slice(0, 180);
+}
+
+function buildAdvisorContext(data, context) {
+  const { plan, obligations, bills, recurring, asOf } = context;
+  const paycheck = plan.forecasts.nextPaycheck;
+  const dinner = buildDinnerGuidance({ asOf, transactions: data.transactions, plan });
+  const allowedCategories = [...new Set([
+    ...data.transactions.map((row) => row.category),
+    ...data.budgetTargets.map((row) => row.category || row.category_name),
+    'Groceries', 'Dining Out', 'Entertainment', 'Gas', 'Utilities', 'Subscriptions', 'Medical', 'Insurance', 'Household/Fun',
+  ].filter(Boolean))].sort();
+  return {
+    as_of: asOf,
+    facts: {
+      checking_now: Number(plan.facts.checking.available || 0),
+      checking_accounts: plan.facts.checking.accountCount || 0,
+      savings: Number(plan.facts.savings.available || 0),
+      bills_due_before_next_payday: {
+        total: Number(plan.facts.dueBeforeNextPayday.total || 0),
+        items: plan.facts.dueBeforeNextPayday.bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue, due_date: bill.dueDate, amount_basis: bill.amountSource, paid: Boolean(bill.paid) })),
+      },
+      next_paycheck: paycheck ? { amount: paycheck.amount, date: paycheck.date, confidence: paycheck.confidence, basis: paycheck.basis } : null,
+      bills_assigned_to_next_paycheck: Number(plan.forecasts.nextPaycheckPlan?.billsTotal || 0),
+      pay_period_budgets: (plan.allowances || []).map((row) => ({ category: row.category, target: row.target, spent: row.spent, left: row.left })),
+      dinner_guidance: dinner,
+    },
+    tracked_bills: bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue ?? bill.amount_due, due_date: bill.dueDate ?? bill.due_date, category: bill.category, status: bill.paid ? 'paid' : 'upcoming', basis: 'tracked bill' })),
+    recurring_estimates: recurring.map((item) => ({ provider: item.payee, amount: item.amountDue ?? item.last_amount, next_date: item.dueDate ?? item.next_date, category: item.category, basis: 'recurring estimate from bank history' })),
+    merchant_directory: merchantDirectory(data.transactions),
+    recent_transactions: data.transactions.slice(0, 220).map(compactTransaction),
+    allowed_rule_categories: allowedCategories,
+    safety: {
+      internal_transfers_excluded_from_spending_and_income: true,
+      no_autonomous_actions: true,
+      proposals_need_household_approval: true,
+    },
+  };
+}
+
 function renderShell(target, context) {
   target.innerHTML = `
     <div class="fa-hero">
       <div class="fa-eyebrow">Family money advisor</div>
       <div class="fa-title">Ask about the household plan</div>
-      <div class="fa-copy">Exact app facts first. Rules are shown before they change anything. For broader advice, hand the same facts to ChatGPT Finance.</div>
+      <div class="fa-copy">Ask normally. Gemini reasons over this household’s bills, paydays, categories, and transaction history. Any correction stays a reviewable proposal.</div>
       ${factCards(context)}
     </div>
     <section class="section">
-      <div class="section-head"><div><div class="section-title">Ask or correct something</div><div class="section-sub">Bills, merchants, dinner, and category rules</div></div></div>
+      <div class="section-head"><div><div class="section-title">Ask or correct something</div><div class="section-sub">Bills, merchants, dinner, spending, and category rules</div></div></div>
       <form class="fa-question" id="finance-advisor-form"><input class="input" name="question" autocomplete="off" placeholder="Why is BP a bill?" /><button class="btn btn-primary" type="submit">Ask</button></form>
       <div class="fa-chips" style="margin-top:10px"><button class="fa-chip" type="button" data-fa-question="Why is BP showing as a bill?">Why is BP a bill?</button><button class="fa-chip" type="button" data-fa-question="How much is Pennymac?">Pennymac amount</button><button class="fa-chip" type="button" data-fa-question="What can we afford for dinner tonight?">Dinner tonight</button><button class="fa-chip" type="button" data-fa-question="Film Alley isn't a subscription, just a movie theater we frequent">Fix Film Alley</button><button class="fa-chip" type="button" data-fa-question="Add a rule that Walmart adds towards grocery budget">Walmart groceries</button></div>
     </section>
@@ -222,6 +297,33 @@ function renderProposal(proposal) {
   append(`<div data-fa-proposal><div class="fa-kicker">Needs your review</div><h3>${esc(proposal.merchant)} → ${esc(proposal.category)}</h3><div class="fa-copy">This creates a shared household rule. ${proposal.suppressRecurring ? 'It also removes this merchant from recurring bills without deleting its bank history.' : ''}</div>${caution}<div class="fa-actions"><button class="btn btn-primary btn-sm" data-fa-apply="future">Apply to future charges</button>${proposal.pastCount ? `<button class="btn btn-outline btn-sm" data-fa-apply="history">Apply + update ${proposal.pastCount} past</button>` : ''}<button class="linkbtn quiet" data-fa-dismiss>Dismiss</button></div><div class="fa-meta">No money moves. Amounts do not change.</div></div>`);
 }
 
+function proposalFromModel(proposal, data) {
+  if (!proposal || proposal.action !== 'merchant_rule') return null;
+  const requestedMerchant = String(proposal.merchant || '').trim();
+  const requestedCategory = String(proposal.category || '').trim();
+  if (!requestedMerchant || !requestedCategory) return null;
+  const allowed = new Set([
+    ...data.transactions.map((row) => row.category),
+    ...data.budgetTargets.map((row) => row.category || row.category_name),
+    'Groceries', 'Dining Out', 'Entertainment', 'Gas', 'Utilities', 'Subscriptions', 'Medical', 'Insurance', 'Household/Fun',
+  ].filter(Boolean).map((value) => String(value).toLowerCase()));
+  if (!allowed.has(requestedCategory.toLowerCase())) return null;
+  return merchantProposal({
+    merchant: requestedMerchant,
+    category: requestedCategory,
+    suppressRecurring: Boolean(proposal.suppress_recurring),
+  }, data);
+}
+
+function renderGeminiAnswer(answer, data) {
+  const confidence = answer.confidence ? `${esc(answer.confidence)} confidence` : 'Grounded response';
+  const evidence = Array.isArray(answer.evidence) && answer.evidence.length
+    ? esc(answer.evidence.slice(0, 4).join(' · ')) : 'Based on the current household context';
+  append(`<div class="fa-kicker">Gemini finance advisor</div><div class="fa-copy" style="white-space:pre-wrap">${esc(answer.note)}</div><div class="fa-meta">${confidence} · ${evidence}</div>`);
+  const proposal = proposalFromModel(answer.proposal, data);
+  if (proposal) renderProposal(proposal);
+}
+
 function financePrompt(question, context) {
   const { plan } = context;
   const paycheck = plan.forecasts.nextPaycheck;
@@ -251,14 +353,8 @@ async function analyzeQuestion(question) {
   try {
     const data = await loadData();
     const context = buildContext(data);
-    const intent = parseFinanceAdvisorIntent(question);
-    if (intent.type === 'dinner') renderDinner(buildDinnerGuidance({ asOf: context.asOf, transactions: data.transactions, plan: context.plan }));
-    else if (intent.type === 'merchant_rule') renderProposal(merchantProposal(intent, data));
-    else {
-      const answer = factAnswer(question, data, context);
-      if (answer) append(answer);
-      else append(`<div class="fa-kicker">Finance handoff</div><h3>I do not want to guess at that.</h3><div class="fa-copy">This tab can answer exact ledger and rule questions without an AI service. Copy a grounded prompt for ChatGPT Finance; it includes the current checking, bills, and paycheck facts shown above.</div><div class="fa-actions"><button class="btn btn-primary btn-sm" data-fa-copy="${esc(question)}">Copy Finance prompt</button></div><div class="fa-meta">No app data changes when you copy or ask.</div>`);
-    }
+    const answer = await data.connect.getAdvisorNote(buildAdvisorContext(data, context), question);
+    renderGeminiAnswer(answer, data);
   } catch (error) {
     append(`<strong>I couldn't read the household facts.</strong><div class="fa-copy">${esc(error.message)}</div>`);
   } finally {
