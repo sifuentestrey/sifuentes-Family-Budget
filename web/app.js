@@ -1483,6 +1483,7 @@ function renderCategoryRows(categories, max) {
 }
 
 function renderDashboard() {
+  if (!state.month) return '<div class="loading">Preparing your monthly view…</div>';
   const txns = spendingIn(state.month);
   const total = txns.reduce((s, t) => s + t.amount, 0);
   const categories = byCategory(txns);
