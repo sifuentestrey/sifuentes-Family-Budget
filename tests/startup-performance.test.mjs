@@ -14,6 +14,12 @@ test('returning users keep navigation while real data hydrates', () => {
   assert.match(boot, /Updating your numbers/);
 });
 
+test('dashboard waits for its month instead of throwing during auth startup', () => {
+  const dashboard = app.slice(app.indexOf('function renderDashboard()'), app.indexOf('function renderHouseholdPrompt()'));
+  assert.match(dashboard, /if \(!state\.month\)/);
+  assert.ok(dashboard.indexOf('if (!state.month)') < dashboard.indexOf("state.month.split('-')"));
+});
+
 test('bills and targets do not block the first real-data paint', () => {
   const start = app.lastIndexOf('(async () => {');
   const startup = app.slice(start);
