@@ -187,7 +187,7 @@ const merchantRuleKey = (value) => String(value ?? '')
  * Existing transaction amounts are never touched. Past categories change only
  * when the household explicitly chose the "update past" action.
  */
-export async function applyMerchantDecision({ merchant, category, applyHistory = false }) {
+export async function applyMerchantDecision({ merchant, category, applyHistory = false, matchType = 'exact' }) {
   const merchantName = String(merchant ?? '').trim();
   const categoryName = String(category ?? '').trim();
   if (!merchantName || !categoryName) throw new Error('Merchant and category are required');
@@ -214,20 +214,21 @@ export async function applyMerchantDecision({ merchant, category, applyHistory =
     row.name.toLowerCase() === categoryName.toLowerCase());
   if (!categoryRow) throw new Error(`Category "${categoryName}" was not found`);
 
+  const ruleKind = matchType === 'contains' ? 'contains' : 'exact';
   const { data: ruleRows, error: ruleReadError } = await supabase
     .from('rules')
-    .select('id, pattern')
-    .eq('household_id', householdId)
-    .eq('is_learned', true);
+    .select('id, pattern, match_type, is_learned')
+    .eq('household_id', householdId);
   if (ruleReadError) throw ruleReadError;
   const key = merchantRuleKey(merchantName);
-  const existing = (ruleRows ?? []).find((row) => merchantRuleKey(row.pattern) === key);
+  const existing = (ruleRows ?? []).find((row) => merchantRuleKey(row.pattern) === key
+    && row.match_type === ruleKind && row.is_learned === (ruleKind === 'exact'));
 
   let ruleId;
   if (existing) {
     const { data, error } = await supabase
       .from('rules')
-      .update({ pattern: merchantName, match_type: 'exact', category_id: categoryRow.id, priority: 100 })
+      .update({ pattern: merchantName, match_type: ruleKind, category_id: categoryRow.id, priority: 100 })
       .eq('id', existing.id)
       .select('id')
       .single();
@@ -239,10 +240,10 @@ export async function applyMerchantDecision({ merchant, category, applyHistory =
       .insert({
         household_id: householdId,
         pattern: merchantName,
-        match_type: 'exact',
+        match_type: ruleKind,
         category_id: categoryRow.id,
         priority: 100,
-        is_learned: true,
+        is_learned: ruleKind === 'exact',
       })
       .select('id')
       .single();
@@ -258,7 +259,9 @@ export async function applyMerchantDecision({ merchant, category, applyHistory =
       .eq('household_id', householdId);
     if (transactionError) throw transactionError;
     const ids = (transactionRows ?? [])
-      .filter((row) => merchantRuleKey(row.payee) === key
+      .filter((row) => (ruleKind === 'contains'
+        ? merchantRuleKey(row.payee).includes(key)
+        : merchantRuleKey(row.payee) === key)
         && !row.is_transfer && !row.is_income && !row.parent_transaction_id)
       .map((row) => row.id);
     for (let start = 0; start < ids.length; start += 100) {
