@@ -71,13 +71,13 @@ export async function listProviderConnections() {
 }
 
 /**
- * Ask the advisor for a fresh check-in note, or answer a direct question.
- * The summary is built entirely client-side from the same engine output the
- * dashboard already renders — this call never sends raw transactions, only
- * the aggregate numbers.
+ * Ask Gemini about the household plan.  The context is deliberately assembled
+ * in the browser from the same deterministic engine output the UI displays,
+ * then sent only through the authenticated Edge Function.  The model can
+ * explain and propose a rule, but it cannot write to the ledger.
  */
-export async function getAdvisorNote(summary, question) {
-  return callFunction('advisor-note', question ? { summary, question } : { summary });
+export async function getAdvisorNote(context, question) {
+  return callFunction('advisor-note', { context, question });
 }
 
 
