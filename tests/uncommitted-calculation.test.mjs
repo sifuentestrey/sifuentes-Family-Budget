@@ -23,6 +23,6 @@ test('home uses plain checking and payday language, not legacy spending headline
 });
 
 test('installed app receives the household-plan home shell', () => {
-  assert.match(sw, /CACHE_VERSION = 'v55'/);
+  assert.match(sw, /CACHE_VERSION = 'v56'/);
   assert.match(home, /buildHouseholdPlan/);
 });
