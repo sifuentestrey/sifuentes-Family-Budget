@@ -1202,10 +1202,10 @@ function signInPrompt(what) {
  */
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
-  { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'bills'] },
+  { id: 'plan', label: 'Plan', icon: 'calendar', views: ['plan', 'bills', 'paycheck'] },
   { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
-  { id: 'income', label: 'Income', icon: 'income', views: ['income', 'paycheck', 'shifts', 'paystubs'] },
-  { id: 'more', label: 'More', icon: 'more', views: ['more', 'connect', 'advisor', 'plan', 'subscriptions', 'trends'] },
+  { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'subscriptions'] },
+  { id: 'connect', label: 'Accounts', icon: 'bank', views: ['connect', 'more', 'income', 'shifts', 'paystubs', 'advisor', 'trends'] },
 ];
 
 /**
@@ -1224,10 +1224,15 @@ const SPENDING_TABS = [
   ['year', 'Year'],
 ];
 
-/** The plan, and the bills it's mostly made of. */
+/** Paycheck planning and the bills it must cover. */
+const PLAN_TABS = [
+  ['plan', 'Paycheck plan'],
+  ['bills', 'Monthly bills'],
+];
+
 const BUDGET_TABS = [
-  ['budget', 'Budget'],
-  ['bills', 'Bills'],
+  ['budget', 'Categories'],
+  ['subscriptions', 'Subscriptions'],
 ];
 const INCOME_TABS = [
   ['income', 'Overview'],
@@ -2111,6 +2116,7 @@ function renderPlan() {
   const child = state.child;
 
   return `
+    ${segmented(PLAN_TABS)}
     ${section('What to do next', `
       ${state.structure ? `
         <div class="note" style="margin-bottom:10px;">
@@ -2212,46 +2218,59 @@ function renderBudget() {
   });
 
   const t = budget.totals;
-  const spentOfPlan = t.billsPaid + budget.necessities.reduce((s, l) => s + l.spent, 0);
+  const txns = spendingIn(state.month);
 
   const line = (l) => {
     const editing = state.editingTarget === l.category;
     const pct = l.planned ? Math.min(100, (l.spent / l.planned) * 100) : 0;
+    const rows = txns
+      .filter((txn) => (txn.category || 'Uncategorized') === l.category)
+      .sort((a, b) => b.posted_date.localeCompare(a.posted_date));
+    const status = l.planned === null
+      ? 'No target set'
+      : l.over
+        ? `${moneyExact(l.spent - l.planned)} over target`
+        : `${moneyExact(l.remaining)} left until the next monthly reset`;
 
     return `
-      <div class="row" style="display:block;">
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
-          <span class="row-title">${escapeHtml(l.category)}</span>
-          <span class="row-amount ${l.over ? 'negative' : ''}">
-            ${moneyExact(l.spent)}${l.planned !== null ? ` <span class="row-amount-sub">of ${money(l.planned)}</span>` : ''}
-          </span>
+      <details class="row cat-row budget-category-row"
+        ${state.openCategories.has(l.category) ? 'open' : ''}
+        data-category="${escapeHtml(l.category)}">
+        <summary>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+            <span class="row-title">${escapeHtml(l.category)}</span>
+            <span class="row-amount ${l.over ? 'negative' : ''}">
+              ${moneyExact(l.spent)}${l.planned !== null ? ` <span class="row-amount-sub">of ${money(l.planned)}</span>` : ''}
+            </span>
+          </div>
+          <div class="row-sub" style="margin-top:3px;">
+            ${status} · ${rows.length} transaction${rows.length === 1 ? '' : 's'}
+          </div>
+          ${l.planned !== null ? `
+            <div class="meter">
+              <div class="meter-fill ${l.over ? 'warn' : 'ok'}" style="width:${pct}%"></div>
+            </div>` : ''}
+        </summary>
+        <div class="cat-body">
+          ${rows.length
+            ? rows.map(renderTransactionRow).join('')
+            : '<div class="prose-sm" style="padding:10px 4px;">No cleared charges in this category this month.</div>'}
+          <div style="padding:9px 4px 2px;">
+            <button class="cat-pill" data-action="edit-target" data-category="${escapeHtml(l.category)}">
+              ${editing ? 'Cancel' : l.planned === null ? 'Set monthly target' : 'Change monthly target'}
+            </button>
+          </div>
+          ${editing ? `
+            <form class="field-inline" data-target-form="${escapeHtml(l.category)}" style="margin:8px 4px 4px;">
+              <input class="input" type="number" step="1" min="0" name="amount"
+                value="${l.planned ?? ''}" placeholder="Monthly target" />
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+              ${l.plannedSource === 'set'
+                ? '<button class="btn btn-sm btn-outline" type="button" data-action="clear-target" data-category="' + escapeHtml(l.category) + '">Clear</button>'
+                : ''}
+            </form>` : ''}
         </div>
-        ${l.planned !== null ? `
-          <div class="meter">
-            <div class="meter-fill ${l.over ? 'warn' : 'ok'}" style="width:${pct}%"></div>
-          </div>` : ''}
-        <div class="row-sub" style="margin-top:5px;">
-          <span>
-            ${l.planned === null
-              ? 'No target yet'
-              : l.over
-                ? `${moneyExact(l.spent - l.planned)} over`
-                : `${moneyExact(l.remaining)} left`}
-          </span>
-          <button class="cat-pill" data-action="edit-target" data-category="${escapeHtml(l.category)}">
-            ${editing ? 'Cancel' : l.planned === null ? 'Set a target' : 'Change target'}
-          </button>
-        </div>
-        ${editing ? `
-          <form class="field-inline" data-target-form="${escapeHtml(l.category)}" style="margin-top:9px;">
-            <input class="input" type="number" step="1" min="0" name="amount"
-              value="${l.planned ?? ''}" placeholder="Monthly target" />
-            <button class="btn btn-sm btn-primary" type="submit">Save</button>
-            ${l.plannedSource === 'set'
-              ? '<button class="btn btn-sm btn-outline" type="button" data-action="clear-target" data-category="' + escapeHtml(l.category) + '">Clear</button>'
-              : ''}
-          </form>` : ''}
-      </div>
+      </details>
     `;
   };
 
@@ -2265,70 +2284,37 @@ function renderBudget() {
       </div>` : ''}
 
     <div class="hero">
-      <div class="hero-label">The plan for ${monthLabel(state.month)}</div>
+      <div class="hero-label">Monthly plan for ${monthLabel(state.month)}</div>
       <div class="hero-value">${moneyExact(t.planned)}</div>
       <div class="hero-note">
-        ${moneyExact(t.billsPlanned)} in bills and ${moneyExact(t.necessitiesPlanned)} in necessities.
-        ${t.remaining > 0 ? `${moneyExact(t.remaining)} of it still has to go out.` : 'All of it is covered.'}
-      </div>
-      <div class="hero-foot">
-        <span><b>${money(spentOfPlan)}</b> spent on it so far</span>
-        <span><b>${money(t.remaining)}</b> still to go</span>
+        One monthly target. Tap any category to see exactly which charges are counted.
       </div>
     </div>
 
-    ${section('Bills', budget.bills.length ? `
-      <div class="list">
-        ${budget.bills.map((b) => row({
-          avatar: b.name,
-          logo: logoForPayee(b.name),
-          title: escapeHtml(b.name),
-          chips: b.paid ? '<span class="chip chip-ok">paid</span>' : '',
-          sub: `Due ${new Date(`${b.dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${b.category ?? 'Uncategorized'}`,
-          amount: moneyExact(b.amount),
-        })).join('')}
-      </div>
-      <div class="kv" style="margin-top:10px;">
-        <div class="kv-row total">
-          <span class="kv-label">Due this month</span><span>${moneyExact(t.billsPlanned)}</span>
+    ${section('Monthly bills', `
+      <button class="row" data-view="bills" style="width:100%;text-align:left;border:0;background:transparent;">
+        <div class="row-body">
+          <div class="row-title">Bills and subscriptions</div>
+          <div class="row-sub">Due dates, paid status, and paycheck assignments</div>
         </div>
-      </div>
-    ` : emptyState({
-      iconName: 'bills',
-      title: 'No bills tracked yet',
-      body: state.session
-        ? billSuggestionCount()
-          ? `${billSuggestionCount()} recurring charges in your own transactions look like bills — rent, childcare, insurance, the utilities. Tracking them is what turns this half of the tab from a guess into your actual bills.`
-          : 'Nothing in your transactions repeats on a bill-shaped rhythm yet.'
-        : 'Sign in to track bills.',
-      action: state.session && billSuggestionCount()
-        ? `<button class="btn btn-primary" data-view="bills">See the ${billSuggestionCount()} found</button>`
-        : '<button class="btn btn-secondary" data-view="bills">Go to bills</button>',
-    }), {
-      sub: 'Known payee, known due date',
-      action: '<button class="section-action" data-view="bills">All bills</button>',
-    })}
+        <div class="row-end">
+          <div class="row-amount">${moneyExact(t.billsPlanned)}</div>
+          <div class="row-amount-sub">this month</div>
+        </div>
+      </button>
+    `, { sub: 'Open the monthly bill calendar for the full list' })}
 
-    ${section('Necessities', budget.necessities.length ? `
+    ${section('Category budgets', budget.necessities.length ? `
       <div class="list tight">${budget.necessities.map(line).join('')}</div>
       <div class="note" style="margin-top:10px;">
-        <strong>Targets start from your own spending.</strong>
-        Each one is the average of recent months, rounded — change any of them and
-        it's saved for the whole household, so both of you are planning against the
-        same numbers. Categories a bill already covers aren't repeated here, so
-        nothing is counted twice.
+        Targets use your recent spending until Trey or Alexus changes one. A saved target is shared,
+        so both of you see the same plan.
       </div>
     ` : emptyState({
       iconName: 'list',
-      title: 'No necessity spending yet',
-      body: 'Groceries, gas, utilities and pharmacy show up here once they post.',
-    }), { sub: 'No due date, but the money goes out anyway' })}
-
-    ${t.otherSpent > 0 ? `
-      <div class="prose-sm" style="margin-top:4px;">
-        ${moneyExact(t.otherSpent)} more went to everything else this month — dining out,
-        shopping, the discretionary side. That's on the Spending tab, not budgeted here.
-      </div>` : ''}
+      title: 'No category spending yet',
+      body: 'Groceries, gas, utilities, pharmacy, and other planned categories appear after charges clear.',
+    }), { sub: 'Spent of target · tap a row for the charges' })}
   `;
 }
 
@@ -2362,14 +2348,8 @@ function renderSpending() {
     month: state.month,
   });
   const reviewCount = uncategorizedCount();
-
-  const prior = state.months.filter((x) => x < state.month).slice(-3)
-    .map((x) => spendingIn(x).reduce((s, t) => s + t.amount, 0))
-    .filter((v) => v > 0);
-  const priorAvg = prior.length >= MIN_MONTHS_FOR_AVERAGE
-    ? prior.reduce((a, b) => a + b, 0) / prior.length
-    : null;
-
+  const visibleCategories = m.rest.categories.slice(0, CATEGORY_LIST_LIMIT);
+  const moreCategories = m.rest.categories.slice(CATEGORY_LIST_LIMIT);
   const restMax = m.rest.categories.length ? m.rest.categories[0].amount : 1;
 
   return `
@@ -2377,71 +2357,55 @@ function renderSpending() {
     ${renderMonthPicker()}
 
     <div class="hero">
-      <div class="hero-label">Out the door in ${monthLabel(state.month)}</div>
+      <div class="hero-label">Spent in ${monthLabel(state.month)}</div>
       <div class="hero-value">${moneyExact(m.total)}</div>
       <div class="hero-note">
-        ${priorAvg !== null
-          ? `${money(priorAvg)} in a typical recent month.`
-          : 'Everything that left the account, minus transfers between your own accounts.'}
+        Posted spending only. Transfers between your own accounts are excluded.
       </div>
-      ${m.total > 0 ? `
-        <div class="split">
-          <div class="split-bar">
-            <i class="split-bills" style="width:${m.bills.share}%"></i>
-            <i class="split-rest" style="width:${m.rest.share}%"></i>
-          </div>
-          <div class="split-keys">
-            <span class="split-key"><b class="split-bills"></b>${money(m.bills.total)} bills · ${m.bills.share}%</span>
-            <span class="split-key"><b class="split-rest"></b>${money(m.rest.total)} everything else · ${m.rest.share}%</span>
-          </div>
-        </div>` : ''}
     </div>
 
     ${reviewCount ? `
       <div class="banner" style="margin-top:14px;">
         <div class="banner-body">
           <strong>${reviewCount} need${reviewCount === 1 ? 's' : ''} a category.</strong>
-          They're sitting under Uncategorized below until they have one.
+          Only unclear merchants stay here; obvious merchants are handled automatically.
         </div>
         <button class="linkbtn" data-view="review">Review</button>
       </div>` : ''}
 
-    ${section('Bills', m.bills.items.length ? `
-      <div class="list tight">
-        ${m.bills.items.map((b) => row({
-          avatar: b.name,
-          logo: logoForPayee(b.payee),
-          title: escapeHtml(b.name),
-          chips: b.source === 'fixed' ? '' : '<span class="chip chip-ok">tracked</span>',
-          sub: `${new Date(`${b.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${escapeHtml(b.category)}`,
-          amount: moneyExact(b.amount),
-        })).join('')}
-      </div>
-      <div class="prose-sm" style="margin-top:9px;">
-        ${m.bills.trackedCount
-          ? `${m.bills.trackedCount} of these matched a bill you track. `
-          : ''}The rest are charges in categories that are a bill by nature —
-        rent, utilities, insurance, childcare, a car payment, a subscription.
-      </div>
+    ${section('Monthly bills', m.bills.total > 0 ? `
+      <button class="row" data-view="bills" style="width:100%;text-align:left;border:0;background:transparent;">
+        <div class="row-body">
+          <div class="row-title">Bills and subscriptions</div>
+          <div class="row-sub">${m.bills.items.length} cleared this month · open the bill calendar</div>
+        </div>
+        <div class="row-end"><div class="row-amount">${moneyExact(m.bills.total)}</div></div>
+      </button>
     ` : emptyState({
       iconName: 'bills',
       title: 'No bills paid this month',
       body: 'Nothing has cleared yet that looks like a fixed monthly cost.',
-    }), {
-      sub: `${moneyExact(m.bills.total)} that was always going out`,
-      action: '<button class="section-action" data-view="bills">Bills tab</button>',
-    })}
+    }))}
 
-    ${section('After the bills', m.rest.categories.length ? `
+    ${section('Everyday spending', visibleCategories.length ? `
       <div class="list tight">${renderCategoryRows(
-        m.rest.categories.map((c) => [c.category, c.amount]), restMax,
+        visibleCategories.map((c) => [c.category, c.amount]), restMax,
       )}</div>
+      ${moreCategories.length ? `
+        <details class="fold" style="margin-top:10px;">
+          <summary>Show ${moreCategories.length} more categor${moreCategories.length === 1 ? 'y' : 'ies'}</summary>
+          <div class="fold-body">
+            <div class="list tight">${renderCategoryRows(
+              moreCategories.map((c) => [c.category, c.amount]), restMax,
+            )}</div>
+          </div>
+        </details>` : ''}
     ` : emptyState({
       iconName: 'list',
-      title: 'Nothing else this month',
-      body: 'Every charge that cleared was a bill.',
+      title: 'No everyday spending this month',
+      body: 'Every cleared charge is currently part of a bill.',
     }), {
-      sub: `${moneyExact(m.rest.total)} across ${m.rest.count} transaction${m.rest.count === 1 ? '' : 's'} · tap any to open it`,
+      sub: 'Top categories first · tap one for its transactions',
       action: '<button class="section-action" data-view="transactions">All transactions</button>',
     })}
   `;
@@ -3209,10 +3173,10 @@ function renderBillSuggestions() {
  * the entire reason this exists rather than waiting for the bank feed.
  */
 function renderBills() {
-  if (!state.session) return `${segmented(BUDGET_TABS)}${signInPrompt('see bills')}`;
+  if (!state.session) return `${segmented(PLAN_TABS)}${signInPrompt('see bills')}`;
 
   if (state.billsError) {
-    return `${segmented(BUDGET_TABS)}
+    return `${segmented(PLAN_TABS)}
       <div class="banner banner-warn"><div class="banner-body">${state.billsError}</div></div>`;
   }
 
@@ -3225,7 +3189,7 @@ function renderBills() {
   );
 
   return `
-    ${segmented(BUDGET_TABS)}
+    ${segmented(PLAN_TABS)}
     ${bills.length ? `
       <div class="hero">
         <div class="hero-label">Due this month</div>
@@ -3527,6 +3491,20 @@ function recategorize(id, category) {
   buildPlan();
   render();
 }
+
+function routeFromEnhancement(view) {
+  const target = [...document.querySelectorAll('#app [data-view]')]
+    .find((node) => node.dataset.view === view);
+  if (target) {
+    target.click();
+    return;
+  }
+  state.view = view;
+  if (view !== 'transactions') state.transactionFilter = null;
+  render();
+}
+
+window.__familyBudgetRoute = routeFromEnhancement;
 
 function render() {
   const app = document.getElementById('app');
