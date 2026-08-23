@@ -3,7 +3,8 @@ import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscriptions.js';
 import { buildUpcomingObligations, obligationProvidersMatch } from '../src/engine/bill-center.js';
 import { detectIncomeStreams } from '../src/engine/income.js';
-import { enhanceBillsView } from './bills-center.js';
+let billsCenterPromise = null;
+const loadBillsCenter = () => billsCenterPromise ??= import('./bills-center.js');
 
 let scheduled = false;
 let rendering = false;
@@ -130,7 +131,7 @@ async function run() {
   }
   rendering = true;
   try {
-    await enhanceBillsView();
+    await (await loadBillsCenter()).enhanceBillsView();
     const center = document.querySelector('[data-bill-center]');
     if (!center || center.querySelector('[data-plan-command-center]')) return;
     ensureStyle();
