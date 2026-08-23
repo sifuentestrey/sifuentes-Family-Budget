@@ -22,7 +22,7 @@ const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   './', './index.html', './app.js', './redesign.css', './budget-clarity.js',
   './bills-center.js', './payday-calendar.js', './payday-events.js',
-  './refresh-transactions.js', './ask-finance.js', './reset.html', './manifest.webmanifest',
+  './refresh-transactions.js', './reset.html', './manifest.webmanifest',
   './vendor/open-props.min.css', './vendor/open-props-normalize.min.css',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
   '../src/domain/payroll.js', '../src/payroll/pay-calculator.js', '../src/payroll/forecast.js',
