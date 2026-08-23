@@ -54,7 +54,7 @@ function render(host, rows) {
       ${already.length ? `<div class="fb-item"><div class="fb-item-title">Already handled</div><div class="fb-message">${esc(already[0].title || already[0].message)}</div><div class="fb-meta">${relativeTime(already[0].applied_at || already[0].created_at)}</div></div>` : ''}
     </div>`;
   host.querySelectorAll('[data-finance-review]').forEach((button) => button.addEventListener('click', () => {
-    window.__familyBudgetRoute?.('more');
+    window.__openFinanceAdvisor?.();
   }));
   host.querySelectorAll('[data-finance-dismiss]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
