@@ -144,7 +144,7 @@ function buildAdvisorContext(data, context) {
   const dinner = buildDinnerGuidance({ asOf, transactions: data.transactions, plan });
   const allowedCategories = [...new Set([
     ...data.transactions.map((row) => row.category),
-    ...data.budgetTargets.map((row) => row.category || row.category_name),
+    ...budgetTargetRows(data.budgetTargets).map((row) => row.category || row.category_name),
     'Groceries', 'Dining Out', 'Entertainment', 'Gas', 'Utilities', 'Subscriptions', 'Medical', 'Insurance', 'Household/Fun',
   ].filter(Boolean))].sort();
   return {
@@ -311,7 +311,7 @@ function proposalFromModel(proposal, data) {
   if (!requestedMerchant || !requestedCategory) return null;
   const allowed = new Set([
     ...data.transactions.map((row) => row.category),
-    ...data.budgetTargets.map((row) => row.category || row.category_name),
+    ...budgetTargetRows(data.budgetTargets).map((row) => row.category || row.category_name),
     'Groceries', 'Dining Out', 'Entertainment', 'Gas', 'Utilities', 'Subscriptions', 'Medical', 'Insurance', 'Household/Fun',
   ].filter(Boolean).map((value) => String(value).toLowerCase()));
   if (!allowed.has(requestedCategory.toLowerCase())) return null;
