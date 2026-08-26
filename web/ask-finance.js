@@ -64,6 +64,13 @@ function accountsFrom(items) {
   })));
 }
 
+// Budget targets are stored as a category -> amount object in the shared
+// database module. Keep the advisor tolerant of older array-shaped fixtures.
+function budgetTargetRows(value) {
+  if (Array.isArray(value)) return value;
+  return Object.entries(value ?? {}).map(([category, amount]) => ({ category, amount }));
+}
+
 function buildContext(data) {
   const asOf = todayIso();
   const recurring = [
