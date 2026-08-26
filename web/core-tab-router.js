@@ -21,7 +21,13 @@
   function route(view) {
     if (!view) return false;
 
-    const bridge = document.querySelector('.app-bar [data-view]')
+    // Prefer a control that already carries the requested destination.
+    // The old generic app-bar fallback could route Bills through whatever
+    // planning control happened to be rendered first.
+    const bridge = document.querySelector(`main [data-view="${view}"]:not(.tab)`)
+      || document.querySelector(`.app-bar [data-view="${view}"]`)
+      || document.querySelector(`main [data-view="${view}"]`)
+      || document.querySelector('.app-bar [data-view]')
       || document.querySelector('main [data-view]:not(.seg-btn)')
       || document.querySelector('main .seg-btn[data-view]');
     if (!bridge) return false;
