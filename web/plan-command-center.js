@@ -45,6 +45,11 @@ function ensureStyle() {
     [data-plan-command-center] .pc-note{margin-top:10px;border-radius:13px;padding:11px 12px;background:var(--warn-soft);font-size:11.5px;line-height:1.45;color:var(--text)}
     [data-plan-command-center] .pc-note b{font-weight:850}
     [data-plan-command-center] .pc-bills{border-top:1px solid var(--border)}
+    [data-plan-command-center] .pc-details{border-top:1px solid var(--border)}
+    [data-plan-command-center] .pc-details-summary{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;cursor:pointer;font-size:12.5px;font-weight:780;color:var(--text)}
+    [data-plan-command-center] .pc-details-summary span{font-size:20px;color:var(--muted);transition:transform .15s}
+    [data-plan-command-center] .pc-details[open] .pc-details-summary span{transform:rotate(90deg)}
+    [data-plan-command-center] .pc-details-body{border-top:1px solid var(--border)}
     [data-plan-command-center] .pc-bill{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;padding:11px 15px;border-top:1px solid var(--border)}
     [data-plan-command-center] .pc-bill:first-child{border-top:0}
     [data-plan-command-center] .pc-bill-name{font-size:12.5px;font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -103,23 +108,28 @@ function render(host, data) {
         <div class="pc-title"><strong>${dateLabel(next.date)}</strong><span>${next.status === 'incomplete' ? 'Not final yet' : money(next.amount)}</span></div>
         <div class="pc-sub">${esc(next.confidence)} confidence · Based on ${esc(next.basis)}.</div>
       </div>
+      <details class="pc-details">
+        <summary class="pc-details-summary">Show plan details <span>›</span></summary>
+        <div class="pc-details-body">
       <div class="pc-row">
-        <div class="pc-row-label">Checking available now</div><div class="pc-row-value">${money(plan.facts.checking.available)}</div>
-        <div class="pc-row-sub">Current fact from connected checking. Savings is not included.</div>
-      </div>
-      <div class="pc-row">
-        <div class="pc-row-label">Bills due before payday</div><div class="pc-row-value">${money(before.total)}</div>
-        <div class="pc-row-sub">${before.bills.length ? `${before.bills.length} bill${before.bills.length === 1 ? '' : 's'} must be covered before ${dateLabel(next.date)}.` : 'No open bills are due before this paycheck.'}</div>
-      </div>
-      <div class="pc-row">
-        <div class="pc-row-label">Assigned to this paycheck</div><div class="pc-row-value">${money(nextPlan?.billsTotal)}</div>
-        <div class="pc-row-sub">Each bill is assigned to the latest paycheck that arrives on or before its due date.</div>
-      </div>
-      <div class="pc-row total">
-        <div class="pc-row-label">Expected checking after this plan</div><div class="pc-row-value">${after === null ? 'Waiting for final timecard' : money(after)}</div>
-        <div class="pc-row-sub">${after === null ? 'The next paycheck is not final, so this forecast is intentionally withheld.' : 'Forecast based on current available checking, this paycheck, and assigned bills.'}</div>
-      </div>
-      ${planBills.length ? `<div class="pc-bills">${planBills.map((bill) => `<div class="pc-bill"><span><div class="pc-bill-name">${esc(bill.providerName)}</div><div class="pc-bill-sub">Due ${dateLabel(bill.dueDate)} · ${esc(bill.amountSource)}</div></span><span class="pc-bill-value">${money(bill.amountDue)}</span></div>`).join('')}</div>` : ''}
+          <div class="pc-row-label">Checking available now</div><div class="pc-row-value">${money(plan.facts.checking.available)}</div>
+          <div class="pc-row-sub">Current fact from connected checking. Savings is not included.</div>
+        </div>
+        <div class="pc-row">
+          <div class="pc-row-label">Bills due before payday</div><div class="pc-row-value">${money(before.total)}</div>
+          <div class="pc-row-sub">${before.bills.length ? `${before.bills.length} bill${before.bills.length === 1 ? '' : 's'} must be covered before ${dateLabel(next.date)}.` : 'No open bills are due before this paycheck.'}</div>
+        </div>
+        <div class="pc-row">
+          <div class="pc-row-label">Assigned to this paycheck</div><div class="pc-row-value">${money(nextPlan?.billsTotal)}</div>
+          <div class="pc-row-sub">Each bill is assigned to the latest paycheck that arrives on or before its due date.</div>
+        </div>
+        <div class="pc-row total">
+          <div class="pc-row-label">Expected checking after this plan</div><div class="pc-row-value">${after === null ? 'Waiting for final timecard' : money(after)}</div>
+          <div class="pc-row-sub">${after === null ? 'The next paycheck is not final, so this forecast is intentionally withheld.' : 'Forecast based on current available checking, this paycheck, and assigned bills.'}</div>
+        </div>
+        ${planBills.length ? `<div class="pc-bills">${planBills.map((bill) => `<div class="pc-bill"><span><div class="pc-bill-name">${esc(bill.providerName)}</div><div class="pc-bill-sub">Due ${dateLabel(bill.dueDate)} · ${esc(bill.amountSource)}</div></span><span class="pc-bill-value">${money(bill.amountDue)}</span></div>`).join('')}</div>` : ''}
+        </div>
+      </details>
     </div>
     ${note ? `<div class="pc-note"><b>${esc(note.label)}</b><br>${esc(note.reason)}</div>` : ''}
   ` : '<div class="pc-note"><b>No reliable paycheck forecast yet.</b><br>Connect payroll or let the app learn a consistent income pattern before it predicts a paycheck.</div>';
