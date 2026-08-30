@@ -38,6 +38,7 @@ function ensureStyle() {
     .fa-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}.fa-fact{padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
     .fa-label{font-size:10.5px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.045em}.fa-value{font-size:20px;font-weight:850;letter-spacing:-.03em;margin-top:3px}.fa-detail{font-size:11.5px;line-height:1.4;color:var(--text-2);margin-top:4px}
     .fa-question{display:flex;gap:8px}.fa-question .input{flex:1;min-width:0}.fa-feed{display:flex;flex-direction:column;gap:10px}.fa-message{padding:13px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.5}.fa-message.user{background:var(--text);color:var(--surface);border-color:var(--text);align-self:flex-end;max-width:88%}.fa-kicker{font-size:10.5px;font-weight:800;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;margin-bottom:5px}.fa-message h3{font-size:15px;margin:0 0 5px}.fa-meta{font-size:11.5px;color:var(--muted);margin-top:9px;line-height:1.45}.fa-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.fa-chips{display:flex;gap:7px;overflow:auto;padding-bottom:2px}.fa-chip{white-space:nowrap;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:999px;padding:8px 11px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer}.fa-note{padding:12px 13px;border-radius:var(--radius);background:var(--quiet-soft);font-size:12px;line-height:1.5;color:var(--text-2)}
+    .fa-advisor-details{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}.fa-advisor-details summary{cursor:pointer;font-size:11.5px;font-weight:750;color:var(--text-2)}.fa-advisor-card{padding:9px 0;border-bottom:1px solid var(--border)}.fa-advisor-card:last-child{border-bottom:0}.fa-advisor-card strong{display:block;font-size:12.5px}.fa-advisor-value{font-weight:850;margin-left:5px}.fa-advisor-card p{margin:3px 0 0;color:var(--text-2);font-size:12px}
     @media(min-width:520px){.fa-facts{grid-template-columns:repeat(3,minmax(0,1fr)}}`;
   document.head.appendChild(style);
 }
@@ -326,7 +327,9 @@ function renderGeminiAnswer(answer, data) {
   const confidence = answer.confidence ? `${esc(answer.confidence)} confidence` : 'Grounded response';
   const evidence = Array.isArray(answer.evidence) && answer.evidence.length
     ? esc(answer.evidence.slice(0, 4).join(' · ')) : 'Based on the current household context';
-  append(`<div class="fa-kicker">Gemini finance advisor</div><div class="fa-copy" style="white-space:pre-wrap">${esc(answer.note)}</div><div class="fa-meta">${confidence} · ${evidence}</div>`);
+  const cards = Array.isArray(answer.cards) ? answer.cards.slice(0, 3).filter((card) => card?.title && card?.detail) : [];
+  const details = cards.length ? `<details class="fa-advisor-details"><summary>Show supporting details</summary>${cards.map((card) => `<div class="fa-advisor-card"><strong>${esc(card.title)}${card.value ? `<span class="fa-advisor-value">${esc(card.value)}</span>` : ''}</strong><p>${esc(card.detail)}</p></div>`).join('')}</details>` : '';
+  append(`<div class="fa-kicker">Sol · ${esc(answer.route || 'household')} view</div><div class="fa-copy" style="white-space:pre-wrap">${esc(answer.note)}</div>${details}<div class="fa-meta">${confidence} · ${evidence}</div>`);
   const proposal = proposalFromModel(answer.proposal, data);
   if (proposal) renderProposal(proposal);
 }
