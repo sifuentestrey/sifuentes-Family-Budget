@@ -227,6 +227,7 @@ export function validatePayProfile(profile) {
  * @property {number} totalTaxes
  * @property {PaystubDeduction[]} deductions
  * @property {Record<string, number>} [earnings] - line items by label
+ * @property {Record<string, unknown>} [metadata] - check/advice number, employer, rate, PTO, YTD totals
  * @property {'manual'|'pdf'|'provider_api'|'email'} source
  * @property {string} [sourceRef]                - for dedupe
  * @property {number} confidence
@@ -246,6 +247,7 @@ export function makePaystub(input) {
     totalTaxes: num(input.totalTaxes),
     deductions: input.deductions ?? [],
     earnings: input.earnings ?? {},
+    metadata: input.metadata ?? {},
     source: input.source ?? 'manual',
     sourceRef: input.sourceRef,
     confidence: input.confidence ?? (input.source === 'manual' ? 1 : 0),
