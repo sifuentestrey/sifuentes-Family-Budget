@@ -85,3 +85,31 @@ test('calculates flexible-category allowance by actual days until payday without
   assert.ok(plan.allowances[0].planned > 60);
   assert.ok(plan.allowances[0].left > 0);
 });
+
+
+test('shows a paid bill on the paycheck checklist without counting it twice', () => {
+  const plan = buildHouseholdPlan({
+    asOf: '2026-08-22',
+    accounts: [{ type: 'checking', available_balance: 500 }],
+    paychecks: [
+      { date: '2026-08-28', expected_amount: 2500, status: 'forecast' },
+      { date: '2026-09-11', expected_amount: 2500, status: 'forecast' },
+    ],
+    includePaidBills: true,
+    bills: [
+      bill('Pennymac', 1846.81, '2026-09-01', {
+        paid: true,
+        paidDate: '2026-08-28',
+        paidAmount: 1846.81,
+      }),
+      bill('Electric', 210, '2026-09-10'),
+    ],
+  });
+
+  const checklist = plan.forecasts.nextPaycheckPlan.bills;
+  assert.deepEqual(checklist.map((item) => item.providerName), ['Pennymac', 'Electric']);
+  assert.equal(checklist[0].paid, true);
+  assert.equal(checklist[1].paid, false);
+  assert.equal(plan.forecasts.nextPaycheckPlan.billsTotal, 210);
+  assert.equal(plan.forecasts.nextPaycheckPlan.expectedCheckingAfterAssignedBills, 2790);
+});
