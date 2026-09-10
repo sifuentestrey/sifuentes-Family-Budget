@@ -26,7 +26,17 @@ const monthOf = (date) => String(date ?? '').slice(0, 7);
 
 function dayDistance(a, b) {
   if (!a || !b) return Infinity;
-  return Math.abs((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+  return Math.abs((Date.parse(String(a) + 'T00:00:00Z') - Date.parse(String(b) + 'T00:00:00Z')) / 86400000);
+}
+
+function dateDelta(from, to) {
+  if (!from || !to) return Infinity;
+  return (Date.parse(String(to) + 'T00:00:00Z')
+    - Date.parse(String(from) + 'T00:00:00Z')) / 86400000;
+}
+
+function transactionDate(transaction) {
+  return transaction?.posted_date || transaction?.date || transaction?.postedDate || null;
 }
 
 /**
@@ -128,11 +138,13 @@ function recurringOccurrences(stream, month) {
  * there is only one candidate, while multiple candidates remain ambiguous.
  */
 function findVariablePayment(bill, transactions) {
-  const candidates = (transactions ?? []).filter((t) =>
-    !t.is_transfer && !t.is_income && !t.pending && t.amount > 0
-      && monthOf(t.posted_date) === monthOf(bill.dueDate)
-      && obligationProvidersMatch(t.payee, bill.providerName),
-  );
+  const candidates = (transactions ?? []).filter((t) => {
+    if (t.is_transfer || t.is_income || t.pending || Number(t.amount) <= 0) return false;
+    const paymentDate = transactionDate(t);
+    const delta = dateDelta(bill.dueDate, paymentDate);
+    return delta >= -7 && delta <= 14
+      && obligationProvidersMatch(t.payee, bill.providerName);
+  });
   return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -146,6 +158,34 @@ function settledPayment(bill) {
   return {
     posted_date: String(bill.paidAt ?? bill.dueDate).slice(0, 10),
     amount: round(bill.paidAmount ?? bill.amountDue),
+  };
+}
+
+/**
+ * Reconcile a tracked bill against the bank before a planning screen uses it.
+ *
+ * This keeps "paid" as an observed fact on the view model without mutating the
+ * household's bill row. A bill may be paid early or late, so its due date
+ * remains the date used for future planning while paidDate records what the
+ * bank actually shows.
+ */
+export function reconcileTrackedBill(bill, transactions = [], recurring = []) {
+  const stream = matchingRecurringStream(bill, recurring);
+  const meta = trackedMeta(bill, stream);
+  const payment = settledPayment(bill)
+    ?? paymentForTrackedBill(bill, transactions, meta.amountVaries);
+  const paid = Boolean(payment);
+  const paidDate = payment ? transactionDate(payment) : null;
+
+  return {
+    ...bill,
+    ...meta,
+    amountDue: round(bill.amountDue),
+    paid,
+    expected: !paid,
+    paidDate: paidDate ?? null,
+    paidAmount: paid ? round(payment.amount) : 0,
+    paidTransactionId: payment?.id ?? bill.paidTransactionId ?? null,
   };
 }
 
@@ -215,7 +255,7 @@ export function buildBillMonth({
       category: bill.category ?? stream?.category ?? 'Other',
       source: bill.source ?? 'manual',
       dueDate: bill.dueDate,
-      paidDate: payment?.posted_date ?? null,
+      paidDate: payment ? transactionDate(payment) : null,
       amountDue: round(bill.amountDue),
       paidAmount: payment ? round(payment.amount) : 0,
       paid: Boolean(payment),
