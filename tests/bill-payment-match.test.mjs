@@ -66,3 +66,18 @@ test('an amount too far off is not matched even on the due date', () => {
   const match = findPayingTransaction(bill, [txn({ amount: 45.00 })]);
   assert.equal(match, null);
 });
+
+
+test('a mortgage paid four days early across a month boundary still matches', () => {
+  const bill = makeBill({
+    providerName: 'Pennymac',
+    amountDue: 1846.81,
+    dueDate: '2026-09-01',
+  });
+  const match = findPayingTransaction(bill, [txn({
+    payee: 'PENNYMAC LOAN SERVICES',
+    amount: 1846.81,
+    posted_date: '2026-08-28',
+  })]);
+  assert.equal(match?.payee, 'PENNYMAC LOAN SERVICES');
+});
