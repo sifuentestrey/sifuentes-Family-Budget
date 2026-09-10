@@ -45,8 +45,13 @@ function billAmount(bill) {
   return Number(bill.amountDue ?? bill.amount_due ?? bill.amount ?? 0);
 }
 
+function billIsPaid(bill) {
+  return String(bill?.status || '').toLowerCase() === 'paid' || bill?.paid === true;
+}
+
 function billIsOpen(bill) {
-  return !['paid', 'cancelled', 'dismissed'].includes(String(bill.status || '').toLowerCase()) && !bill.paid;
+  return !['cancelled', 'dismissed', 'ignored'].includes(String(bill.status || '').toLowerCase())
+    && !billIsPaid(bill);
 }
 
 function billSource(bill) {
@@ -138,13 +143,18 @@ function allowanceForWindow({ category, monthlyTarget, transactions, asOf, nextP
   };
 }
 
-function assignBills({ bills, paychecks, asOf }) {
-  const openBills = bills.filter((bill) => billIsOpen(bill) && validDate(billDueDate(bill)));
+function assignBills({ bills, paychecks, asOf, includePaid = false }) {
+  const candidateBills = bills.filter((bill) => {
+    const status = String(bill.status || '').toLowerCase();
+    if (!validDate(billDueDate(bill))) return false;
+    if (['cancelled', 'dismissed', 'ignored'].includes(status)) return false;
+    return includePaid || !billIsPaid(bill);
+  });
   const dueBeforeNext = [];
   const groups = new Map(paychecks.map((paycheck) => [paycheck.date, []]));
   const later = [];
 
-  for (const bill of openBills) {
+  for (const bill of candidateBills) {
     const dueDate = billDueDate(bill);
     const eligible = paychecks.filter((paycheck) => paycheck.date <= dueDate);
     const latest = eligible.at(-1);
@@ -154,6 +164,8 @@ function assignBills({ bills, paychecks, asOf }) {
       amountDue: round(billAmount(bill)),
       amountSource: billSource(bill),
       confidence: confidenceForBill(bill),
+      paid: billIsPaid(bill),
+      expected: !billIsPaid(bill),
     };
 
     if (dueDate < (paychecks[0]?.date || '9999-12-31')) dueBeforeNext.push(item);
@@ -166,7 +178,10 @@ function assignBills({ bills, paychecks, asOf }) {
     groups: paychecks.map((paycheck) => ({
       paycheckDate: paycheck.date,
       bills: groups.get(paycheck.date),
-      total: sum(groups.get(paycheck.date).map((bill) => bill.amountDue)),
+      total: sum(groups.get(paycheck.date)
+        .filter((bill) => !billIsPaid(bill))
+        .map((bill) => bill.amountDue)),
+      grossTotal: sum(groups.get(paycheck.date).map((bill) => bill.amountDue)),
     })),
     later: later.sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
   };
@@ -192,6 +207,7 @@ export function buildHouseholdPlan({
   budgetTargets = {},
   flexibleCategories = ['Groceries', 'Dining Out', 'Gas', 'Household/Fun'],
   transactions = [],
+  includePaidBills = false,
 } = {}) {
   if (!validDate(asOf)) throw new Error('asOf must be YYYY-MM-DD');
 
@@ -204,9 +220,13 @@ export function buildHouseholdPlan({
   const forecasts = forecastPaychecks({ paychecks, incomeStreams, asOf });
   const nextPaycheck = forecasts[0] || null;
   const followingPaycheck = forecasts[1] || null;
-  const assignments = assignBills({ bills, paychecks: forecasts, asOf });
+  const assignments = assignBills({
+    bills, paychecks: forecasts, asOf, includePaid: includePaidBills,
+  });
   const beforeNext = assignments.dueBeforeNext;
-  const beforeNextTotal = sum(beforeNext.map((bill) => bill.amountDue));
+  const beforeNextTotal = sum(beforeNext
+    .filter((bill) => !billIsPaid(bill))
+    .map((bill) => bill.amountDue));
   const assigned = nextPaycheck
     ? assignments.groups.find((group) => group.paycheckDate === nextPaycheck.date) || { bills: [], total: 0 }
     : { bills: [], total: 0 };
