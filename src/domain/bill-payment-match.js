@@ -43,7 +43,8 @@ function transactionDate(transaction) {
 export function findPayingTransaction(bill, transactions) {
   const billAmount = Number(bill.amountDue);
   const candidates = (transactions ?? []).filter((t) => {
-    if (t.is_transfer || t.is_income || t.pending) return false;
+    if (t.is_transfer || t.is_income || t.pending || t.parent_transaction_id) return false;
+    if (!providersMatch(t.payee || t.raw_description, bill.providerName)) return false;
 
     const transactionAmount = Number(t.amount);
     if (!Number.isFinite(transactionAmount) || transactionAmount <= 0) return false;

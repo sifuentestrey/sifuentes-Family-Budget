@@ -15,9 +15,9 @@
  * a contractual due date that differs from the day the household paid it.
  */
 
-import { providersMatch } from '../domain/provider-match.js';
-import { slugify } from '../domain/bill.js';
-import { BILL_CATEGORIES } from '../domain/bill.js';
+import { providersMatch } from './domain/provider-match.js';
+import { slugify } from './domain/bill.js';
+import { BILL_CATEGORIES } from './domain/bill.js';
 import { projectNext, daysBetween } from './cadence.js';
 
 const STALE_GRACE_DAYS = 7;

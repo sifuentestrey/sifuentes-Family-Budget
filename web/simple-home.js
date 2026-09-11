@@ -1,3 +1,4 @@
+import { loadHouseholdData } from './household-data.js';
 import { buildHouseholdPlan } from '../src/engine/household-plan.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscriptions.js';
@@ -66,21 +67,7 @@ function ensureStyle() {
   document.head.appendChild(style);
 }
 
-async function loadData() {
-  if (!dataPromise) {
-    dataPromise = Promise.all([
-      import('./connect.js'), import('./bills.js'), import('./budget-targets.js'),
-    ]).then(async ([connect, bills, budgetTargets]) => {
-      if (!await connect.getSession()) return null;
-      const [items, transactions, rawBills, suppressions, targets] = await Promise.all([
-        connect.listConnectedItems(), connect.listTransactions(), bills.listBillsForCenter(),
-        bills.listBillSuppressions(), budgetTargets.listBudgetTargets(),
-      ]);
-      return { items, transactions, rawBills, suppressions, targets };
-    });
-  }
-  return dataPromise;
-}
+async function loadData() { return loadHouseholdData(); }
 
 function accountPicture(items) {
   const accounts = [];
@@ -110,20 +97,7 @@ function routeButton(label, sub, value, view) {
 }
 
 function render(host, data) {
-  const asOf = todayIso();
-  const recurring = recurringFor(data);
-  const bills = data.rawBills.filter((bill) => !data.suppressions.some((marker) =>
-    obligationProvidersMatch(marker.providerName, bill.providerName),
-  ));
-  const obligations = buildUpcomingObligations({ bills, recurring, transactions: data.transactions, asOf });
-  const plan = buildHouseholdPlan({
-    asOf,
-    accounts: accountPicture(data.items),
-    bills: obligations,
-    incomeStreams: detectIncomeStreams(data.transactions),
-    budgetTargets: data.targets,
-    transactions: data.transactions,
-  });
+  const { plan, asOf, dataHealth } = data.context;
   const next = plan.forecasts.nextPaycheck;
   const nextPlan = plan.forecasts.nextPaycheckPlan;
   const due = plan.facts.dueBeforeNextPayday;
@@ -136,6 +110,8 @@ function render(host, data) {
       <div class="sh-foot">${plan.diagnostics.checkingBalanceIsAvailable ? 'Available balance from connected checking' : 'Current balance; provider did not report an available balance'}${plan.facts.savings.accountCount ? ` · ${money(plan.facts.savings.available)} savings` : ''}</div>
     </div>
 
+    ${dataHealth.stale ? '<div class="sh-attention">Bank information may be out of date. Refresh accounts before relying on this plan.</div>' : ''}
+    ${data.payrollError ? `<div class="sh-attention">${esc(data.payrollError)}</div>` : ''}
     ${attention ? `<button class="sh-attention" type="button" data-home-route="bills"><b>${esc(attention.label)}</b>${esc(attention.reason)}</button>` : ''}
 
     <section class="sh-section">
@@ -144,7 +120,7 @@ function render(host, data) {
         const percent = allowance.planned ? Math.min(100, allowance.spent / allowance.planned * 100) : 0;
         return `<button class="sh-allowance" type="button" data-home-route="budget">
           <div class="sh-allowance-top"><span>${esc(allowance.category)}</span><span>${money0(allowance.left)} left</span></div>
-          <div class="sh-allowance-note">${esc(allowance.label)} · ${allowance.daysRemaining} days remaining</div>
+          <div class="sh-allowance-note">${allowance.suggested ? 'Suggested from recent spending · ' : ''}${esc(allowance.label)} · ${allowance.daysRemaining} days remaining</div>
           <div class="sh-meter"><i style="width:${percent}%"></i></div>
         </button>`;
       }).join('') : '<div class="sh-empty">Choose a monthly target for groceries, restaurants, gas, or household/fun to see a simple allowance here.</div>'}</div>

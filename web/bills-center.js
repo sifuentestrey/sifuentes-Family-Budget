@@ -1,3 +1,4 @@
+import { loadHouseholdData } from './household-data.js';
 /**
  * Bills center: one place for what must be paid, what already cleared, and
  * which paycheck covers each remaining obligation.
@@ -155,30 +156,11 @@ function suppressedProvider(name, suppressions) {
 }
 
 async function loadData(force = false) {
-  if (force) dataPromise = null;
-  if (!dataPromise) {
-    dataPromise = Promise.all([
-      listBillsForCenter(),
-      listBillSuppressions(),
-      listTransactions(),
-    ]).then(([rawBills, suppressions, transactions]) => {
-      const recurringAnalysis = analyzeSubscriptions(transactions);
-      const recurring = [
-        ...(recurringAnalysis.bills ?? []),
-        ...buildReliableSubscriptionStreams(transactions, { asOf: todayIso() }),
-      ].filter((stream) => !suppressedProvider(stream.payee, suppressions));
-
-      return {
-        bills: dedupeTrackedBills(rawBills)
-          .filter((bill) => !suppressedProvider(bill.providerName, suppressions)),
-        suppressions,
-        transactions,
-        recurring,
-        incomeStreams: detectIncomeStreams(transactions),
-      };
-    });
-  }
-  return dataPromise;
+  const data = await loadHouseholdData(force);
+  if (!data) throw new Error('Sign in to see your bills.');
+  return { bills: dedupeTrackedBills(data.context.bills), suppressions: data.suppressions,
+    transactions: data.transactions, recurring: data.context.recurring, incomeStreams: data.context.incomeStreams,
+    plan: data.context.plan };
 }
 
 function showLogos() { return localStorage.getItem('showLogos') !== '0'; }
@@ -314,7 +296,11 @@ function dedupeUpcoming(items, bills) {
   return out;
 }
 
-function assignmentRecords(upcoming, incomeStreams, bills) {
+function assignmentRecords(upcoming, incomeStreams, bills, sharedPlan) {
+  if (sharedPlan) return [
+    ...sharedPlan.facts.dueBeforeNextPayday.bills.map(bill => ({ bill, label: 'Needs money already in the account' })),
+    ...sharedPlan.forecasts.paycheckGroups.flatMap(g => g.bills.map(bill => ({ bill, label: `${dateLabel(g.paycheckDate)} paycheck` }))),
+  ];
   const plan = planPaycheckCoverage(dedupeUpcoming(upcoming, bills), incomeStreams, { asOf: todayIso() });
   const records = [];
   for (const bill of plan.dueNow.bills) records.push({ bill, label: 'Needs money already in the account' });
@@ -427,7 +413,7 @@ function renderCenter(host, data) {
     transactions: data.transactions,
     asOf: todayIso(),
   });
-  const assignments = assignmentRecords(upcoming, data.incomeStreams, data.bills);
+  const assignments = assignmentRecords(upcoming, data.incomeStreams, data.bills, data.plan);
 
   host.innerHTML = renderMonth(monthData, data.transactions, data.bills, assignments);
 

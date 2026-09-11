@@ -38,13 +38,15 @@ function ensureStyle() {
   `;
   document.head.appendChild(style);
 }
-function render(host, rows) {
+function render(host, rows, notes = []) {
   const pending = rows.filter((row) => row.status === 'pending').slice(0, 2);
   const already = rows.filter((row) => row.status === 'applied' || row.action === 'already_applied').slice(0, 1);
-  const last = rows[0]?.created_at;
+  const latestNote = notes.find(n => n.source === 'daily');
+  const last = latestNote?.created_at || rows[0]?.created_at;
   host.innerHTML = `
     <div class="fb-card">
       <div class="fb-head"><div class="fb-title">Money check-in</div><div class="fb-sub">${relativeTime(last)} · Finance Brain only suggests; it never pays, transfers, or trades.</div></div>
+      ${latestNote ? `<div class="fb-item"><div class="fb-message">${esc(latestNote.note)}</div><div class="fb-actions"><button class="fb-btn primary" type="button" data-finance-review>Ask about this</button></div></div>` : '<div class="fb-empty">Your daily advisor check-in will appear here after its next successful analysis.</div>'}
       ${pending.length ? pending.map((row) => `<div class="fb-item">
         <div class="fb-item-title">${esc(row.title || 'Needs review')}</div>
         <div class="fb-message">${esc(row.message || row.reason || 'Review this household money item.')}</div>
@@ -60,6 +62,7 @@ function render(host, rows) {
     button.disabled = true;
     try {
       await (await import('./connect.js')).dismissAdvisorRecommendation(button.dataset.financeDismiss);
+      document.querySelector('[data-finance-brain]')?.remove();
       schedule();
     } catch {
       button.disabled = false;
@@ -73,12 +76,13 @@ async function run() {
   loading = true;
   try {
     ensureStyle();
-    const rows = await (await import('./connect.js')).listAdvisorRecommendations();
+    const connect = await import('./connect.js');
+    const [rows, notes] = await Promise.all([connect.listAdvisorRecommendations(), connect.listAdvisorNotes()]);
     if (!home.isConnected || !homeActive()) return;
     const host = document.createElement('section');
     host.dataset.financeBrain = '1';
     home.appendChild(host);
-    render(host, rows);
+    render(host, rows, notes);
   } catch {
     // Recommendations are additive; core household facts remain usable without them.
   } finally {

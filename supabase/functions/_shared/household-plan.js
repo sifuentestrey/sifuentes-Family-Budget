@@ -1,3 +1,6 @@
+// GENERATED FILE — do not edit.
+// Source of truth: src/engine/household-plan.js
+// Regenerate with: npm run sync:shared
 /**
  * Deterministic household money-planning snapshot.
  *

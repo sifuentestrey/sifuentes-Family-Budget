@@ -75,8 +75,8 @@ test('calculates flexible-category allowance by actual days until payday without
     budgetTargets: { Restaurants: 310 },
     flexibleCategories: ['Restaurants'],
     transactions: [
-      { posted_date: '2026-08-23', category: 'Restaurants', amount: 30 },
-      { posted_date: '2026-08-24', category: 'Restaurants', amount: 70, is_transfer: true },
+      { posted_date: '2026-08-21', category: 'Restaurants', amount: 30 },
+      { posted_date: '2026-08-21', category: 'Restaurants', amount: 70, is_transfer: true },
     ],
   });
 
