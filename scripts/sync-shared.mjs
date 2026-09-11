@@ -26,6 +26,7 @@ const RULES = [
   // has always imported against.
   { source: 'engine', dest: '' },
   { source: 'domain', dest: 'domain' },
+  { source: 'payroll', dest: 'payroll' },
   // Nested the same way under src/engine/ and _shared/ so a file at either
   // level (e.g. advisor-summary.js importing './budget/safe-to-spend.js')
   // resolves identically on both sides — the flat engine rule above only
@@ -41,11 +42,8 @@ const RULES = [
 // and copying dead code creates a second file CI has to keep synchronized for
 // no runtime benefit.
 const BROWSER_ONLY = new Set([
-  'engine/bill-center.js',
-  'engine/reliable-subscriptions.js',
   'engine/adaptive-budget.js',
   'engine/money-plan-summary.js',
-  'engine/household-plan.js',
   'engine/finance-advisor.js',
 ]);
 
@@ -64,7 +62,10 @@ function syncFile(sourcePath, sourceLabel, destPath) {
 // Source of truth: src/${sourceLabel}
 // Regenerate with: npm run sync:shared
 `;
-  const content = banner + readFileSync(sourcePath, 'utf8');
+  let source = readFileSync(sourcePath, 'utf8');
+  if (sourceLabel.startsWith('engine/') && sourceLabel.split('/').length === 2) source = source.replaceAll("'../domain/", "'./domain/");
+  if (sourceLabel.startsWith('payroll/')) source = source.replaceAll("'../engine/", "'../");
+  const content = banner + source;
   mkdirSync(join(destPath, '..'), { recursive: true });
 
   if (check) {

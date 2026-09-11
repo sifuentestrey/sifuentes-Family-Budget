@@ -19,7 +19,7 @@
  * pattern reaches is reported separately rather than guessed at.
  */
 import { projectNext, addDays } from './cadence.js';
-import { isUnpaid } from '../domain/bill.js';
+import { isUnpaid } from './domain/bill.js';
 
 const DEFAULT_HORIZON_DAYS = 70;
 

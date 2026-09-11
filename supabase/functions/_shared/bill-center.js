@@ -1,3 +1,6 @@
+// GENERATED FILE — do not edit.
+// Source of truth: src/engine/bill-center.js
+// Regenerate with: npm run sync:shared
 /**
  * The operational Bills view.
  *
@@ -16,8 +19,8 @@
  * mortgage obligation coexist instead of one replacing the other.
  */
 
-import { findPayingTransaction } from '../domain/bill-payment-match.js';
-import { providersMatch } from '../domain/provider-match.js';
+import { findPayingTransaction } from './domain/bill-payment-match.js';
+import { providersMatch } from './domain/provider-match.js';
 import { projectNext } from './cadence.js';
 import { payeeStem } from './similar-payee.js';
 

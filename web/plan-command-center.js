@@ -1,3 +1,4 @@
+import { loadHouseholdData } from './household-data.js';
 import { buildHouseholdPlan } from '../src/engine/household-plan.js';
 import { analyzeSubscriptions } from '../src/engine/subscriptions.js';
 import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscriptions.js';
@@ -98,59 +99,12 @@ function ensureStyle() {
   `;
   document.head.appendChild(style);
 }
-async function loadData() {
-  if (!dataPromise) {
-    dataPromise = Promise.all([import('./connect.js'), import('./bills.js'), import('./budget-targets.js')])
-      .then(async ([connect, bills, budgetTargets]) => {
-        if (!await connect.getSession()) return null;
-        const [items, transactions, rawBills, suppressions, targets] = await Promise.all([
-          connect.listConnectedItems(), connect.listTransactions(), bills.listBillsForCenter(),
-          bills.listBillSuppressions(), budgetTargets.listBudgetTargets(),
-        ]);
-        const recurring = [
-          ...(analyzeSubscriptions(transactions).bills ?? []),
-          ...buildReliableSubscriptionStreams(transactions, { asOf: todayIso() }),
-        ].filter((stream) => !suppressions.some((marker) => obligationProvidersMatch(marker.providerName, stream.payee)));
-        const tracked = rawBills.filter((bill) => !suppressions.some((marker) => obligationProvidersMatch(marker.providerName, bill.providerName)));
-        const upcoming = buildUpcomingObligations({
-          bills: tracked, recurring, transactions, asOf: todayIso(),
-        });
-        const reconciledTracked = tracked.map((bill) =>
-          reconcileTrackedBill(bill, transactions, recurring));
-        // Keep future paid rows available for the paycheck checklist, while
-        // avoiding old settled history distorting the current plan.
-        const trackedForPlanning = reconciledTracked.filter((bill) =>
-          validDate(bill.dueDate) && (bill.dueDate >= todayIso() || !bill.paid));
-        const planningBills = [
-          ...trackedForPlanning,
-          ...upcoming.filter((item) =>
-            !trackedForPlanning.some((bill) => samePlanningBill(bill, item))),
-        ];
-        return {
-          items,
-          transactions,
-          targets,
-          bills: upcoming,
-          planningBills,
-          incomeStreams: detectIncomeStreams(transactions),
-        };
-      });
-  }
-  return dataPromise;
-}
+async function loadData() { return loadHouseholdData(); }
 function flattenedAccounts(items) {
   return (items ?? []).flatMap((item) => (item.accounts ?? []).map((account) => ({ ...account, institution: item.institution_name })));
 }
 function render(host, data) {
-  const plan = buildHouseholdPlan({
-    asOf: todayIso(),
-    accounts: flattenedAccounts(data.items),
-    bills: data.planningBills,
-    includePaidBills: true,
-    incomeStreams: data.incomeStreams,
-    budgetTargets: data.targets,
-    transactions: data.transactions,
-  });
+  const { plan } = data.context;
   const next = plan.forecasts.nextPaycheck;
 
   if (!next) {

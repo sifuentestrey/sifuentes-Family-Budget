@@ -1,3 +1,4 @@
+import { loadHouseholdData } from './household-data.js';
 /**
  * Advisor tab — Gemini reasons over a privacy-scoped household context built
  * from the exact same deterministic plan that powers the rest of the app.
@@ -43,21 +44,7 @@ function ensureStyle() {
   document.head.appendChild(style);
 }
 
-async function loadData(force = false) {
-  if (force) dataPromise = null;
-  if (!dataPromise) {
-    dataPromise = Promise.all([import('./connect.js'), import('./bills.js'), import('./budget-targets.js')])
-      .then(async ([connect, bills, targets]) => {
-        if (!await connect.getSession()) return null;
-        const [items, transactions, rawBills, suppressions, budgetTargets] = await Promise.all([
-          connect.listConnectedItems(), connect.listTransactions(), bills.listBillsForCenter(),
-          bills.listBillSuppressions(), targets.listBudgetTargets(),
-        ]);
-        return { connect, bills, items, transactions, rawBills, suppressions, budgetTargets };
-      });
-  }
-  return dataPromise;
-}
+async function loadData(force = false) { return loadHouseholdData(force); }
 
 function accountsFrom(items) {
   return (items ?? []).flatMap((item) => (item.accounts ?? []).map((account) => ({
@@ -72,23 +59,7 @@ function budgetTargetRows(value) {
   return Object.entries(value ?? {}).map(([category, amount]) => ({ category, amount }));
 }
 
-function buildContext(data) {
-  const asOf = todayIso();
-  const recurring = [
-    ...(analyzeSubscriptions(data.transactions).bills ?? []),
-    ...buildReliableSubscriptionStreams(data.transactions, { asOf }),
-  ].filter((stream) => !data.suppressions.some((marker) => obligationProvidersMatch(marker.providerName, stream.payee)));
-  const bills = data.rawBills.filter((bill) => !data.suppressions.some((marker) =>
-    obligationProvidersMatch(marker.providerName, bill.providerName)));
-  const obligations = buildUpcomingObligations({ bills, recurring, transactions: data.transactions, asOf });
-  const plan = buildHouseholdPlan({
-    asOf, accounts: accountsFrom(data.items), bills: obligations,
-    incomeStreams: detectIncomeStreams(data.transactions), budgetTargets: data.budgetTargets,
-    flexibleCategories: ['Groceries', 'Dining Out', 'Gas', 'Household/Fun'],
-    transactions: data.transactions,
-  });
-  return { asOf, plan, obligations, recurring, bills };
-}
+function buildContext(data) { return data.context; }
 
 function factCards(context) {
   const { plan } = context;
@@ -150,6 +121,10 @@ function buildAdvisorContext(data, context) {
   ].filter(Boolean))].sort();
   return {
     as_of: asOf,
+    data_health: context.dataHealth,
+    suggested_budget_targets: context.suggestedBudgetTargets,
+    budget_window: plan.budgetWindow,
+    future_paychecks: plan.forecasts.paycheckGroups,
     facts: {
       checking_now: Number(plan.facts.checking.available || 0),
       checking_accounts: plan.facts.checking.accountCount || 0,
@@ -160,10 +135,10 @@ function buildAdvisorContext(data, context) {
       },
       next_paycheck: paycheck ? { amount: paycheck.amount, date: paycheck.date, confidence: paycheck.confidence, basis: paycheck.basis } : null,
       bills_assigned_to_next_paycheck: Number(plan.forecasts.nextPaycheckPlan?.billsTotal || 0),
-      pay_period_budgets: (plan.allowances || []).map((row) => ({ category: row.category, target: row.target, spent: row.spent, left: row.left })),
+      pay_period_budgets: (plan.allowances || []).map((row) => ({ category: row.category, target: row.planned, spent: row.spent, left: row.left, suggested: Boolean(row.suggested) })),
       dinner_guidance: dinner,
     },
-    tracked_bills: bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue ?? bill.amount_due, due_date: bill.dueDate ?? bill.due_date, category: bill.category, status: bill.paid ? 'paid' : 'upcoming', basis: 'tracked bill' })),
+    tracked_bills: bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue ?? bill.amount_due, due_date: bill.dueDate ?? bill.due_date, category: bill.category, status: bill.paid || bill.status === 'paid' ? 'paid' : 'upcoming', basis: 'tracked bill' })),
     recurring_estimates: recurring.map((item) => ({ provider: item.payee, amount: item.amountDue ?? item.last_amount, next_date: item.dueDate ?? item.next_date, category: item.category, basis: 'recurring estimate from bank history' })),
     merchant_directory: merchantDirectory(data.transactions),
     recent_transactions: data.transactions.slice(0, 220).map(compactTransaction),
@@ -181,12 +156,12 @@ function renderShell(target, context) {
     <div class="fa-hero">
       <div class="fa-eyebrow">Family money advisor</div>
       <div class="fa-title">Ask about the household plan</div>
-      <div class="fa-copy">Ask normally. Gemini reasons over this household’s bills, paydays, categories, and transaction history. Any correction stays a reviewable proposal.</div>
+      <div class="fa-copy">Ask normally. Your bills, paychecks, and spending in one conversation. I’ll explain what changed and help you adjust the plan.</div>
       ${factCards(context)}
     </div>
     <section class="section">
       <div class="section-head"><div><div class="section-title">Ask or correct something</div><div class="section-sub">Bills, merchants, dinner, spending, and category rules</div></div></div>
-      <form class="fa-question" id="finance-advisor-form"><input class="input" name="question" autocomplete="off" placeholder="Why is BP a bill?" /><button class="btn btn-primary" type="submit">Ask</button></form>
+      <form class="fa-question" id="finance-advisor-form"><input class="input" name="question" autocomplete="off" placeholder="What should we plan for this paycheck?" /><button class="btn btn-primary" type="submit">Ask</button></form>
       <div class="fa-chips" style="margin-top:10px"><button class="fa-chip" type="button" data-fa-question="Why is BP showing as a bill?">Why is BP a bill?</button><button class="fa-chip" type="button" data-fa-question="How much is Pennymac?">Pennymac amount</button><button class="fa-chip" type="button" data-fa-question="What can we afford for dinner tonight?">Dinner tonight</button><button class="fa-chip" type="button" data-fa-question="Film Alley isn't a subscription, just a movie theater we frequent">Fix Film Alley</button><button class="fa-chip" type="button" data-fa-question="Add a rule that Walmart adds towards grocery budget">Walmart groceries</button></div>
     </section>
     <section class="section"><div class="section-head"><div><div class="section-title">Advisor answers</div><div class="section-sub">Nothing here moves money or changes a record without your approval.</div></div></div><div id="finance-advisor-feed" class="fa-feed"><div class="fa-note">Start with a real household question. This tab looks up matching bills and transactions instead of guessing from a summary.</div></div></section>`;

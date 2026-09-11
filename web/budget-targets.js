@@ -33,6 +33,7 @@ export async function saveBudgetTarget(householdId, category, amount) {
     updated_by: (await supabase.auth.getUser()).data.user?.id ?? null,
   }, { onConflict: 'household_id,category' });
   if (error) throw error;
+  window.dispatchEvent(new CustomEvent('family-budget:data-changed', { detail: { source: 'budget-target' } }));
 }
 
 /** Back to "use our own average" for this category. */
@@ -43,4 +44,5 @@ export async function clearBudgetTarget(householdId, category) {
     .eq('household_id', householdId)
     .eq('category', category);
   if (error) throw error;
+  window.dispatchEvent(new CustomEvent('family-budget:data-changed', { detail: { source: 'budget-target' } }));
 }

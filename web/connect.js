@@ -160,6 +160,8 @@ export async function listConnectedItems() {
  * shape the rest of the app already expects from the fixture path.
  */
 export async function listTransactions() {
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
   const { data, error } = await supabase
     .from('transactions')
     .select(`
@@ -169,9 +171,12 @@ export async function listTransactions() {
       logo_url, merchant_website, pfc_primary, pfc_detailed,
       categories(name)
     `)
-    .order('posted_date', { ascending: false });
+    .order('posted_date', { ascending: false }).order('id').range(offset, offset + 999);
   if (error) throw error;
-  return (data ?? []).map(({ categories, ...t }) => ({ ...t, category: categories?.name ?? null }));
+  rows.push(...(data || []));
+  if (!data || data.length < 1000) break;
+  }
+  return rows.map(({ categories, ...t }) => ({ ...t, category: categories?.name ?? null }));
 }
 
 const merchantRuleKey = (value) => String(value ?? '')

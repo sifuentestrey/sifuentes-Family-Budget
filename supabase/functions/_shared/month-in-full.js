@@ -22,7 +22,7 @@
  */
 
 import { bucketFor } from './expenses.js';
-import { findPayingTransaction } from '../domain/bill-payment-match.js';
+import { findPayingTransaction } from './domain/bill-payment-match.js';
 import { spendingOnly, monthOf } from './budget/monthly-budget.js';
 
 const round = (n) => Math.round(n * 100) / 100;
