@@ -150,7 +150,11 @@ function findVariablePayment(bill, transactions) {
 
 function paymentForTrackedBill(bill, transactions, amountVaries) {
   return findPayingTransaction(bill, transactions)
-    ?? (amountVaries ? findVariablePayment(bill, transactions) : null);
+    // Only a bank-derived estimate can be replaced by a different payment
+    // amount. A real invoice must not be settled by a partial payment.
+    ?? (amountVaries && bill.source === 'bank' && !bill.verifiedAmount
+      && !bill.statementDate && !bill.sourceDocumentId && !bill.sourceMessageId
+      ? findVariablePayment(bill, transactions) : null);
 }
 
 function settledPayment(bill, transactions = []) {
@@ -190,6 +194,8 @@ export function reconcileTrackedBill(bill, transactions = [], recurring = []) {
   return {
     ...bill,
     ...meta,
+    status: paid ? 'paid' : bill.status === 'paid' ? 'confirmed' : bill.status,
+    needsReview: bill.needsReview || (bill.status === 'paid' && !paid),
     amountDue: round(bill.amountDue),
     paid,
     expected: !paid,
@@ -351,17 +357,14 @@ export function buildUpcomingObligations({
   const upcoming = [];
 
   const openTracked = bills.filter((bill) => {
-    if (bill.status === 'paid' || bill.status === 'ignored') return false;
-    const stream = matchingRecurringStream(bill, recurring);
-    const meta = trackedMeta(bill, stream);
-    return !paymentForTrackedBill(bill, transactions, meta.amountVaries);
+    if (bill.status === 'ignored') return false;
+    return !reconcileTrackedBill(bill, transactions, recurring).paid;
   });
 
   for (const bill of openTracked) {
     const stream = matchingRecurringStream(bill, recurring);
     upcoming.push({
-      ...bill,
-      status: bill.status ?? 'confirmed',
+      ...reconcileTrackedBill(bill, transactions, recurring),
       ...trackedMeta(bill, stream),
     });
   }

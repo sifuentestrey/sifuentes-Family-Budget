@@ -56,6 +56,7 @@ function billAmount(bill) {
 }
 
 function billIsPaid(bill) {
+  if (typeof bill?.paid === 'boolean') return bill.paid;
   return String(bill?.status || '').toLowerCase() === 'paid' || bill?.paid === true;
 }
 
