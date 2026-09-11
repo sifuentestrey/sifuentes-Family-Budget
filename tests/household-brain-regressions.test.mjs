@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { buildHouseholdPlan } from '../src/engine/household-plan.js';
 import { buildHouseholdContext } from '../src/engine/household-context.js';
 import { findPayingTransaction } from '../src/domain/bill-payment-match.js';
-import { buildBillMonth } from '../src/engine/bill-center.js';
+import { buildBillMonth, reconcileTrackedBill } from '../src/engine/bill-center.js';
+test('saved paid status cannot use another provider payment', () => {
+  const bill = { providerName: 'Riverdale Water', amountDue: 120, dueDate: '2026-09-04', status: 'paid', paidTransactionId: 'insurance', paidAmount: 121 };
+  const transactions = [{ id: 'insurance', payee: 'Acme Insurance', amount: 121, posted_date: '2026-09-03' }];
+  assert.equal(reconcileTrackedBill(bill, transactions).paid, false);
+  assert.equal(reconcileTrackedBill({ ...bill, providerName: 'Acme Insurance' }, transactions).paid, true);
+});
 const stream = { account_id: 'a', payee: 'Example employer', next_expected: '2026-09-18', typical_amount: 2000, cadence: 'biweekly' };
 test('paycheck allowance includes yesterday and keeps its original period tomorrow', () => {
   const input = { asOf: '2026-09-11', incomeStreams: [stream], budgetTargets: { Groceries: 600 }, transactions: [

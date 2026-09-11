@@ -153,8 +153,18 @@ function paymentForTrackedBill(bill, transactions, amountVaries) {
     ?? (amountVaries ? findVariablePayment(bill, transactions) : null);
 }
 
-function settledPayment(bill) {
+function settledPayment(bill, transactions = []) {
   if (bill.status !== 'paid') return null;
+  // Old reconciliation could link an equal-sized charge from another provider.
+  // When the linked bank row is available, validate it instead of trusting the
+  // saved status. Missing history alone does not undo a confirmed payment.
+  const linked = transactions.find(t => t.id && t.id === bill.paidTransactionId);
+  if (linked) {
+    if (linked.pending || linked.is_transfer || linked.is_income
+        || linked.parent_transaction_id || !(Number(linked.amount) > 0)
+        || !obligationProvidersMatch(linked.payee || linked.raw_description, bill.providerName)) return null;
+    return linked;
+  }
   return {
     posted_date: String(bill.paidAt ?? bill.dueDate).slice(0, 10),
     amount: round(bill.paidAmount ?? bill.amountDue),
@@ -172,7 +182,7 @@ function settledPayment(bill) {
 export function reconcileTrackedBill(bill, transactions = [], recurring = []) {
   const stream = matchingRecurringStream(bill, recurring);
   const meta = trackedMeta(bill, stream);
-  const payment = settledPayment(bill)
+  const payment = settledPayment(bill, transactions)
     ?? paymentForTrackedBill(bill, transactions, meta.amountVaries);
   const paid = Boolean(payment);
   const paidDate = payment ? transactionDate(payment) : null;
@@ -226,7 +236,7 @@ export function buildBillMonth({
     const meta = trackedMeta(bill, stream);
 
     const availableTransactions = transactions.filter(t => !consumed.has(`tx:${t.id || t.plaid_transaction_id}`));
-    let payment = settledPayment(bill) ?? paymentForTrackedBill(bill, availableTransactions, meta.amountVaries);
+    let payment = settledPayment(bill, transactions) ?? paymentForTrackedBill(bill, availableTransactions, meta.amountVaries);
     // Recurring fixtures can supply evidence when the raw feed is unavailable.
     if (!payment && !transactions.length) {
       const candidates = actual.map((r, index) => ({ ...r, id: `rec:${index}`, payee: r.providerName,
