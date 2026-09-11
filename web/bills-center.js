@@ -206,7 +206,7 @@ function avatar(name, transactions) {
 function statusChip(item) {
   return item.paid
     ? '<span class="chip chip-ok">paid</span>'
-    : '<span class="chip chip-outline">due</span>';
+    : '<span class="chip chip-outline">' + (item.needsReview ? 'needs review' : 'due') + '</span>';
 }
 
 function trackedBillFor(item, bills) {
@@ -319,7 +319,7 @@ function renderObligationRow(item, transactions, bills, assignments) {
   const amount = item.paid ? item.paidAmount : item.amountDue;
   const primaryDate = item.paid ? `Paid ${dateLabel(item.paidDate ?? item.dueDate)}` : `Due ${dateLabel(item.dueDate)}`;
   const assignment = item.paid ? null : assignmentFor(item, assignments);
-  const detail = [primaryDate, assignment, item.category ?? 'Other'].filter(Boolean).join(' · ');
+  const detail = [primaryDate, item.reviewReason, assignment, item.category ?? 'Other'].filter(Boolean).join(' · ');
   return `
     <div class="row bill-center-row ${item.paid ? 'paid' : ''}">
       ${avatar(item.providerName, transactions)}

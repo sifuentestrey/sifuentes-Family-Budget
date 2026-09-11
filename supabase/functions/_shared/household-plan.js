@@ -287,6 +287,37 @@ export function buildHouseholdPlan({
     });
   }
   const flexibleRemaining = sum(allowances.map(a => a.left));
+  // Carry checking forward exactly once. These are forecasts, not reservations
+  // or approval to spend. Savings and incomplete payroll cannot close a gap.
+  let projectedBalance = round(checkingAvailable - beforeNextTotal
+    - (nextPaycheck?.date > asOf ? flexibleRemaining : 0));
+  const fundingTimeline = assignments.groups.map((group, index) => {
+    const paycheck = forecasts[index];
+    const end = forecasts[index + 1]?.date || addDays(asOf, PAYCHECK_HORIZON_DAYS);
+    let everydayBudget = 0;
+    if (paycheck.date === asOf) everydayBudget = flexibleRemaining;
+    else for (let date = paycheck.date; date < end; date = addDays(date, 1)) {
+      everydayBudget += flexibleCategories.reduce((total, category) => total + Math.max(0, Number(budgetTargets[category]) || 0), 0) / monthDays(date);
+    }
+    everydayBudget = round(everydayBudget);
+    const usableIncome = paycheck.status === 'incomplete' ? null : paycheck.amount;
+    const carryInNeeded = usableIncome === null ? null : round(Math.max(0, group.total + everydayBudget - usableIncome));
+    projectedBalance = usableIncome === null || projectedBalance === null ? null
+      : round(projectedBalance + usableIncome - group.total - everydayBudget);
+    return { paycheckDate: paycheck.date, through: end, bills: group.total, everydayBudget,
+      expectedIncome: usableIncome, carryInNeeded, projectedBalance, reserved: false,
+      basis: 'Checking plus forecast pay, less known bills and category budgets; not money set aside' };
+  });
+  const reviewedBills = bills.filter(b => b.needsReview && billIsOpen(b));
+  if (reviewedBills.length) attention.push({ type: 'bill_payment_review', priority: 'high',
+    label: `${reviewedBills.length} bill payment${reviewedBills.length === 1 ? '' : 's'} need${reviewedBills.length === 1 ? 's' : ''} review`,
+    reason: 'Uncertain payments are not marked paid. Their full bill amounts remain in the plan until matched.', confidence: 'high' });
+  const futureGap = fundingTimeline.find(row => row.projectedBalance !== null && row.projectedBalance < 0);
+  if (futureGap) attention.push({ type: 'future_funding_gap', priority: 'high', label: 'A future paycheck period needs more money',
+    reason: `The plan starting ${futureGap.paycheckDate} is short by $${round(-futureGap.projectedBalance).toFixed(2)} through ${futureGap.through}, using current checking, forecast pay, known bills, and category budgets. No money has been reserved.`, confidence: 'medium' });
+  const carryForward = fundingTimeline.find(row => row.carryInNeeded > 0);
+  if (!futureGap && carryForward) attention.push({ type: 'carry_forward_needed', priority: 'medium', label: 'Keep earlier money for a bill-heavy paycheck',
+    reason: `The ${carryForward.paycheckDate} paycheck period needs $${carryForward.carryInNeeded.toFixed(2)} carried forward from earlier checking funds for known bills and category budgets. This is a planning estimate, not money already set aside.`, confidence: 'medium' });
   if (checkingAvailable >= beforeNextTotal && checkingAvailable < beforeNextTotal + flexibleRemaining) {
     attention.push({ type: 'budget_cash_gap', priority: 'high', label: 'Everyday budgets need adjusting',
       reason: `Bills and remaining category budgets exceed checking by $${round(beforeNextTotal + flexibleRemaining - checkingAvailable).toFixed(2)} before payday. Category limits do not guarantee that cash is available.`, confidence: 'medium' });
@@ -338,6 +369,7 @@ export function buildHouseholdPlan({
         basedOn: [nextPaycheck.basis, ...assigned.bills.map((bill) => bill.amountSource)],
       },
       paycheckGroups: assignments.groups.map(g => ({ ...g, paycheck: forecasts.find(p => p.date === g.paycheckDate) })),
+      fundingTimeline,
       laterBills: assignments.later,
     },
     budgetWindow: { start: periodStart, end: allowanceEnd, provisional: provisionalWindow },

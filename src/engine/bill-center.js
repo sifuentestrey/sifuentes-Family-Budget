@@ -132,18 +132,17 @@ function recurringOccurrences(stream, month) {
 /**
  * Conservative fallback for a variable bill.
  *
- * Amount matching is intentionally ignored only when the same provider appears
- * exactly once in the bill's month. Electric and water can move far more than
- * the generic 2% bill matcher permits; provider + month is strong enough when
- * there is only one candidate, while multiple candidates remain ambiguous.
+ * Bank-derived estimates may differ from the actual payment. Candidate
+ * payments still require provider identity and the early/late date window;
+ * the batch reconciler rejects competing payments and competing invoices.
  */
 function findVariablePayment(bill, transactions) {
   const candidates = (transactions ?? []).filter((t) => {
-    if (t.is_transfer || t.is_income || t.pending || t.parent_transaction_id || Number(t.amount) <= 0) return false;
+    if (t.is_transfer || t.is_income || t.pending || t.parent_transaction_id || !Number.isFinite(Number(t.amount)) || Number(t.amount) <= 0) return false;
     const paymentDate = transactionDate(t);
     const delta = dateDelta(bill.dueDate, paymentDate);
     return delta >= -7 && delta <= 14
-      && obligationProvidersMatch(t.payee, bill.providerName);
+      && providersMatch(t.payee || t.raw_description, bill.providerName);
   });
   return candidates.length === 1 ? candidates[0] : null;
 }
@@ -166,10 +165,14 @@ function settledPayment(bill, transactions = []) {
   if (linked) {
     if (linked.pending || linked.is_transfer || linked.is_income
         || linked.parent_transaction_id || !(Number(linked.amount) > 0)
-        || !obligationProvidersMatch(linked.payee || linked.raw_description, bill.providerName)) return null;
+        || !providersMatch(linked.payee || linked.raw_description, bill.providerName)) return null;
+    const invoice = (bill.source && bill.source !== 'bank') || bill.verifiedAmount
+      || bill.statementDate || bill.sourceDocumentId || bill.sourceMessageId;
+    if (invoice && Math.round(Number(linked.amount) * 100) !== Math.round(Number(bill.amountDue) * 100)) return null;
     return linked;
   }
   return {
+    id: bill.paidTransactionId ?? null,
     posted_date: String(bill.paidAt ?? bill.dueDate).slice(0, 10),
     amount: round(bill.paidAmount ?? bill.amountDue),
   };
@@ -184,10 +187,48 @@ function settledPayment(bill, transactions = []) {
  * bank actually shows.
  */
 export function reconcileTrackedBill(bill, transactions = [], recurring = []) {
-  const stream = matchingRecurringStream(bill, recurring);
-  const meta = trackedMeta(bill, stream);
-  const payment = settledPayment(bill, transactions)
-    ?? paymentForTrackedBill(bill, transactions, meta.amountVaries);
+  return reconcileTrackedBills([bill], transactions, recurring)[0];
+}
+
+/** Resolve all obligations together. Never break a tie using input order. */
+export function reconcileTrackedBills(bills = [], transactions = [], recurring = []) {
+  const key = t => t.id || t.plaid_transaction_id || t;
+  const evidence = bills.map(bill => {
+    const meta = trackedMeta(bill, matchingRecurringStream(bill, recurring));
+    if (['ignored', 'cancelled', 'dismissed'].includes(bill.status)) return { bill, meta, candidates: [] };
+    const saved = settledPayment(bill, transactions);
+    const candidates = saved ? [saved] : transactions.filter(t => paymentForTrackedBill(bill, [t], meta.amountVaries));
+    return { bill, meta, saved, candidates: [...new Map(candidates.map(t => [key(t), t])).values()] };
+  });
+  const claims = new Map();
+  for (const item of evidence) for (const t of item.candidates) {
+    const owners = claims.get(key(t)) || [];
+    owners.push(item);
+    claims.set(key(t), owners);
+  }
+  return evidence.map(item => {
+    const { bill, meta, saved, candidates } = item;
+    let payment = null;
+    let reviewReason = null;
+    if (candidates.length === 1) {
+      const owners = claims.get(key(candidates[0]));
+      const savedOwners = owners.filter(o => o.saved && o.bill.paidTransactionId);
+      if (owners.length === 1 || (saved && savedOwners.length === 1 && savedOwners[0] === item)) payment = candidates[0];
+      else reviewReason = 'Payment could belong to more than one bill';
+    } else if (candidates.length > 1) reviewReason = 'More than one possible payment; allocation needs review';
+    if (!payment && !reviewReason && !['ignored', 'cancelled', 'dismissed'].includes(bill.status)) {
+      const nearby = transactions.some(t => !t.pending && !t.is_transfer && !t.is_income && !t.parent_transaction_id
+        && Number.isFinite(Number(t.amount)) && Number(t.amount) > 0
+        && providersMatch(t.payee || t.raw_description, bill.providerName)
+        && dateDelta(bill.dueDate, transactionDate(t)) >= -7 && dateDelta(bill.dueDate, transactionDate(t)) <= 14);
+      if (nearby) reviewReason = 'Payment amount differs from the bill; full amount kept in the plan until matched';
+    }
+    if (!payment && bill.status === 'paid') reviewReason ||= 'Saved payment could not be verified';
+    return reconciledBill(bill, meta, payment, reviewReason);
+  });
+}
+
+function reconciledBill(bill, meta, payment, reviewReason) {
   const paid = Boolean(payment);
   const paidDate = payment ? transactionDate(payment) : null;
 
@@ -195,13 +236,14 @@ export function reconcileTrackedBill(bill, transactions = [], recurring = []) {
     ...bill,
     ...meta,
     status: paid ? 'paid' : bill.status === 'paid' ? 'confirmed' : bill.status,
-    needsReview: bill.needsReview || (bill.status === 'paid' && !paid),
+    needsReview: Boolean(bill.needsReview || reviewReason),
+    reviewReason,
     amountDue: round(bill.amountDue),
     paid,
     expected: !paid,
     paidDate: paidDate ?? null,
     paidAmount: paid ? round(payment.amount) : 0,
-    paidTransactionId: payment?.id ?? bill.paidTransactionId ?? null,
+    paidTransactionId: paid ? payment?.id ?? bill.paidTransactionId ?? null : null,
   };
 }
 
@@ -233,7 +275,13 @@ export function buildBillMonth({
   const consumed = new Set();
   const rows = [];
 
-  const trackedThisMonth = bills
+  // Include adjacent months in reconciliation before filtering the view.
+  const fallback = recurring.flatMap(stream => (stream.dates || []).map((date, i) => ({
+    id: `history:${stream.account_id || ''}:${stream.payee}:${date}:${i}`,
+    payee: stream.payee, posted_date: date, amount: stream.amounts?.[i] ?? stream.last_amount ?? stream.typical_amount,
+  })));
+  const reconciled = reconcileTrackedBills(bills, transactions.length ? transactions : fallback, recurring);
+  const trackedThisMonth = reconciled
     .filter((bill) => bill.status !== 'ignored' && monthOf(bill.dueDate) === month)
     .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
 
@@ -241,14 +289,7 @@ export function buildBillMonth({
     const stream = matchingRecurringStream(bill, recurring);
     const meta = trackedMeta(bill, stream);
 
-    const availableTransactions = transactions.filter(t => !consumed.has(`tx:${t.id || t.plaid_transaction_id}`));
-    let payment = settledPayment(bill, transactions) ?? paymentForTrackedBill(bill, availableTransactions, meta.amountVaries);
-    // Recurring fixtures can supply evidence when the raw feed is unavailable.
-    if (!payment && !transactions.length) {
-      const candidates = actual.map((r, index) => ({ ...r, id: `rec:${index}`, payee: r.providerName,
-        amount: r.paidAmount, posted_date: r.paidDate })).filter(r => !consumed.has(Number(r.id.slice(4))));
-      payment = paymentForTrackedBill(bill, candidates, meta.amountVaries);
-    }
+    const payment = bill.paid ? { id: bill.paidTransactionId, posted_date: bill.paidDate, amount: bill.paidAmount } : null;
     if (payment) {
       consumed.add(`tx:${payment.id || payment.plaid_transaction_id}`);
       actual.forEach((r, index) => {
@@ -269,6 +310,8 @@ export function buildBillMonth({
       paidAmount: payment ? round(payment.amount) : 0,
       paid: Boolean(payment),
       expected: !payment,
+      needsReview: bill.needsReview,
+      reviewReason: bill.reviewReason,
       ...meta,
     });
   }
@@ -276,9 +319,9 @@ export function buildBillMonth({
   // Actual recurring obligations that do not already correspond to a tracked
   // bill are still real money that left the account, so they belong here.
   actual.forEach((row, index) => {
-    const belongsToAnotherMonth = bills.some(b => b.status !== 'ignored' && monthOf(b.dueDate) !== month
+    const belongsToAnotherMonth = reconciled.some(b => b.paid && b.status !== 'ignored' && monthOf(b.dueDate) !== month
       && obligationProvidersMatch(row.providerName, b.providerName)
-      && transactionDate(paymentForTrackedBill(b, transactions, trackedMeta(b, matchingRecurringStream(b, recurring)).amountVaries)) === row.paidDate);
+      && b.paidDate === row.paidDate);
     if (!consumed.has(index) && !belongsToAnotherMonth) rows.push(row);
   });
 
@@ -356,15 +399,15 @@ export function buildUpcomingObligations({
   const today = asOf ?? new Date().toISOString().slice(0, 10);
   const upcoming = [];
 
-  const openTracked = bills.filter((bill) => {
+  const openTracked = reconcileTrackedBills(bills, transactions, recurring).filter((bill) => {
     if (bill.status === 'ignored') return false;
-    return !reconcileTrackedBill(bill, transactions, recurring).paid;
+    return !bill.paid;
   });
 
   for (const bill of openTracked) {
     const stream = matchingRecurringStream(bill, recurring);
     upcoming.push({
-      ...reconcileTrackedBill(bill, transactions, recurring),
+      ...bill,
       ...trackedMeta(bill, stream),
     });
   }

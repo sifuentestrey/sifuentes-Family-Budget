@@ -5,7 +5,7 @@
 import { buildHouseholdPlan } from './household-plan.js';
 import { analyzeSubscriptions } from './subscriptions.js';
 import { buildReliableSubscriptionStreams } from './reliable-subscriptions.js';
-import { buildUpcomingObligations, obligationProvidersMatch, reconcileTrackedBill } from './bill-center.js';
+import { buildUpcomingObligations, obligationProvidersMatch, reconcileTrackedBills } from './bill-center.js';
 import { detectIncomeStreams } from './income.js';
 import { splitParentIds, isSplitParent } from './split.js';
 
@@ -19,7 +19,8 @@ export function buildHouseholdContext({ asOf = householdDate(), items = [], tran
     ...buildReliableSubscriptionStreams(transactions, { asOf })].filter(s => !suppressed(s.payee));
   const bills = rawBills.filter(b => !suppressed(b.providerName));
   const obligations = buildUpcomingObligations({ bills, recurring, transactions, asOf });
-  const tracked = bills.map(b => reconcileTrackedBill(b, transactions, recurring))
+  const reconciledBills = reconcileTrackedBills(bills, transactions, recurring);
+  const tracked = reconciledBills
     .filter(b => b.dueDate && (b.dueDate >= asOf || !b.paid));
   const planningBills = [...tracked, ...obligations.filter(o => !tracked.some(b =>
     obligationProvidersMatch(b.providerName, o.providerName) && b.dueDate === o.dueDate))];
@@ -49,7 +50,7 @@ export function buildHouseholdContext({ asOf = householdDate(), items = [], tran
   const latestTransaction = transactions.map(t => t.posted_date || t.date).filter(Boolean).sort().at(-1) || null;
   const latestSync = items.map(i => i.updated_at).filter(Boolean).sort()[0] || null;
   const syncAgeDays = latestSync ? Math.max(0, (Date.parse(asOf) - Date.parse(latestSync.slice(0, 10))) / 86400000) : null;
-  return { asOf, plan, obligations, recurring, bills, planningBills, incomeStreams,
+  return { asOf, plan, obligations, recurring, bills, reconciledBills, planningBills, incomeStreams,
     suggestedBudgetTargets,
     dataHealth: { latestTransaction, latestSync, stale: syncAgeDays === null || syncAgeDays > 2,
       missingBudgetTargets: Object.keys(budgetTargets).length === 0 } };

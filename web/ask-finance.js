@@ -111,7 +111,7 @@ function merchantDirectory(transactions) {
 }
 
 function buildAdvisorContext(data, context) {
-  const { plan, obligations, bills, recurring, asOf } = context;
+  const { plan, obligations, reconciledBills: bills, recurring, asOf } = context;
   const paycheck = plan.forecasts.nextPaycheck;
   const dinner = buildDinnerGuidance({ asOf, transactions: data.transactions, plan });
   const allowedCategories = [...new Set([
@@ -125,20 +125,21 @@ function buildAdvisorContext(data, context) {
     suggested_budget_targets: context.suggestedBudgetTargets,
     budget_window: plan.budgetWindow,
     future_paychecks: plan.forecasts.paycheckGroups,
+    funding_forecast: plan.forecasts.fundingTimeline,
     facts: {
       checking_now: Number(plan.facts.checking.available || 0),
       checking_accounts: plan.facts.checking.accountCount || 0,
       savings: Number(plan.facts.savings.available || 0),
       bills_due_before_next_payday: {
         total: Number(plan.facts.dueBeforeNextPayday.total || 0),
-        items: plan.facts.dueBeforeNextPayday.bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue, due_date: bill.dueDate, amount_basis: bill.amountSource, paid: Boolean(bill.paid) })),
+        items: plan.facts.dueBeforeNextPayday.bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue, due_date: bill.dueDate, amount_basis: bill.amountSource, paid: Boolean(bill.paid), needs_review: Boolean(bill.needsReview), review_reason: bill.reviewReason })),
       },
       next_paycheck: paycheck ? { amount: paycheck.amount, date: paycheck.date, confidence: paycheck.confidence, basis: paycheck.basis } : null,
       bills_assigned_to_next_paycheck: Number(plan.forecasts.nextPaycheckPlan?.billsTotal || 0),
       pay_period_budgets: (plan.allowances || []).map((row) => ({ category: row.category, target: row.planned, spent: row.spent, left: row.left, suggested: Boolean(row.suggested) })),
       dinner_guidance: dinner,
     },
-    tracked_bills: bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue ?? bill.amount_due, due_date: bill.dueDate ?? bill.due_date, category: bill.category, status: bill.paid || bill.status === 'paid' ? 'paid' : 'upcoming', basis: 'tracked bill' })),
+    tracked_bills: bills.map((bill) => ({ provider: bill.providerName, amount: bill.amountDue, due_date: bill.dueDate, category: bill.category, status: bill.paid ? 'paid' : bill.needsReview ? 'needs_review' : 'upcoming', review_reason: bill.reviewReason, basis: 'reconciled bill' })),
     recurring_estimates: recurring.map((item) => ({ provider: item.payee, amount: item.amountDue ?? item.last_amount, next_date: item.dueDate ?? item.next_date, category: item.category, basis: 'recurring estimate from bank history' })),
     merchant_directory: merchantDirectory(data.transactions),
     recent_transactions: data.transactions.slice(0, 220).map(compactTransaction),

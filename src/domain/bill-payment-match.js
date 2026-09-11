@@ -28,10 +28,8 @@ function transactionDate(transaction) {
 /**
  * Find the bank transaction that most likely paid a bill.
  *
- * Deliberately conservative: candidates are the transactions matching on
- * amount and date window alone. If more than one qualifies, only the provider
- * name breaks the tie — with none or more than one naming the bill's provider,
- * this returns null rather than guessing. A bill wrongly marked paid vanishes
+ * Candidates must match provider, amount, and the date window. With more than
+ * one matching candidate this returns null rather than guessing. A bill wrongly marked paid vanishes
  * from what's owed; a bill that stays visible one day too long is a far smaller
  * failure.
  *
@@ -51,6 +49,11 @@ export function findPayingTransaction(bill, transactions) {
 
     const relative = billAmount ? Math.abs(transactionAmount - billAmount) / billAmount : 1;
     if (relative > AMOUNT_TOLERANCE) return false;
+    // A documented or manually specified invoice is not an approximate target.
+    // Even a small underpayment must remain open; fees/overpayments need review.
+    const invoice = (bill.source && bill.source !== 'bank') || bill.verifiedAmount
+      || bill.statementDate || bill.sourceDocumentId || bill.sourceMessageId;
+    if (invoice && Math.round(transactionAmount * 100) !== Math.round(billAmount * 100)) return false;
 
     const paymentDate = transactionDate(t);
     if (!paymentDate) return false;

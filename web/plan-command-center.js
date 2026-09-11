@@ -137,6 +137,7 @@ function render(host, data) {
     const amountPrefix = !paid && (bill.amountVaries || bill.amountSource === 'recurring estimate') ? '~' : '';
     const statusText = paid
       ? 'Paid ' + dateLabel(bill.paidDate || bill.dueDate)
+      : bill.needsReview ? 'Needs review · payment not confirmed'
       : bill.dueDate < todayIso()
         ? 'Needs payment · overdue'
         : 'Needs payment';
