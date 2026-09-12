@@ -136,11 +136,6 @@ function hideLegacy(main, host = null) {
   }
 }
 
-/** Restore the app's sign-in/empty state when the center has no household data. */
-function restoreLegacy(main) {
-  for (const child of [...main.children]) child.hidden = false;
-}
-
 function dedupeTrackedBills(bills) {
   const out = [];
   for (const bill of bills) {
@@ -576,25 +571,24 @@ export async function enhanceBillsView() {
     return;
   }
 
-  const host = document.createElement('div');
-  host.dataset.billCenter = '1';
-  host.innerHTML = '<div class="bill-center-loading">Checking bills and subscriptions…</div>';
-  seg.insertAdjacentElement('afterend', host);
+  let host = null;
   mounting = true;
   try {
     const data = await loadData();
-    if (!data) {
-      host.remove();
-      if (isBillsView()) restoreLegacy(main);
-      return;
-    }
-    if (!host.isConnected || !isBillsView()) return;
-    hideLegacy(main, host);
+    if (!data || !isBillsView()) return;
+    const currentMain = document.querySelector('main');
+    const currentSeg = currentMain?.querySelector('.seg');
+    if (!currentMain || !currentSeg) return;
+    host = document.createElement('div');
+    host.dataset.billCenter = '1';
+    currentSeg.insertAdjacentElement('afterend', host);
+    hideLegacy(currentMain, host);
     renderCenter(host, data);
-    hideLegacy(main, host);
+    hideLegacy(currentMain, host);
   } catch (error) {
-    if (host.isConnected) {
-      hideLegacy(main, host);
+    if (host?.isConnected) {
+      const currentMain = document.querySelector('main');
+      if (currentMain) hideLegacy(currentMain, host);
       host.innerHTML = `<div class="banner banner-warn"><div class="banner-body"><strong>Could not build Bills.</strong><div>${esc(error.message || 'Try reloading the app.')}</div></div></div>`;
     }
   } finally {
