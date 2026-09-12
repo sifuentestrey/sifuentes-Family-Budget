@@ -4,7 +4,7 @@
 
   let billsCenterPromise = null;
   const loadBillsCenter = () => {
-    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v63');
+    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v64');
     return billsCenterPromise;
   };
 
@@ -39,6 +39,15 @@
          provider names ellipsize before they can shove PAID/DUE off-screen. */
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-center-row.paid {
         opacity: 1 !important;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-center-row.review {
+        opacity: 1 !important;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-status-mark {
+        position: relative;
+        z-index: 0;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-center-row .row-body {
@@ -88,11 +97,11 @@
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day {
-        min-height: 60px !important;
-        padding: 5px 3px !important;
+        min-height: 68px !important;
+        padding: 7px 4px !important;
         align-items: stretch !important;
         justify-content: flex-start;
-        gap: 3px !important;
+        gap: 5px !important;
         cursor: pointer;
         outline-offset: -1px;
       }
@@ -112,14 +121,26 @@
         display: none !important;
       }
 
-      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-calendar-mini {
-        display: block;
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-statuses {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 3px;
         width: 100%;
         min-width: 0;
-        border-radius: 5px;
-        padding: 2px 1px;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        width: 100%;
+        min-width: 0;
+        border-radius: 7px;
+        padding: 4px 2px;
         text-align: center;
-        font-size: 8.5px;
+        font-size: 9px;
         font-weight: 800;
         line-height: 1.05;
         white-space: nowrap;
@@ -128,14 +149,48 @@
         font-variant-numeric: tabular-nums;
       }
 
-      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-calendar-mini.paid {
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status-mark {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        font-size: 10px;
+        font-weight: 950;
+        line-height: 1;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.paid {
         color: var(--positive);
         background: var(--positive-soft);
       }
 
-      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-calendar-mini.due {
-        color: var(--accent-ink);
-        background: var(--accent-soft);
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.paid .bill-day-status-mark {
+        background: var(--positive);
+        color: var(--positive-ink);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.due {
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.due .bill-day-status-mark {
+        border: 1.5px solid currentColor;
+        color: inherit;
+        font-size: 9px;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.review {
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.review .bill-day-status-mark {
+        background: var(--warn);
+        color: #2a1904;
+        font-size: 9px;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-calendar-agenda {
@@ -208,8 +263,39 @@
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status.due {
-        color: var(--accent-ink);
-        background: var(--accent-soft);
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status.review {
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status-mark {
+        display: inline-grid;
+        place-items: center;
+        width: 13px;
+        height: 13px;
+        margin-right: 3px;
+        border-radius: 50%;
+        font-size: 9px;
+        font-weight: 950;
+        line-height: 1;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status.paid .bill-agenda-status-mark {
+        background: var(--positive);
+        color: var(--positive-ink);
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status.due .bill-agenda-status-mark {
+        border: 1.5px solid currentColor;
+      }
+
+      #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-status.review .bill-agenda-status-mark {
+        background: var(--warn);
+        color: #2a1904;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-agenda-amount {
@@ -233,11 +319,13 @@
 
       @media (max-width: 390px) {
         #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day {
-          min-height: 56px !important;
+          min-height: 62px !important;
         }
 
-        #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-calendar-mini {
-          font-size: 7.5px;
+        #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status {
+          font-size: 8px;
+          padding-left: 1px;
+          padding-right: 1px;
         }
       }
     `;
@@ -319,7 +407,7 @@
     }
 
     const chips = [...title.querySelectorAll('.chip')];
-    const primary = chips.find((chip) => /^(paid|due)$/i.test(chip.textContent.trim()));
+    const primary = chips.find((chip) => /^(paid|due|needs review)$/i.test(chip.textContent.trim()));
     if (primary) primary.classList.add('bill-primary-status');
 
     if (sub.dataset.scheduleEnriched === '1') return;
@@ -370,7 +458,9 @@
         name,
         amount,
         amountText,
-        status: row.classList.contains('paid') ? 'paid' : 'due',
+        status: row.classList.contains('paid')
+          ? 'paid'
+          : row.classList.contains('review') ? 'review' : 'due',
         schedule: sub.textContent.trim(),
       };
     })
@@ -435,7 +525,7 @@
           <div class="bill-agenda-item">
             <div class="bill-agenda-name">
               <span>${htmlEsc(row.name)}</span>
-              <span class="bill-agenda-status ${row.status}">${row.status}</span>
+              <span class="bill-agenda-status ${row.status}"><span class="bill-agenda-status-mark" aria-hidden="true">${row.status === 'paid' ? '✓' : '!'}</span>${row.status === 'paid' ? 'paid' : row.status === 'review' ? 'check' : 'due'}</span>
             </div>
             <div class="bill-agenda-amount">${htmlEsc(row.amountText)}</div>
             <div class="bill-agenda-meta">${htmlEsc(row.schedule)}</div>
@@ -469,32 +559,42 @@
       const day = Number(cell.querySelector('.bill-day-num')?.textContent || 0);
       if (!day) return;
       const dayRows = byDay.get(day) ?? [];
-      const due = dayRows.filter((row) => row.status === 'due');
       const paid = dayRows.filter((row) => row.status === 'paid');
+      const due = dayRows.filter((row) => row.status === 'due');
+      const review = dayRows.filter((row) => row.status === 'review');
 
-      cell.querySelectorAll('.bill-calendar-mini').forEach((node) => node.remove());
+      let statuses = cell.querySelector('.bill-day-statuses');
+      if (!statuses) {
+        statuses = document.createElement('span');
+        statuses.className = 'bill-day-statuses';
+        cell.appendChild(statuses);
+      }
+      statuses.innerHTML = '';
       cell.classList.toggle('selected', day === selected);
       cell.setAttribute('role', 'button');
       cell.tabIndex = 0;
 
       if (due.length) {
         const mini = document.createElement('span');
-        mini.className = 'bill-calendar-mini due';
-        mini.textContent = due.length === 1
-          ? `${compactMoney(due[0].amount)} due`
-          : `${due.length} due`;
-        cell.appendChild(mini);
+        mini.className = 'bill-day-status due';
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${due.length === 1 ? compactMoney(due[0].amount) : due.length} due</span>`;
+        statuses.appendChild(mini);
       }
 
       if (paid.length) {
         const paidTotal = paid.reduce((sum, row) => sum + row.amount, 0);
         const mini = document.createElement('span');
-        mini.className = 'bill-calendar-mini paid';
-        mini.textContent = paid.length === 1
-          ? `✓ ${compactMoney(paid[0].amount)}`
-          : `✓ ${paid.length} paid`;
+        mini.className = 'bill-day-status paid';
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">✓</span><span>${paid.length === 1 ? compactMoney(paid[0].amount) : paid.length} paid</span>`;
         mini.title = `${compactMoney(paidTotal)} paid`;
-        cell.appendChild(mini);
+        statuses.appendChild(mini);
+      }
+
+      if (review.length) {
+        const mini = document.createElement('span');
+        mini.className = 'bill-day-status review';
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${review.length} check</span>`;
+        statuses.appendChild(mini);
       }
 
       const selectDay = () => {
@@ -516,10 +616,11 @@
       }
 
       const dueText = due.length ? `${due.length} due` : '';
+      const reviewText = review.length ? `${review.length} needs review` : '';
       const paidText = paid.length ? `${paid.length} paid` : '';
       cell.setAttribute(
         'aria-label',
-        [`Day ${day}`, dueText, paidText].filter(Boolean).join(', '),
+        [`Day ${day}`, dueText, reviewText, paidText].filter(Boolean).join(', '),
       );
     });
 

@@ -44,6 +44,9 @@ test('income streams are reconciled, not only appended forever', () => {
 
 test('Bills is calendar/list based and no longer renders the big left-to-spend hero', () => {
   assert.match(billsCenter, /class=\"bill-calendar\"/);
+  assert.match(billsCenter, /bill-status-mark/);
+  assert.match(billsCenter, /bill-status-legend/);
+  assert.match(billsCenter, /bill-day-statuses/);
   assert.match(billsCenter, /Bills & subscriptions/);
   assert.doesNotMatch(billsCenter, /hero-value/);
   assert.doesNotMatch(billsCenter, /bill-progress/);

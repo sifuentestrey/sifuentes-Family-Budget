@@ -8,6 +8,7 @@
 <!-- Installable to the home screen on Android and iOS. -->
 <link rel="manifest" href="./manifest.webmanifest" />
 <meta name="theme-color" content="#f6f6f3" />
+<meta name="theme-color" content="#121820" media="(prefers-color-scheme: dark)" />
 
 <!-- iOS ignores the manifest for the home-screen icon and launch behaviour,
      so these have to be declared separately. -->
@@ -67,6 +68,7 @@
 
     /* Money coming in, and nothing else. */
     --positive: #0d8f5f;
+    --positive-ink: #ffffff;
     --positive-soft: #e4f5ed;
 
     --warn: #b46a10;
@@ -101,40 +103,41 @@
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0d0f13;
-      --surface: #171a20;
-      --surface-2: #1e222a;
-      --border: #242832;
-      --border-strong: #333845;
+      --bg: #121820;
+      --surface: #1b2530;
+      --surface-2: #253241;
+      --border: #3a4a5c;
+      --border-strong: #56677c;
 
-      --text: #f1f2f6;
-      --text-2: #b6bcc9;
-      --muted: #838a99;
+      --text: #f7f9fc;
+      --text-2: #c7d1df;
+      --muted: #9eacbd;
 
-      --accent: #ff6a58;
-      --accent-ink: #ff8574;
-      --accent-soft: #34201d;
-      --on-accent: #1a0d0b;
+      --accent: #8eb5ff;
+      --accent-ink: #b4ccff;
+      --accent-soft: #22395f;
+      --on-accent: #0d192d;
 
-      --positive: #35c98d;
-      --positive-soft: #12291f;
+      --positive: #65e0ad;
+      --positive-ink: #0b3425;
+      --positive-soft: #173c2f;
 
-      --warn: #e0a552;
-      --warn-soft: #2f2415;
-      --negative: #f0705d;
-      --negative-soft: #331b18;
-      --quiet-soft: #20242c;
+      --warn: #f2bf6d;
+      --warn-soft: #3d301e;
+      --negative: #ff938b;
+      --negative-soft: #472625;
+      --quiet-soft: #2b3848;
 
       /* Lifted, not black-on-black. */
-      --hero-bg: #232833;
+      --hero-bg: #2a3a4f;
       --hero-ink: #f6f7fa;
-      --hero-label: #98a0b1;
-      --hero-note: #b6bcc9;
-      --hero-rule: #343a47;
+      --hero-label: #b7c5d8;
+      --hero-note: #d1dbe8;
+      --hero-rule: #43566e;
 
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
-      --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.45), 0 10px 24px -16px rgba(0, 0, 0, 0.8);
-      --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 20px 40px -20px rgba(0, 0, 0, 0.85);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32), 0 8px 22px rgba(0, 0, 0, 0.16);
+      --shadow-md: 0 2px 5px rgba(0, 0, 0, 0.38), 0 18px 46px rgba(0, 0, 0, 0.28);
+      --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.38);
 
       --av-0: #3d8a70; --av-1: #a75f35; --av-2: #5b6fb8;
       --av-3: #a84a68; --av-4: #3a89a2; --av-5: #8271c4;
@@ -744,7 +747,7 @@
   <script type="module" src="./simple-home.js"></script>
   <script type="module" src="./finance-brain-ui.js"></script>
   <script type="module" src="./ask-finance.js"></script>
-  <script type="module" src="./plan-command-center.js?build=v63"></script>
+  <script type="module" src="./plan-command-center.js?build=v64"></script>
   <script>
     // Registered outside the module so a service-worker failure can never stop
     // the app itself from loading.
