@@ -89,8 +89,10 @@ function ensureStyle() {
     [data-plan-command-center] .pc-bills-head span{font-size:11px;font-weight:800;color:var(--positive);white-space:nowrap}
     [data-plan-command-center] .pc-bills-sub{margin-top:2px;font-size:10.5px;color:var(--muted)}
     [data-plan-command-center] .pc-bill-content{display:flex;align-items:flex-start;gap:9px;min-width:0}
-    [data-plan-command-center] .pc-status{display:flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;margin-top:1px;border:1.5px solid var(--border-strong);border-radius:50%;font-size:13px;font-weight:900;line-height:1;color:transparent}
-    [data-plan-command-center] .pc-status.paid{border-color:var(--positive);background:var(--positive-soft);color:var(--positive)}
+    [data-plan-command-center] .pc-status{display:flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;height:28px;margin-top:-2px;border:2px solid var(--border-strong);border-radius:50%;font-size:17px;font-weight:950;line-height:1;color:var(--muted)}
+    [data-plan-command-center] .pc-status.paid{border-color:var(--positive);background:var(--positive);color:var(--positive-ink);box-shadow:0 0 0 3px var(--positive-soft)}
+    [data-plan-command-center] .pc-status.pending{border-color:var(--warn);background:transparent;color:var(--warn);font-size:15px}
+    [data-plan-command-center] .pc-status.review{border-color:var(--warn);background:var(--warn);color:#2a1904;font-size:15px}
     [data-plan-command-center] .pc-bill-main{min-width:0}
     [data-plan-command-center] .pc-bill.is-paid .pc-bill-name{color:var(--text-2)}
     [data-plan-command-center] .pc-bill-meta{font-size:10.5px;color:var(--muted);margin-top:2px;line-height:1.35}
@@ -142,9 +144,11 @@ function render(host, data) {
         ? 'Needs payment · overdue'
         : 'Needs payment';
     const dueText = 'Due ' + dateLabel(bill.dueDate);
+    const statusClass = paid ? 'paid' : bill.needsReview ? 'review' : 'pending';
+    const statusGlyph = paid ? '✓' : bill.needsReview ? '!' : '○';
     return '<div class="pc-bill ' + (paid ? 'is-paid' : '') + '">'
       + '<div class="pc-bill-content">'
-      + '<span class="pc-status ' + (paid ? 'paid' : 'pending') + '" aria-label="' + (paid ? 'Paid' : 'Needs payment') + '">' + (paid ? '✓' : '') + '</span>'
+      + '<span class="pc-status ' + statusClass + '" aria-label="' + (paid ? 'Paid' : bill.needsReview ? 'Needs review' : 'Needs payment') + '">' + statusGlyph + '</span>'
       + '<span class="pc-bill-main"><div class="pc-bill-name">' + esc(bill.providerName) + '</div>'
       + '<div class="pc-bill-meta">' + esc(statusText) + ' · ' + esc(dueText) + '</div></span>'
       + '</div>'
