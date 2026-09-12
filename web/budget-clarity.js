@@ -4,7 +4,7 @@
 
   let billsCenterPromise = null;
   const loadBillsCenter = () => {
-    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v62');
+    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v63');
     return billsCenterPromise;
   };
 
@@ -535,15 +535,6 @@
 
   const simplify = () => {
     ensureStyle();
-
-    // Bills are the primary household obligation view. The monthly plan stays
-    // one tap away, but the bottom nav no longer drops people into a second,
-    // partly duplicated bill list first.
-    const primary = document.querySelector('.tabbar .tab[data-view="budget"]');
-    if (primary) {
-      primary.dataset.view = 'bills';
-      setOwnText(primary, 'Bills');
-    }
 
     // Spending answers a different time question than Bills. Bills is what is
     // coming due; Spending is what actually left the account in the selected
