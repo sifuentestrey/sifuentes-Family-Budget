@@ -4,7 +4,7 @@
 
   let billsCenterPromise = null;
   const loadBillsCenter = () => {
-    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js');
+    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v61');
     return billsCenterPromise;
   };
 

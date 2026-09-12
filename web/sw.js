@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v60';
+const CACHE_VERSION = 'v61';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 
@@ -63,8 +63,8 @@ async function shellDocument(request) {
   if (!contentType.includes('text/html')) return response;
   let refreshed = await response.text();
   if (!refreshed.includes('redesign.css')) refreshed = refreshed.replace('</head>', '  <link rel="stylesheet" href="./redesign.css" />\n</head>');
-  if (!refreshed.includes('budget-clarity.js')) refreshed = refreshed.replace('</body>', '  <script src="./budget-clarity.js"></script>\n</body>');
-  if (!refreshed.includes('payday-calendar.js')) refreshed = refreshed.replace('</body>', '  <script type="module" src="./payday-calendar.js"></script>\n</body>');
+  if (!refreshed.includes('budget-clarity.js')) refreshed = refreshed.replace('</body>', `  <script src="./budget-clarity.js?build=${CACHE_VERSION}"></script>\n</body>`);
+  if (!refreshed.includes('payday-calendar.js')) refreshed = refreshed.replace('</body>', `  <script type="module" src="./payday-calendar.js?build=${CACHE_VERSION}"></script>\n</body>`);
   const headers = new Headers(response.headers); headers.delete('content-length');
   return new Response(refreshed, { status: response.status, statusText: response.statusText, headers });
 }

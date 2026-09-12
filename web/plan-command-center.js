@@ -5,7 +5,7 @@ import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscri
 import { buildUpcomingObligations, obligationProvidersMatch, reconcileTrackedBill } from '../src/engine/bill-center.js';
 import { detectIncomeStreams } from '../src/engine/income.js';
 let billsCenterPromise = null;
-const loadBillsCenter = () => billsCenterPromise ??= import('./bills-center.js');
+const loadBillsCenter = () => billsCenterPromise ??= import('./bills-center.js?build=v61');
 
 let scheduled = false;
 let rendering = false;
