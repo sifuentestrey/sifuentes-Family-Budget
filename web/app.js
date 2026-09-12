@@ -1490,7 +1490,6 @@ function renderDashboard() {
   const categories = byCategory(txns);
   const [year, month] = state.month.split('-').map(Number);
   const income = projectMonthlyIncome(state.streams, year, month);
-  const net = income.total - total;
 
   const transfers = state.transactions.filter(
     (t) => monthKey(t.posted_date) === state.month && t.is_transfer && t.amount > 0,
@@ -1531,7 +1530,7 @@ function renderDashboard() {
     ${renderUpcoming()}
 
     ${section('This month', `
-      <div class="stat-row">
+      <div class="stat-row two">
         <div class="stat">
           <div class="stat-label">Income</div>
           <div class="stat-value positive">${money(income.total)}</div>
@@ -1541,11 +1540,6 @@ function renderDashboard() {
           <div class="stat-label">Spent</div>
           <div class="stat-value">${money(total)}</div>
           <div class="stat-note">${txns.length} transactions</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Left over</div>
-          <div class="stat-value ${net < 0 ? 'negative' : 'positive'}">${money(net)}</div>
-          <div class="stat-note">${net < 0 ? 'overspending' : 'saved'}</div>
         </div>
       </div>
 
@@ -3392,7 +3386,7 @@ function renderInstallHint() {
 const VIEW_HEADERS = {
   dashboard: () => ['Home', state.session ? 'Your household, right now' : 'Demo numbers — nothing here is real yet'],
   budget: () => ['Budget', 'Bills and necessities, and what\'s left of them'],
-  bills: () => ['Budget', 'What you owe, and when it has to be covered'],
+  bills: () => ['Plan', 'Paydays, bills, and what each check needs to cover'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
   year: () => ['Spending', 'Twelve months at a time'],
