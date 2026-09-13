@@ -5,7 +5,7 @@ import { buildReliableSubscriptionStreams } from '../src/engine/reliable-subscri
 import { buildUpcomingObligations, obligationProvidersMatch, reconcileTrackedBill } from '../src/engine/bill-center.js';
 import { detectIncomeStreams } from '../src/engine/income.js';
 let billsCenterPromise = null;
-const loadBillsCenter = () => billsCenterPromise ??= import('./bills-center.js?build=v64');
+const loadBillsCenter = () => billsCenterPromise ??= import('./bills-center.js?build=v66');
 
 let scheduled = false;
 let rendering = false;
@@ -57,12 +57,12 @@ function ensureStyle() {
   const style = document.createElement('style');
   style.id = 'plan-command-center-style';
   style.textContent = `
-    [data-plan-command-center]{margin:0 0 16px}
-    [data-plan-command-center] .pc-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-sm)}
-    [data-plan-command-center] .pc-head{padding:15px}
+    [data-plan-command-center]{margin:0 0 14px}
+    [data-plan-command-center] .pc-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:none}
+    [data-plan-command-center] .pc-head{padding:14px}
     [data-plan-command-center] .pc-kicker{font-size:10.5px;font-weight:820;letter-spacing:.055em;text-transform:uppercase;color:var(--muted)}
     [data-plan-command-center] .pc-title{display:flex;justify-content:space-between;gap:12px;align-items:baseline;margin-top:3px}
-    [data-plan-command-center] .pc-title strong{font-size:22px;letter-spacing:-.035em}
+    [data-plan-command-center] .pc-title strong{font-size:20px;letter-spacing:-.035em}
     [data-plan-command-center] .pc-title span{font-size:14px;font-weight:820;color:var(--positive);white-space:nowrap}
     [data-plan-command-center] .pc-sub{font-size:11px;color:var(--muted);line-height:1.4;margin-top:3px}
     [data-plan-command-center] .pc-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;padding:12px 15px;border-top:1px solid var(--border)}
@@ -89,7 +89,7 @@ function ensureStyle() {
     [data-plan-command-center] .pc-bills-head span{font-size:11px;font-weight:800;color:var(--positive);white-space:nowrap}
     [data-plan-command-center] .pc-bills-sub{margin-top:2px;font-size:10.5px;color:var(--muted)}
     [data-plan-command-center] .pc-bill-content{display:flex;align-items:flex-start;gap:9px;min-width:0}
-    [data-plan-command-center] .pc-status{display:flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;height:28px;margin-top:-2px;border:2px solid var(--border-strong);border-radius:50%;font-size:17px;font-weight:950;line-height:1;color:var(--muted)}
+    [data-plan-command-center] .pc-status{display:flex;align-items:center;justify-content:center;flex:0 0 25px;width:25px;height:25px;margin-top:-1px;border:2px solid var(--border-strong);border-radius:50%;font-size:15px;font-weight:950;line-height:1;color:var(--muted)}
     [data-plan-command-center] .pc-status.paid{border-color:var(--positive);background:var(--positive);color:var(--positive-ink);box-shadow:0 0 0 3px var(--positive-soft)}
     [data-plan-command-center] .pc-status.pending{border-color:var(--warn);background:transparent;color:var(--warn);font-size:15px}
     [data-plan-command-center] .pc-status.review{border-color:var(--warn);background:var(--warn);color:#2a1904;font-size:15px}
@@ -117,7 +117,11 @@ function render(host, data) {
   const nextPlan = plan.forecasts.nextPaycheckPlan;
   const bills = nextPlan?.bills ?? [];
   const majorBills = bills.filter(isMajorBill);
-  const visibleBills = majorBills.length ? majorBills : bills;
+  const relevantBills = majorBills.length ? majorBills : bills;
+  // The command center is a quick answer, not a second ledger. Keep the
+  // three most important rows here and leave the complete list in the
+  // expandable Bills detail below.
+  const visibleBills = relevantBills.slice(0, 3);
   const hiddenCount = Math.max(0, bills.length - visibleBills.length);
   const unpaidBills = bills.filter((bill) => !bill.paid);
   const unpaidTotal = Number(nextPlan?.billsTotal ?? 0);
@@ -145,7 +149,7 @@ function render(host, data) {
         : 'Needs payment';
     const dueText = 'Due ' + dateLabel(bill.dueDate);
     const statusClass = paid ? 'paid' : bill.needsReview ? 'review' : 'pending';
-    const statusGlyph = paid ? '✓' : bill.needsReview ? '!' : '○';
+    const statusGlyph = paid ? '✓' : '!';
     return '<div class="pc-bill ' + (paid ? 'is-paid' : '') + '">'
       + '<div class="pc-bill-content">'
       + '<span class="pc-status ' + statusClass + '" aria-label="' + (paid ? 'Paid' : bill.needsReview ? 'Needs review' : 'Needs payment') + '">' + statusGlyph + '</span>'
@@ -160,8 +164,8 @@ function render(host, data) {
     ? billRows
     : '<div class="pc-empty">No major bills are assigned to this paycheck yet.</div>';
   const smallerNote = hiddenCount
-    ? '<div class="pc-bills-note">' + hiddenCount + ' smaller recurring item'
-      + (hiddenCount === 1 ? '' : 's') + ' included in the total.</div>'
+    ? '<div class="pc-bills-note">' + hiddenCount + ' more bill'
+      + (hiddenCount === 1 ? '' : 's') + ' included in the total. Open the bill list below to see them.</div>'
     : '';
   const billSummary = unpaidTotal > 0
     ? money(unpaidTotal) + ' to cover'

@@ -1202,7 +1202,7 @@ function signInPrompt(what) {
  */
 const NAV_GROUPS = [
   { id: 'dashboard', label: 'Home', icon: 'home', views: ['dashboard'] },
-  { id: 'bills', label: 'Plan', icon: 'calendar', views: ['bills', 'paycheck'] },
+  { id: 'bills', label: 'Bills', icon: 'calendar', views: ['bills', 'paycheck'] },
   { id: 'spending', label: 'Spending', icon: 'spending', views: ['spending', 'transactions', 'review', 'year'] },
   { id: 'budget', label: 'Budget', icon: 'budget', views: ['budget', 'subscriptions'] },
   { id: 'advisor', label: 'Advisor', icon: 'sparkle', views: ['advisor'] },
@@ -1226,7 +1226,7 @@ const SPENDING_TABS = [
 
 /** Paycheck planning and the bills it must cover. */
 const PLAN_TABS = [
-  ['bills', 'Paycheck & bills'],
+  ['bills', 'Bills & paycheck'],
   ['paycheck', 'Paycheck details'],
 ];
 
@@ -3386,7 +3386,7 @@ function renderInstallHint() {
 const VIEW_HEADERS = {
   dashboard: () => ['Home', state.session ? 'Your household, right now' : 'Demo numbers — nothing here is real yet'],
   budget: () => ['Budget', 'Bills and necessities, and what\'s left of them'],
-  bills: () => ['Plan', 'Paydays, bills, and what each check needs to cover'],
+  bills: () => ['Bills', 'Paid, due, and which paycheck covers it'],
   spending: () => ['Spending', 'Where the money actually goes'],
   transactions: () => ['Spending', 'Every transaction, newest first'],
   year: () => ['Spending', 'Twelve months at a time'],

@@ -472,3 +472,108 @@ button.row:active, .row.tappable:active { transform: scale(.995); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* -------------------------------------------------------------------------
+ * Calm pass
+ *
+ * The first refresh made every piece of information look like a separate
+ * feature. Keep the same components, but give the screen one visual answer:
+ * quiet surfaces, one accent, and less decoration around the numbers.
+ * ---------------------------------------------------------------------- */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --border: #e1e5eb;
+  --border-strong: #cbd2dc;
+  --text: #171b22;
+  --text-2: #505967;
+  --muted: #7a8492;
+  --accent: #3268d8;
+  --accent-ink: #2855b4;
+  --accent-soft: #edf2ff;
+  --positive: #13865e;
+  --positive-soft: #e9f6ef;
+  --warn: #a76716;
+  --warn-soft: #fff5e7;
+  --negative: #c7473c;
+  --negative-soft: #fff0ee;
+  --quiet-soft: #eef1f5;
+  --hero-bg: #1d2733;
+  --shadow-sm: 0 1px 2px rgba(23, 27, 34, .04);
+  --shadow-md: 0 5px 16px rgba(23, 27, 34, .07);
+  --shadow-lg: 0 12px 28px rgba(23, 27, 34, .12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11161c;
+    --surface: #1a2129;
+    --surface-2: #202a34;
+    --border: #303c49;
+    --border-strong: #455363;
+    --text: #f0f3f6;
+    --text-2: #c0cad5;
+    --muted: #93a0ae;
+    --accent: #8eafff;
+    --accent-ink: #b6caff;
+    --accent-soft: #243452;
+    --on-accent: #111a2a;
+    --positive: #65d7a6;
+    --positive-ink: #123426;
+    --positive-soft: #1b3a2e;
+    --warn: #e5b56a;
+    --warn-soft: #3b2e1d;
+    --negative: #f08a80;
+    --negative-soft: #432725;
+    --quiet-soft: #252f3a;
+    --hero-bg: #263544;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .24);
+    --shadow-md: 0 5px 16px rgba(0, 0, 0, .20);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, .28);
+  }
+}
+
+html, body { background: var(--bg); }
+body { background: var(--bg); }
+#app { max-width: 570px; padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+
+.app-bar { min-height: 68px; padding-top: 16px; padding-bottom: 11px; }
+.app-bar-title { font-size: 25px; letter-spacing: -.04em; }
+.app-bar-sub { margin-top: 4px; font-size: 12px; }
+.icon-btn { width: 38px; height: 38px; background: var(--surface); box-shadow: none; backdrop-filter: none; }
+.section { margin-top: 22px; }
+.section-head { margin-bottom: 8px; }
+.section-title { font-size: 17px; }
+
+.hero { border-radius: 18px; padding: 20px 18px 17px; background: var(--hero-bg); box-shadow: none; }
+.hero::after { display: none; }
+.hero-value { font-size: clamp(38px, 10vw, 48px); }
+.hero-foot { margin-top: 13px; padding-top: 12px; }
+
+.card, .list, .kv, .table, .empty, .stat { box-shadow: none; }
+.card { border-radius: 15px; padding: 15px; }
+.list { border-radius: 14px; }
+.row { min-height: 53px; padding: 11px 12px; gap: 10px; }
+.row-avatar { width: 34px; height: 34px; border-radius: 10px; }
+.row-title { font-size: 14px; }
+.row-sub { font-size: 11px; }
+.row-amount { font-size: 14px; }
+.stat { min-height: 80px; padding: 12px; border-radius: 14px; }
+.stat-value { font-size: 19px; }
+.note, .banner { border-radius: 13px; }
+
+.seg { margin-bottom: 13px; padding: 3px; border-radius: 12px; box-shadow: none; }
+.seg-btn { min-height: 32px; padding: 6px 10px; font-size: 12px; border-radius: 9px; }
+.seg-btn.active { box-shadow: none; }
+.month-picker { margin-bottom: 11px; border-radius: 12px; box-shadow: none; }
+
+.tabbar { bottom: calc(8px + env(safe-area-inset-bottom)); width: calc(100% - 24px); max-width: 550px; padding: 4px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); box-shadow: 0 7px 20px rgba(0,0,0,.12); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.tab { min-height: 51px; padding: 6px 2px 5px; border-radius: 12px; font-size: 9.5px; }
+.tab.active { background: var(--accent-soft); }
+.tab-icon { height: 21px; }
+
+@media (min-width: 900px) {
+  #app { max-width: 700px; }
+  .tabbar { max-width: 600px; }
+}

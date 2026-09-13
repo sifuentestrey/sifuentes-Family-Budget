@@ -15,7 +15,7 @@
  *                current is exactly the failure this app exists to prevent.
  */
 
-const CACHE_VERSION = 'v65';
+const CACHE_VERSION = 'v66';
 const SHELL_CACHE = `budget-shell-${CACHE_VERSION}`;
 const DATA_CACHE = `budget-data-${CACHE_VERSION}`;
 

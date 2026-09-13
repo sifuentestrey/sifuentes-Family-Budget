@@ -65,13 +65,13 @@ function ensureStyle() {
       display:block;width:100%;min-width:0;border-radius:5px;padding:2px 1px;
       text-align:center;font-size:8.5px;font-weight:850;line-height:1.05;
       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-      font-variant-numeric:tabular-nums;color:var(--positive);
+      font-variant-numeric:tabular-nums;color:var(--accent);
     }
     #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .payday-calendar-mini.deposited {
-      background:var(--positive-soft);
+      background:transparent;
     }
     #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .payday-calendar-mini.expected {
-      box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--positive) 60%,transparent);
+      box-shadow:none;
       background:transparent;
     }
     #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .payday-agenda-item {

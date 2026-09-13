@@ -84,26 +84,26 @@ function ensureStyle() {
     [data-bill-center] .bill-toolbar-actions{display:flex;gap:6px}
     [data-bill-center] .bill-text-btn{min-height:36px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);font:inherit;font-size:12px;font-weight:750;padding:0 10px;cursor:pointer}
     [data-bill-center] .bill-text-btn:disabled{opacity:.55;cursor:default}
-    [data-bill-center] .bill-month-meta{display:flex;gap:8px;flex-wrap:wrap;margin:0 3px 10px;color:var(--muted);font-size:12px}
-    [data-bill-center] .bill-month-meta>span{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:999px;background:var(--surface-2,rgba(255,255,255,.05));font-weight:700}
+    [data-bill-center] .bill-month-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 3px 10px;color:var(--muted);font-size:12px}
+    [data-bill-center] .bill-month-meta>span{display:inline-flex;align-items:center;gap:5px;font-weight:700}
     [data-bill-center] .bill-month-meta strong{font-size:13px;color:var(--text)}
     [data-bill-center] .bill-meta-mark{display:grid;place-items:center;width:19px;height:19px;border-radius:50%;font-size:13px;font-weight:900;line-height:1}
-    [data-bill-center] .bill-meta-paid{background:var(--positive-soft)!important;color:var(--positive)}
+    [data-bill-center] .bill-meta-paid{background:transparent!important;color:var(--positive)}
     [data-bill-center] .bill-meta-paid .bill-meta-mark{background:var(--positive);color:var(--positive-ink)}
-    [data-bill-center] .bill-meta-due{background:var(--warn-soft)!important;color:var(--warn)}
+    [data-bill-center] .bill-meta-due{background:transparent!important;color:var(--warn)}
     [data-bill-center] .bill-meta-due .bill-meta-mark{border:2px solid var(--warn);color:var(--warn);font-size:11px}
-    [data-bill-center] .bill-calendar{border:1px solid var(--border);border-radius:18px;background:var(--surface);padding:11px;margin-bottom:8px;box-shadow:var(--shadow-sm)}
+    [data-bill-center] .bill-calendar{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:10px;margin-bottom:8px;box-shadow:none}
     [data-bill-center] .bill-calendar-weekdays,[data-bill-center] .bill-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
     [data-bill-center] .bill-calendar-weekdays span{text-align:center;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 0 6px}
-    [data-bill-center] .bill-day{min-height:56px;border:1px solid transparent;border-radius:12px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:background .15s ease,border-color .15s ease}
+    [data-bill-center] .bill-day{min-height:48px;border:1px solid transparent;border-radius:9px;padding:5px 3px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;transition:background .15s ease,border-color .15s ease}
     [data-bill-center] .bill-day.today{outline:2px solid var(--accent);outline-offset:-2px}
     [data-bill-center] .bill-day.has-items{background:var(--surface-2,rgba(255,255,255,.05));border-color:var(--border)}
     [data-bill-center] .bill-day-num{font-weight:820;line-height:1.1}
     [data-bill-center] .bill-day-statuses{display:flex;flex-direction:column;align-items:stretch;gap:3px;width:100%;min-width:0}
-    [data-bill-center] .bill-day-status{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0;padding:3px 2px;border-radius:6px;font-size:8.5px;font-weight:850;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    [data-bill-center] .bill-day-status.paid{color:var(--positive);background:var(--positive-soft)}
-    [data-bill-center] .bill-day-status.due{color:var(--warn);background:var(--warn-soft)}
-    [data-bill-center] .bill-day-status.review{color:var(--warn);background:var(--warn-soft)}
+    [data-bill-center] .bill-day-status{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0;padding:1px 2px;border-radius:4px;font-size:9px;font-weight:850;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    [data-bill-center] .bill-day-status.paid{color:var(--positive);background:transparent}
+    [data-bill-center] .bill-day-status.due{color:var(--warn);background:transparent}
+    [data-bill-center] .bill-day-status.review{color:var(--warn);background:transparent}
     [data-bill-center] .bill-day-status-mark{display:grid;place-items:center;flex:0 0 auto;width:13px;height:13px;border-radius:50%;font-size:10px;font-weight:950;line-height:1}
     [data-bill-center] .bill-day-status.paid .bill-day-status-mark{background:var(--positive);color:var(--positive-ink)}
     [data-bill-center] .bill-day-status.due .bill-day-status-mark{border:1.5px solid currentColor;color:inherit;font-size:9px}
@@ -115,12 +115,11 @@ function ensureStyle() {
     [data-bill-center] .bill-legend-mark.due{border:2px solid var(--warn);color:var(--warn);font-size:10px}
     [data-bill-center] .bill-legend-mark.review{background:var(--warn);color:#2a1904;font-size:10px}
     [data-bill-center] .bill-center-row{position:relative}
-    [data-bill-center] .bill-center-row.paid{background:var(--positive-soft);box-shadow:inset 4px 0 0 var(--positive)}
-    [data-bill-center] .bill-center-row.review{background:var(--warn-soft);box-shadow:inset 4px 0 0 var(--warn)}
+    [data-bill-center] .bill-center-row.paid,[data-bill-center] .bill-center-row.review,[data-bill-center] .bill-center-row.due{background:var(--surface);box-shadow:none}
     [data-bill-center] .bill-center-row.due .bill-primary-status .chip{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));color:var(--warn)}
     [data-bill-center] .bill-center-row.review .bill-primary-status .chip{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 45%,var(--border));color:var(--warn)}
-    [data-bill-center] .bill-status-mark{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;font-size:20px;font-weight:950;line-height:1}
-    [data-bill-center] .bill-status-mark.paid{background:var(--positive);color:var(--positive-ink);box-shadow:0 0 0 3px var(--positive-soft)}
+    [data-bill-center] .bill-status-mark{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border-radius:50%;font-size:18px;font-weight:950;line-height:1}
+    [data-bill-center] .bill-status-mark.paid{background:var(--positive);color:var(--positive-ink);box-shadow:none}
     [data-bill-center] .bill-status-mark.due{border:2px solid var(--warn);color:var(--warn);font-size:18px;background:transparent}
     [data-bill-center] .bill-status-mark.review{background:var(--warn);color:#2a1904;font-size:18px}
     [data-bill-center] .bill-center-row .row-body{min-width:0}
@@ -146,11 +145,23 @@ function ensureStyle() {
       [data-bill-center] .bill-toolbar-actions{flex-direction:column}
       [data-bill-center] .bill-edit-grid{grid-template-columns:1fr}
       [data-bill-center] .bill-edit-grid .wide{grid-column:auto}
-      [data-bill-center] .bill-day{min-height:50px;padding:5px 2px}
-      [data-bill-center] .bill-status-mark{flex-basis:30px;width:30px;height:30px;font-size:18px}
+      [data-bill-center] .bill-day{min-height:44px;padding:4px 2px}
+      [data-bill-center] .bill-status-mark{flex-basis:28px;width:28px;height:28px;font-size:17px}
       [data-bill-center] .bill-center-row{gap:8px;padding-left:11px;padding-right:11px}
       [data-bill-center] .bill-day-status{font-size:8px}
     }
+
+    /* Calm mode: the paycheck summary is the answer; the calendar and full
+       ledger are supporting detail that should be one deliberate tap away. */
+    [data-bill-center] .bill-more-details{margin:0 0 18px;border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden}
+    [data-bill-center] .bill-more-details>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:11px 13px;cursor:pointer;list-style:none;font-size:12.5px;font-weight:780;color:var(--text)}
+    [data-bill-center] .bill-more-details>summary::-webkit-details-marker{display:none}
+    [data-bill-center] .bill-more-details>summary::after{content:'›';font-size:20px;line-height:1;color:var(--muted);transition:transform .15s ease}
+    [data-bill-center] .bill-more-details[open]>summary::after{transform:rotate(90deg)}
+    [data-bill-center] .bill-more-body{border-top:1px solid var(--border);padding:10px 10px 2px}
+    [data-bill-center] .bill-more-body>.section{margin-top:16px}
+    [data-bill-center] .bill-more-body>.bill-calendar{margin-bottom:10px}
+    [data-bill-center] .bill-primary-status{display:none!important}
   `;
   document.head.appendChild(style);
 }
@@ -240,7 +251,7 @@ function statusChip(item) {
 function statusMark(item) {
   const status = item.paid ? 'paid' : item.needsReview ? 'review' : 'due';
   const label = item.paid ? 'Paid' : item.needsReview ? 'Needs review' : 'Needs payment';
-  const glyph = item.paid ? '✓' : item.needsReview ? '!' : '○';
+  const glyph = item.paid ? '✓' : '!';
   return `<span class="bill-status-mark ${status}" role="img" aria-label="${label}">${glyph}</span>`;
 }
 
@@ -398,9 +409,9 @@ function renderCalendar(monthData) {
     const reviewCount = items.filter((item) => !item.paid && item.needsReview).length;
     const dueCount = items.length - paidCount - reviewCount;
     const statuses = [
-      paidCount ? `<span class="bill-day-status paid"><span class="bill-day-status-mark" aria-hidden="true">✓</span><span>${paidCount} paid</span></span>` : '',
-      dueCount ? `<span class="bill-day-status due"><span class="bill-day-status-mark" aria-hidden="true">!</span><span>${dueCount} due</span></span>` : '',
-      reviewCount ? `<span class="bill-day-status review"><span class="bill-day-status-mark" aria-hidden="true">!</span><span>${reviewCount} check</span></span>` : '',
+      paidCount ? `<span class="bill-day-status paid" title="${paidCount} paid"><span class="bill-day-status-mark" aria-hidden="true">✓</span><span>${paidCount}</span></span>` : '',
+      dueCount ? `<span class="bill-day-status due" title="${dueCount} due"><span class="bill-day-status-mark" aria-hidden="true">!</span><span>${dueCount}</span></span>` : '',
+      reviewCount ? `<span class="bill-day-status review" title="${reviewCount} needs review"><span class="bill-day-status-mark" aria-hidden="true">!</span><span>${reviewCount}</span></span>` : '',
     ].filter(Boolean).join('');
     const label = [
       `Day ${day}`,
@@ -431,6 +442,7 @@ function renderMonth(monthData, transactions, bills, assignments) {
   const paidCount = rows.filter((item) => item.paid).length;
   const dueCount = rows.length - paidCount;
 
+  const detailCount = rows.length ? `${rows.length} bill${rows.length === 1 ? '' : 's'}` : 'bill list';
   return `
     <div class="bill-toolbar">
       <div class="bill-month-nav">
@@ -449,13 +461,18 @@ function renderMonth(monthData, transactions, bills, assignments) {
       <span class="bill-meta-paid"><span class="bill-meta-mark" aria-hidden="true">✓</span><strong>${paidCount}</strong> paid</span>
       <span class="bill-meta-due"><span class="bill-meta-mark" aria-hidden="true">!</span><strong>${dueCount}</strong> still due</span>
     </div>
-    ${renderCalendar(monthData)}
-    <div class="bill-status-legend" aria-label="Bill status key">
-      <span><span class="bill-legend-mark paid" aria-hidden="true">✓</span> Paid</span>
-      <span><span class="bill-legend-mark due" aria-hidden="true">!</span> Needs payment</span>
-      <span><span class="bill-legend-mark review" aria-hidden="true">!</span> Check this</span>
-    </div>
-    <section class="section"><div class="section-head"><div><div class="section-title">Bills & subscriptions</div><div class="section-sub">Paid and upcoming, in date order. Automatic items are marked auto.</div></div></div>${list}</section>`;
+    <details class="bill-more-details">
+      <summary>View calendar and ${detailCount}</summary>
+      <div class="bill-more-body">
+        ${renderCalendar(monthData)}
+        <div class="bill-status-legend" aria-label="Bill status key">
+          <span><span class="bill-legend-mark paid" aria-hidden="true">✓</span> Paid</span>
+          <span><span class="bill-legend-mark due" aria-hidden="true">!</span> Needs payment</span>
+          <span><span class="bill-legend-mark review" aria-hidden="true">!</span> Check this</span>
+        </div>
+        <section class="section"><div class="section-head"><div><div class="section-title">Bills & subscriptions</div><div class="section-sub">Paid and upcoming, in date order. Automatic items are marked auto.</div></div></div>${list}</section>
+      </div>
+    </details>`;
 }
 
 function renderCenter(host, data) {

@@ -36,30 +36,30 @@ function ensureStyle() {
   const style = document.createElement('style');
   style.id = 'simple-home-style';
   style.textContent = `
-    [data-simple-home] .sh-hero{background:var(--hero-bg);color:var(--hero-ink);border-radius:22px;padding:19px;box-shadow:var(--shadow-md)}
+    [data-simple-home] .sh-hero{background:var(--hero-bg);color:var(--hero-ink);border-radius:18px;padding:18px;box-shadow:none}
     [data-simple-home] .sh-label{font-size:11px;font-weight:800;letter-spacing:.055em;text-transform:uppercase;color:var(--hero-label)}
     [data-simple-home] .sh-balance{font-size:37px;line-height:1.05;font-weight:860;letter-spacing:-.045em;margin:4px 0 5px;font-variant-numeric:tabular-nums}
     [data-simple-home] .sh-foot{padding-top:11px;margin-top:11px;border-top:1px solid var(--hero-rule);font-size:12px;color:var(--hero-note)}
-    [data-simple-home] .sh-card,.sh-list{background:var(--surface);border:1px solid var(--border);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-sm)}
-    [data-simple-home] .sh-section{margin-top:20px}
+    [data-simple-home] .sh-card,.sh-list{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:none}
+    [data-simple-home] .sh-section{margin-top:18px}
     [data-simple-home] .sh-section-head{display:flex;justify-content:space-between;align-items:baseline;margin:0 3px 7px}
     [data-simple-home] .sh-section-title{font-size:16px;font-weight:820;letter-spacing:-.025em}
     [data-simple-home] .sh-section-note{font-size:11px;color:var(--muted)}
     [data-simple-home] .sh-link{border:0;background:none;color:var(--accent);font:inherit;font-size:11px;font-weight:800;padding:0}
-    [data-simple-home] .sh-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 14px;border-top:1px solid var(--border);background:transparent;color:var(--text);width:100%;text-align:left;font:inherit}
+    [data-simple-home] .sh-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 13px;border-top:1px solid var(--border);background:transparent;color:var(--text);width:100%;text-align:left;font:inherit}
     [data-simple-home] .sh-row:first-child{border-top:0}
     [data-simple-home] .sh-row-title{font-size:13.5px;font-weight:790;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     [data-simple-home] .sh-row-sub{font-size:10.8px;color:var(--muted);margin-top:2px;line-height:1.35}
     [data-simple-home] .sh-row-value{font-size:12.5px;font-weight:820;white-space:nowrap;font-variant-numeric:tabular-nums}
-    [data-simple-home] .sh-allowance{padding:14px;border-top:1px solid var(--border)}
+    [data-simple-home] .sh-allowance{padding:13px;border-top:1px solid var(--border)}
     [data-simple-home] .sh-allowance:first-child{border-top:0}
     [data-simple-home] .sh-allowance-top{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:790}
     [data-simple-home] .sh-allowance-note{font-size:10.8px;color:var(--muted);margin-top:2px}
     [data-simple-home] .sh-meter{height:7px;background:var(--quiet-soft);border-radius:999px;overflow:hidden;margin-top:8px}
     [data-simple-home] .sh-meter i{display:block;height:100%;background:var(--accent);border-radius:999px}
-    [data-simple-home] .sh-attention{margin-top:12px;border-radius:14px;padding:12px;background:var(--warn-soft);color:var(--text);font-size:12px;line-height:1.45}
+    [data-simple-home] .sh-attention{margin-top:12px;border:1px solid color-mix(in srgb,var(--warn) 24%,var(--border));border-radius:12px;padding:11px;background:var(--warn-soft);color:var(--text);font-size:12px;line-height:1.45;text-align:left;width:100%}
     [data-simple-home] .sh-attention b{display:block;font-weight:850;margin-bottom:2px}
-    [data-simple-home] .sh-plan{padding:15px}
+    [data-simple-home] .sh-plan{padding:14px;text-align:left;color:var(--text);font:inherit;width:100%}
     [data-simple-home] .sh-plan-title{font-size:13.5px;font-weight:820}
     [data-simple-home] .sh-plan-value{font-size:25px;line-height:1.12;font-weight:850;letter-spacing:-.035em;margin:2px 0}
     [data-simple-home] .sh-empty{padding:18px 14px;color:var(--muted);font-size:12px;line-height:1.45}
@@ -97,11 +97,28 @@ function routeButton(label, sub, value, view) {
 }
 
 function render(host, data) {
-  const { plan, asOf, dataHealth } = data.context;
+  const { plan, dataHealth } = data.context;
   const next = plan.forecasts.nextPaycheck;
   const nextPlan = plan.forecasts.nextPaycheckPlan;
   const due = plan.facts.dueBeforeNextPayday;
   const attention = plan.attention[0] ?? null;
+  const allowances = plan.allowances ?? [];
+  const flexibleLeft = allowances.reduce((sum, allowance) => sum + Number(allowance.left || 0), 0);
+  const flexibleNames = allowances.slice(0, 3).map((allowance) => allowance.category).filter(Boolean).join(', ');
+  const flexibleMore = allowances.length > 3 ? ` + ${allowances.length - 3} more` : '';
+  const flexibleNote = allowances.length
+    ? `${flexibleNames}${flexibleMore} · through ${next ? dateLabel(next.date) : 'your next payday'}`
+    : 'Set targets for groceries, gas, and extras';
+  const notice = dataHealth.stale
+    ? { title: 'Bank data may be out of date', body: 'Refresh accounts before relying on this plan.' }
+    : data.payrollError
+      ? { title: 'Paycheck forecast needs attention', body: data.payrollError }
+      : attention
+        ? { title: attention.label, body: attention.reason, route: 'bills' }
+        : null;
+  const nextPaycheckValue = next
+    ? next.status === 'incomplete' ? 'Not final' : money(next.amount)
+    : '—';
 
   host.innerHTML = `
     <div class="sh-hero">
@@ -110,36 +127,24 @@ function render(host, data) {
       <div class="sh-foot">${plan.diagnostics.checkingBalanceIsAvailable ? 'Available balance from connected checking' : 'Current balance; provider did not report an available balance'}${plan.facts.savings.accountCount ? ` · ${money(plan.facts.savings.available)} savings` : ''}</div>
     </div>
 
-    ${dataHealth.stale ? '<div class="sh-attention">Bank information may be out of date. Refresh accounts before relying on this plan.</div>' : ''}
-    ${data.payrollError ? `<div class="sh-attention">${esc(data.payrollError)}</div>` : ''}
-    ${attention ? `<button class="sh-attention" type="button" data-home-route="bills"><b>${esc(attention.label)}</b>${esc(attention.reason)}</button>` : ''}
+    ${notice ? notice.route
+      ? `<button class="sh-attention" type="button" data-home-route="${notice.route}"><b>${esc(notice.title)}</b>${esc(notice.body)}</button>`
+      : `<div class="sh-attention"><b>${esc(notice.title)}</b>${esc(notice.body)}</div>` : ''}
 
     <section class="sh-section">
-      <div class="sh-section-head"><div><div class="sh-section-title">Until payday</div><div class="sh-section-note">${next ? `Flexible spending through ${dateLabel(next.date)}` : 'Set up a reliable payday to use allowances'}</div></div><button class="sh-link" data-home-route="budget">Edit budget</button></div>
-      <div class="sh-list">${plan.allowances.length ? plan.allowances.map((allowance) => {
-        const percent = allowance.planned ? Math.min(100, allowance.spent / allowance.planned * 100) : 0;
-        return `<button class="sh-allowance" type="button" data-home-route="budget">
-          <div class="sh-allowance-top"><span>${esc(allowance.category)}</span><span>${money0(allowance.left)} left</span></div>
-          <div class="sh-allowance-note">${allowance.suggested ? 'Suggested from recent spending · ' : ''}${esc(allowance.label)} · ${allowance.daysRemaining} days remaining</div>
-          <div class="sh-meter"><i style="width:${percent}%"></i></div>
-        </button>`;
-      }).join('') : '<div class="sh-empty">Choose a monthly target for groceries, restaurants, gas, or household/fun to see a simple allowance here.</div>'}</div>
+      <div class="sh-section-head"><div><div class="sh-section-title">Next up</div><div class="sh-section-note">The two numbers that affect the next decision</div></div><button class="sh-link" data-home-route="bills">Open bills</button></div>
+      <div class="sh-list">
+        ${routeButton('Next paycheck', next ? `Expected ${dateLabel(next.date)} · ${next.confidence} confidence` : 'No reliable forecast yet', nextPaycheckValue, 'bills')}
+        ${routeButton('Bills before then', `${due.bills.length} open bill${due.bills.length === 1 ? '' : 's'}`, money(due.total), 'bills')}
+      </div>
     </section>
 
     <section class="sh-section">
-      <div class="sh-section-head"><div><div class="sh-section-title">${esc(due.label)}</div><div class="sh-section-note">Current fact · not a forecast</div></div><button class="sh-link" data-home-route="bills">Open Plan</button></div>
-      <div class="sh-list">${due.bills.length ? due.bills.slice(0, 3).map((bill) =>
-        routeButton(bill.providerName, `Due ${dateLabel(bill.dueDate)} · ${bill.amountSource}`, money(bill.amountDue), 'bills'),
-      ).join('') + (due.bills.length > 3 ? routeButton(`${due.bills.length - 3} more bill${due.bills.length === 4 ? '' : 's'}`, 'See every bill in Plan', money(due.total), 'bills') : '') : '<div class="sh-empty">No open bills are due before the next known paycheck.</div>'}</div>
-    </section>
-
-    <section class="sh-section">
-      <div class="sh-section-head"><div class="sh-section-title">Next paycheck</div><button class="sh-link" data-home-route="income">Income details</button></div>
-      <button class="sh-card sh-plan" type="button" data-home-route="bills">
-        ${next ? `<div class="sh-plan-title">Expected ${dateLabel(next.date)} · ${esc(next.confidence)} confidence</div>
-          <div class="sh-plan-value">${next.status === 'incomplete' ? 'Not final yet' : money(next.amount)}</div>
-          <div class="sh-row-sub">Based on ${esc(next.basis)}. ${nextPlan?.billsTotal ? `${money(nextPlan.billsTotal)} assigned to bills.` : 'No bills assigned yet.'}</div>`
-          : '<div class="sh-plan-title">No reliable paycheck forecast yet</div><div class="sh-row-sub">Connect payroll or let the app learn a consistent income pattern before it projects a paycheck.</div>'}
+      <div class="sh-section-head"><div><div class="sh-section-title">Until payday</div><div class="sh-section-note">${esc(flexibleNote)}</div></div><button class="sh-link" data-home-route="budget">Edit budget</button></div>
+      <button class="sh-card sh-plan" type="button" data-home-route="budget">
+        <div class="sh-plan-title">${allowances.length ? 'Left across your targets' : 'Set up your targets'}</div>
+        <div class="sh-plan-value">${allowances.length ? `${money0(flexibleLeft)} left` : 'Groceries, gas, extras'}</div>
+        <div class="sh-row-sub">${allowances.length && nextPlan?.billsTotal ? `${money(nextPlan.billsTotal)} is reserved for bills before flexible spending.` : 'The app will keep this separate from fixed bills.'}</div>
       </button>
     </section>
   `;

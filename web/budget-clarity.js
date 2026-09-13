@@ -4,7 +4,7 @@
 
   let billsCenterPromise = null;
   const loadBillsCenter = () => {
-    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v65');
+    if (!billsCenterPromise) billsCenterPromise = import('./bills-center.js?build=v66');
     return billsCenterPromise;
   };
 
@@ -71,14 +71,7 @@
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-primary-status {
-        flex: 0 0 auto;
-        margin-left: 0 !important;
-        text-transform: uppercase;
-        letter-spacing: .055em;
-        font-size: 10px;
-        font-weight: 850;
-        line-height: 1;
-        padding: 6px 9px;
+        display: none !important;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-center-row .row-title .chip:not(.bill-primary-status) {
@@ -97,11 +90,11 @@
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day {
-        min-height: 68px !important;
-        padding: 7px 4px !important;
+        min-height: 48px !important;
+        padding: 5px 3px !important;
         align-items: stretch !important;
         justify-content: flex-start;
-        gap: 5px !important;
+        gap: 3px !important;
         cursor: pointer;
         outline-offset: -1px;
       }
@@ -137,8 +130,8 @@
         gap: 3px;
         width: 100%;
         min-width: 0;
-        border-radius: 7px;
-        padding: 4px 2px;
+        border-radius: 4px;
+        padding: 1px 2px;
         text-align: center;
         font-size: 9px;
         font-weight: 800;
@@ -163,7 +156,7 @@
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.paid {
         color: var(--positive);
-        background: var(--positive-soft);
+        background: transparent;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.paid .bill-day-status-mark {
@@ -173,7 +166,7 @@
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.due {
         color: var(--warn);
-        background: var(--warn-soft);
+        background: transparent;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.due .bill-day-status-mark {
@@ -184,7 +177,7 @@
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.review {
         color: var(--warn);
-        background: var(--warn-soft);
+        background: transparent;
       }
 
       #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status.review .bill-day-status-mark {
@@ -319,7 +312,7 @@
 
       @media (max-width: 390px) {
         #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day {
-          min-height: 62px !important;
+          min-height: 44px !important;
         }
 
         #app:has(.seg-btn[data-view="bills"].active) [data-bill-center] .bill-day-status {
@@ -577,7 +570,8 @@
       if (due.length) {
         const mini = document.createElement('span');
         mini.className = 'bill-day-status due';
-        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${due.length === 1 ? compactMoney(due[0].amount) : due.length} due</span>`;
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${due.length}</span>`;
+        mini.title = `${due.length} due · ${compactMoney(due.reduce((sum, row) => sum + row.amount, 0))}`;
         statuses.appendChild(mini);
       }
 
@@ -585,7 +579,7 @@
         const paidTotal = paid.reduce((sum, row) => sum + row.amount, 0);
         const mini = document.createElement('span');
         mini.className = 'bill-day-status paid';
-        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">✓</span><span>${paid.length === 1 ? compactMoney(paid[0].amount) : paid.length} paid</span>`;
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">✓</span><span>${paid.length}</span>`;
         mini.title = `${compactMoney(paidTotal)} paid`;
         statuses.appendChild(mini);
       }
@@ -593,7 +587,8 @@
       if (review.length) {
         const mini = document.createElement('span');
         mini.className = 'bill-day-status review';
-        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${review.length} check</span>`;
+        mini.innerHTML = `<span class="bill-day-status-mark" aria-hidden="true">!</span><span>${review.length}</span>`;
+        mini.title = `${review.length} needs review`;
         statuses.appendChild(mini);
       }
 
