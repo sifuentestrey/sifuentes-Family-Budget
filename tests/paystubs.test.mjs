@@ -27,6 +27,7 @@ test('a fully populated paystub survives a round trip through row shape', () => 
     regularHours: 80,
     overtimeHours: 0,
     earnings: { Regular: 1700 },
+    metadata: { checkNumber: 'advice-123', payRate: 53.57, ytdGross: 88462.22 },
     source: 'pdf',
     sourceRef: 'msg_paystub_001',
     confidence: 0.9,
@@ -56,6 +57,7 @@ test('a fully populated paystub survives a round trip through row shape', () => 
   assert.equal(back.sourceRef, stub.sourceRef);
   assert.equal(back.confidence, stub.confidence);
   assert.deepEqual(back.earnings, stub.earnings);
+  assert.deepEqual(back.metadata, stub.metadata);
 });
 
 test('deductions round-trip as their own rows, joined back onto the stub', () => {
