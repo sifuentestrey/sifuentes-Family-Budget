@@ -70,3 +70,7 @@ verify_jwt = false
 # same reasoning as advisor-note above.
 [functions.parse-bill-text]
 verify_jwt = true
+
+# Server connection uses its own scoped key, verified inside the handler.
+[functions.family-board-bills]
+verify_jwt = false
